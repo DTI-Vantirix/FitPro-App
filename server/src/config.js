@@ -1,0 +1,52 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+export const SERVER_ROOT = path.resolve(here, '..');
+
+// Load server/.env when present (Node 20.12+). Real environment variables win.
+try {
+  process.loadEnvFile?.(path.join(SERVER_ROOT, '.env'));
+} catch {
+  // no .env file: fine
+}
+
+const list = (value) =>
+  String(value || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+export function loadConfig(env = process.env) {
+  const production = env.NODE_ENV === 'production';
+
+  const jwtSecret = env.JWT_SECRET || (production ? '' : 'dev-only-secret-do-not-use-in-production');
+  if (production && jwtSecret.length < 32) {
+    throw new Error('JWT_SECRET must be set to at least 32 random characters in production');
+  }
+
+  return {
+    production,
+    port: Number(env.PORT) || 4000,
+    databaseUrl: env.DATABASE_URL || 'postgres://fitpro:fitpro@localhost:5432/fitpro',
+    jwtSecret,
+    tokenTtlSec: (Number(env.TOKEN_TTL_DAYS) || 30) * 24 * 60 * 60,
+    // Where the web app lives; used for links in emails (password reset).
+    appUrl: (env.APP_URL || 'http://localhost:5173').replace(/\/$/, ''),
+    // Public base URL of this API, used to build upload URLs. Empty = same origin.
+    publicUrl: (env.PUBLIC_URL || '').replace(/\/$/, ''),
+    corsOrigins: list(env.CORS_ORIGINS || 'http://localhost:5173'),
+    uploadDir: path.resolve(env.UPLOAD_DIR || path.join(SERVER_ROOT, 'uploads')),
+    maxUploadBytes: (Number(env.MAX_UPLOAD_MB) || 50) * 1024 * 1024,
+    // Built web app to serve from this process (optional; handy for single-box deploys).
+    webDist: env.WEB_DIST ? path.resolve(env.WEB_DIST) : '',
+    mail: {
+      from: env.MAIL_FROM || 'FitPro <no-reply@fitpro.local>',
+      resendApiKey: env.RESEND_API_KEY || '',
+    },
+    routerUrl: env.ROUTER_URL || 'https://valhalla1.openstreetmap.de/route',
+    // Outside production, auth responses include the emailed code so you can
+    // test sign-up without a mail provider. Never on in production.
+    exposeDevCodes: !production && env.EXPOSE_DEV_CODES !== 'false',
+  };
+}

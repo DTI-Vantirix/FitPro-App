@@ -1,0 +1,95 @@
+{
+  "name": "PaceZone",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Zone label, e.g. Zone 2"
+    },
+    "zone_number": {
+      "type": "number",
+      "description": "1 to 5"
+    },
+    "intensity": {
+      "type": "string",
+      "description": "Very Light, Light, Moderate, Hard, Maximum"
+    },
+    "hr_min_pct": {
+      "type": "number",
+      "description": "Lower bound as a percent of max heart rate"
+    },
+    "hr_max_pct": {
+      "type": "number",
+      "description": "Upper bound as a percent of max heart rate"
+    },
+    "fast_sec": {
+      "type": "number",
+      "description": "Fastest pace of the zone in seconds per mile"
+    },
+    "slow_sec": {
+      "type": "number",
+      "description": "Slowest pace of the zone in seconds per mile"
+    },
+    "color": {
+      "type": "string",
+      "description": "Hex colour used across the app"
+    },
+    "purpose": {
+      "type": "string",
+      "description": "Primary purpose of the zone"
+    },
+    "feel": {
+      "type": "string",
+      "description": "What the zone feels like \u2014 the talk test"
+    },
+    "sort_order": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "name",
+    "fast_sec",
+    "slow_sec"
+  ],
+  "rls": {
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

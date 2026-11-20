@@ -1,0 +1,50 @@
+{
+  "name": "SocialProfile",
+  "type": "object",
+  "properties": {
+    "handle": {
+      "type": "string",
+      "description": "Unique @handle used to find and invite this athlete"
+    },
+    "display_name": {
+      "type": "string",
+      "description": "Name shown next to the handle"
+    },
+    "bio": {
+      "type": "string",
+      "description": "One line about the athlete"
+    },
+    "avatar_url": {
+      "type": "string",
+      "description": "Profile picture"
+    },
+    "visibility": {
+      "type": "string",
+      "enum": [
+        "public",
+        "private"
+      ],
+      "enumColors": [
+        "green",
+        "gray"
+      ],
+      "default": "private",
+      "description": "Public accounts can be followed straight away, private accounts approve every request"
+    }
+  },
+  "required": [
+    "handle"
+  ],
+  "rls": {
+    "read": {},
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "update": {
+      "created_by_id": "{{user.id}}"
+    },
+    "delete": {
+      "created_by_id": "{{user.id}}"
+    }
+  }
+}

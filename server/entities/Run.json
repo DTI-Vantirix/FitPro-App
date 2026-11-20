@@ -1,0 +1,182 @@
+{
+  "name": "Run",
+  "type": "object",
+  "properties": {
+    "route_id": {
+      "type": "string"
+    },
+    "route_name": {
+      "type": "string",
+      "description": "Route name, or 'Free run'"
+    },
+    "distance_mi": {
+      "type": "number"
+    },
+    "duration_sec": {
+      "type": "number",
+      "description": "Moving time in seconds"
+    },
+    "avg_pace_sec": {
+      "type": "number",
+      "description": "Average seconds per mile"
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "target_zone_name": {
+      "type": "string"
+    },
+    "target_fast_sec": {
+      "type": "number"
+    },
+    "target_slow_sec": {
+      "type": "number"
+    },
+    "in_zone_pct": {
+      "type": "number",
+      "description": "Percent of the run spent inside the target pace zone"
+    },
+    "splits": {
+      "type": "array",
+      "description": "Per-mile splits",
+      "items": {
+        "type": "object",
+        "properties": {
+          "mile": {
+            "type": "number"
+          },
+          "pace_sec": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "points": {
+      "type": "array",
+      "description": "Tracked GPS points",
+      "items": {
+        "type": "object",
+        "properties": {
+          "lat": {
+            "type": "number"
+          },
+          "lng": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "legs": {
+      "type": "array",
+      "description": "The run split at the gym stop: start to gym, then gym to finish",
+      "items": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "number"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "distance_mi": {
+            "type": "number"
+          },
+          "duration_sec": {
+            "type": "number"
+          },
+          "avg_pace_sec": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "avg_hr": {
+      "type": "number",
+      "description": "Average heart rate from a paired monitor"
+    },
+    "max_hr": {
+      "type": "number",
+      "description": "Peak heart rate from a paired monitor"
+    },
+    "hr_device": {
+      "type": "string",
+      "description": "Name of the paired heart-rate monitor"
+    },
+    "gym_name": {
+      "type": "string",
+      "description": "Gym visited mid-run, if any"
+    },
+    "gym_point": {
+      "type": "object",
+      "description": "Where the run paused for the gym",
+      "properties": {
+        "lat": {
+          "type": "number"
+        },
+        "lng": {
+          "type": "number"
+        }
+      }
+    },
+    "source": {
+      "type": "string",
+      "description": "Where this run came from: live, garmin, apple, health_connect, gpx_import, manual"
+    },
+    "external_id": {
+      "type": "string",
+      "description": "The activity id at the source, used to update a synced run instead of duplicating it"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "distance_mi",
+    "duration_sec"
+  ],
+  "rls": {
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

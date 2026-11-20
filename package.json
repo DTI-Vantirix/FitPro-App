@@ -1,0 +1,25 @@
+{
+  "name": "fitpro-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "web",
+    "server"
+  ],
+  "scripts": {
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "migrate": "npm run migrate -w server",
+    "create-admin": "npm run create-admin -w server --",
+    "dev": "node scripts/dev.js",
+    "dev:api": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w web",
+    "test": "npm test -w server",
+    "lint": "npm run lint -w web"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}

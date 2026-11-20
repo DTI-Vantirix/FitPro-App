@@ -1,0 +1,65 @@
+{
+  "name": "Challenge",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Group challenge name, e.g. November 100"
+    },
+    "description": {
+      "type": "string"
+    },
+    "metric": {
+      "type": "string",
+      "enum": [
+        "distance",
+        "runs",
+        "workouts"
+      ],
+      "enumColors": [
+        "green",
+        "blue",
+        "purple"
+      ],
+      "default": "distance",
+      "description": "The only number the group competes on"
+    },
+    "target_value": {
+      "type": "number",
+      "description": "Monthly goal each member is chasing, in the metric's unit"
+    },
+    "month": {
+      "type": "string",
+      "description": "Month key, YYYY-MM"
+    },
+    "start_date": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "end_date": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "creator_handle": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "metric",
+    "target_value",
+    "month"
+  ],
+  "rls": {
+    "read": {},
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "update": {
+      "created_by_id": "{{user.id}}"
+    },
+    "delete": {
+      "created_by_id": "{{user.id}}"
+    }
+  }
+}

@@ -1,0 +1,135 @@
+{
+  "name": "Post",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "run",
+        "workout"
+      ],
+      "enumColors": [
+        "blue",
+        "purple"
+      ],
+      "default": "run"
+    },
+    "ref_id": {
+      "type": "string",
+      "description": "The Run or Workout this post was generated from"
+    },
+    "title": {
+      "type": "string"
+    },
+    "caption": {
+      "type": "string"
+    },
+    "distance_mi": {
+      "type": "number"
+    },
+    "duration_sec": {
+      "type": "number"
+    },
+    "avg_pace_sec": {
+      "type": "number"
+    },
+    "zone_name": {
+      "type": "string"
+    },
+    "in_zone_pct": {
+      "type": "number"
+    },
+    "volume_lb": {
+      "type": "number"
+    },
+    "set_count": {
+      "type": "number"
+    },
+    "route_points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "lat": {
+            "type": "number"
+          },
+          "lng": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "background_type": {
+      "type": "string",
+      "enum": [
+        "none",
+        "photo",
+        "video"
+      ],
+      "enumColors": [
+        "gray",
+        "blue",
+        "purple"
+      ],
+      "default": "none"
+    },
+    "background_url": {
+      "type": "string"
+    },
+    "visibility": {
+      "type": "string",
+      "enum": [
+        "public",
+        "friends",
+        "private"
+      ],
+      "enumColors": [
+        "green",
+        "blue",
+        "gray"
+      ],
+      "default": "friends",
+      "description": "Public reaches anyone in FitPro, friends reaches accepted connections, private is only you"
+    },
+    "author_handle": {
+      "type": "string"
+    },
+    "author_name": {
+      "type": "string"
+    },
+    "author_avatar": {
+      "type": "string"
+    },
+    "shared_to": {
+      "type": "array",
+      "description": "External apps this post was pushed to",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "kind"
+  ],
+  "rls": {
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "read": {
+      "$or": [
+        {
+          "data.visibility": "public"
+        },
+        {
+          "created_by_id": "{{user.id}}"
+        }
+      ]
+    },
+    "update": {
+      "created_by_id": "{{user.id}}"
+    },
+    "delete": {
+      "created_by_id": "{{user.id}}"
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "name": "Connection",
+  "type": "object",
+  "properties": {
+    "from_user_id": {
+      "type": "string",
+      "description": "The athlete who sent the request"
+    },
+    "to_user_id": {
+      "type": "string",
+      "description": "The athlete the request was sent to"
+    },
+    "from_handle": {
+      "type": "string"
+    },
+    "from_name": {
+      "type": "string"
+    },
+    "to_handle": {
+      "type": "string"
+    },
+    "to_name": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "accepted",
+        "declined"
+      ],
+      "enumColors": [
+        "yellow",
+        "green",
+        "gray"
+      ],
+      "default": "pending"
+    }
+  },
+  "required": [
+    "from_user_id",
+    "to_user_id"
+  ],
+  "rls": {
+    "create": {
+      "data.from_user_id": "{{user.id}}"
+    },
+    "read": {
+      "$or": [
+        {
+          "data.from_user_id": "{{user.id}}"
+        },
+        {
+          "data.to_user_id": "{{user.id}}"
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "data.from_user_id": "{{user.id}}"
+        },
+        {
+          "data.to_user_id": "{{user.id}}"
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "data.from_user_id": "{{user.id}}"
+        },
+        {
+          "data.to_user_id": "{{user.id}}"
+        }
+      ]
+    }
+  }
+}

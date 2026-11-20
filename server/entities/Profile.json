@@ -1,0 +1,85 @@
+{
+  "name": "Profile",
+  "type": "object",
+  "properties": {
+    "age": {
+      "type": "number"
+    },
+    "sex": {
+      "type": "string",
+      "enum": [
+        "male",
+        "female"
+      ],
+      "enumColors": [
+        "blue",
+        "pink"
+      ]
+    },
+    "height_in": {
+      "type": "number",
+      "description": "Height in inches"
+    },
+    "weight_lb": {
+      "type": "number",
+      "description": "Weight in pounds"
+    },
+    "hr_max": {
+      "type": "number",
+      "description": "Estimated max heart rate from age"
+    },
+    "vo2max": {
+      "type": "number",
+      "description": "Estimated VO2max used to derive pace zones"
+    },
+    "threshold_sec": {
+      "type": "number",
+      "description": "Threshold pace in seconds per mile used to build the zones"
+    },
+    "auto_threshold_sec": {
+      "type": "number",
+      "description": "Threshold pace estimated from age, height and weight"
+    }
+  },
+  "rls": {
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}
