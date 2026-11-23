@@ -38,7 +38,7 @@ const SECTIONS = [
     title: 'Your choices',
     body: [
       'Delete all training data: Settings → Your data wipes your runs, routes, workouts, profile and zones immediately. It cannot be undone.',
-      'Delete your whole account: an app admin can remove your account from the app’s user list, which takes your records with it.',
+      'Delete your whole account: Settings → Your data → Delete account asks for your password, then removes your account and every record tied to it. It cannot be undone.',
       'Withdraw consent: stop using the app and delete your data. The next sign-in will ask for consent again only if your account still exists.',
     ],
   },

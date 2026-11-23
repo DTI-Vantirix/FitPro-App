@@ -40,7 +40,7 @@ atomically, and redemption is rate limited (10 tries per 15 minutes per user).
 | --- | --- | --- |
 | Google sign-in | Button shows "isn't set up yet" | Needs a Google OAuth client. Apple sign-in becomes **required** by App Review if Google is offered in the iOS app. |
 | Two-step sign-in (MFA) | `/api/auth/mfa/*` answers 501; screens kept | TOTP is straightforward to add on this server. |
-| Account deletion button | API done (`DELETE /api/auth/me`), no button yet | **Required by both app stores.** Add to Settings → Your data. |
+| Account deletion button | Web: done (Settings → Your data, asks for the password). Native: not yet | **Required by both app stores.** |
 | File storage | Local disk (`server/uploads`) | Move to S3/R2 before deploying more than one server. |
 | Rate limits | In memory, per process | Fine for one server; Redis if scaled out. |
 | Social share backgrounds | Still load from `media.base44.com` (`web/src/lib/social.js`) | Download and self-host the three images. |
