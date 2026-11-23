@@ -285,7 +285,7 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
     <Text style={styles.kicker}>STEP 06 · MANUAL IMPORT (ALWAYS AVAILABLE)</Text>
     <Text style={styles.title}>Import selected activities</Text>
     <Text style={styles.description}>Manual imports always remain available. The existing ingestActivity endpoint receives selected records; fake records are never eligible.</Text>
-    {!active ? <Text style={styles.error}>Import is disabled until consent, sign-in, and Base44 invite authorization are confirmed.</Text> : <>
+    {!active ? <Text style={styles.error}>Import is disabled until consent, sign-in, and FitPro invite authorization are confirmed.</Text> : <>
       <Text style={styles.count}>{selectedActivities.length} selected of {available.length} readable activities</Text>
       {available.length === 0 && <Text style={styles.description}>No importable activities loaded. Refresh your health adapter above.</Text>}
       {available.map((item) => {
@@ -320,7 +320,7 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
           {record.httpStatus !== undefined ? ` · HTTP ${record.httpStatus}` : ''}
           {'\n'}ID: {record.activityKey.slice(0, 84)}
         </Text>)}
-      <Text style={styles.footnote}>Automatic import is optional, foreground-only and requires prior read permission. Local receipts/settings clear on sign-out or consent withdrawal. Existing Base44 records are not deleted. No background sync or automatic retry.</Text>
+      <Text style={styles.footnote}>Automatic import is optional, foreground-only and requires prior read permission. Local receipts/settings clear on sign-out or consent withdrawal. Existing FitPro records are not deleted. No background sync or automatic retry.</Text>
     </>}
   </View>;
 }

@@ -57,7 +57,7 @@ export function BackgroundSyncPilotPanel({ provider, signedIn, consentAccepted, 
   return <View style={styles.panel}>
     <Text style={styles.kicker}>STEP 7B.2C · CONTROLLED BACKGROUND SYNC PILOT</Text>
     <Text style={styles.title}>Background import of new running workouts</Text>
-    <Text style={styles.copy}>OFF by default and separate from foreground auto-import. Enabling permits FitPro to send newly completed Apple Health / Health Connect runs to your personal Base44 account when the operating system schedules this app. Uploaded details include running distance, duration, date, and a generic run name. This pilot does NOT upload GPS routes, heart rate or strength exercises. Maximum ONE run per worker execution, no historical backfill, and no automatic retries after an upload error.</Text>
+    <Text style={styles.copy}>OFF by default and separate from foreground auto-import. Enabling permits FitPro to send newly completed Apple Health / Health Connect runs to your FitPro account when the operating system schedules this app. Uploaded details include running distance, duration, date, and a generic run name. This pilot does NOT upload GPS routes, heart rate or strength exercises. Maximum ONE run per worker execution, no historical backfill, and no automatic retries after an upload error.</Text>
     <Text style={styles.info}>Scheduler: {status?.available ? 'AVAILABLE' : 'NOT AVAILABLE / CHECKING'} · Task: {status?.registered ? 'REGISTERED' : 'NOT REGISTERED'}</Text>
     <Text style={styles.info}>Background upload opt-in: {status?.enabled ? 'ENABLED' : 'OFF'}{status?.paused ? ' · PAUSED (MANUAL REVIEW REQUIRED)' : ''}</Text>
     <Text style={styles.info}>Provider: {status?.provider ?? 'none'} · Enabled at: {status?.enabledAt ?? 'Never'}</Text>
@@ -88,7 +88,7 @@ export function BackgroundSyncPilotPanel({ provider, signedIn, consentAccepted, 
       {inspection.truncated && <Text style={styles.copy}>Showing the newest five running sessions.</Text>}
     </View>}
     <Action label="Refresh background sync pilot status" onPress={() => { void action('refresh'); }} busy={busy} secondary />
-    {status?.paused && <Text style={styles.error}>Background uploads have been paused after a permission, account, storage, or upload error. Verify your Base44 account and existing imports. Stop the pilot and explicitly opt in again to resume new-only imports.</Text>}
+    {status?.paused && <Text style={styles.error}>Background uploads have been paused after a permission, account, storage, or upload error. Verify your FitPro account and existing imports. Stop the pilot and explicitly opt in again to resume new-only imports.</Text>}
     {!authorized && <Text style={styles.copy}>Sign-in, consent, verified invite access and a platform-matching health provider are required to enable.</Text>}
     {!!message && <Text style={styles.success} selectable>{message}</Text>}
     {!!error && <Text style={styles.error} selectable>{error}</Text>}

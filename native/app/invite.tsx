@@ -81,7 +81,7 @@ export default function InviteScreen() {
         )}
       </>}
       <Action label="Sign out" onPress={signOut} busy={busy} secondary />
-      <Text style={styles.note}>Codes are verified directly by the existing Base44 inviteAccess function. This native client never creates access grants itself.</Text>
+      <Text style={styles.note}>Codes are verified directly by the FitPro API's inviteAccess function. This native client never creates access grants itself.</Text>
     </ScrollView>
   </KeyboardAvoidingView>;
 }

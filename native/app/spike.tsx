@@ -81,7 +81,7 @@ export default function IngestSpike() {
       subtitle="Signed-in user token is in secure device storage. It is not displayed or shipped in app code." />
     <View style={styles.panel}>
       <Text style={styles.panelLabel}>ACCESS</Text>
-      <Text style={styles.small}>Consent accepted · Invite access confirmed by Base44</Text>
+      <Text style={styles.small}>Consent accepted · Invite access confirmed by the FitPro API</Text>
       <Text style={styles.panelLabel}>TARGET</Text>
       <Text selectable style={styles.small}>{INGEST_URL}</Text>
       <Text style={styles.panelLabel}>TEST WORKOUT ID</Text>

@@ -51,7 +51,7 @@ export default function ConsentScreen() {
       <Text style={styles.title}>What could be sent</Text>
       <Text style={styles.body}>Activity details may include workout names, exercises, sets, weights, run distance, duration, heart rate, route coordinates and other fields supported by the FitPro ingestion contract.</Text>
       <Text style={styles.title}>Where it would go</Text>
-      <Text style={styles.body}>When you choose to sync, selected activity data will be sent to your existing FitPro account through its published Base44 backend. This shell uses no advertising or analytics SDKs.</Text>
+      <Text style={styles.body}>When you choose to sync, selected activity data will be sent to your existing FitPro account through the FitPro API. This shell uses no advertising or analytics SDKs.</Text>
       <Text style={styles.title}>You remain in control</Text>
       <Text style={styles.body}>Apple Health permissions are requested separately, only after your consent and invite authorization have passed and you explicitly select Apple Health. You can withdraw this local consent later. Withdrawing does not delete records already uploaded to FitPro or revoke a server session.</Text>
     </View>

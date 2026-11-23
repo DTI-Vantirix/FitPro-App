@@ -87,7 +87,7 @@ export class ActivitySyncError extends Error {
 }
 
 /** Called only from an explicit on-screen tap. The Bearer token is the existing
- * authenticated Base44 app-user token, never a builder/admin token.
+ * authenticated FitPro app-user token, never a builder/admin token.
  */
 export async function submitHealthActivity(
   item: NormalizedActivity,

@@ -38,7 +38,7 @@ export function backgroundBlockers(input: BackgroundReadiness): string[] {
       input.platform === 'other') problems.push('A matching iOS/Android health provider is required.');
   if (!input.signedIn) problems.push('A current user session is required.');
   if (!input.consentAccepted) problems.push('Health-import consent is required.');
-  if (!input.inviteVerified) problems.push('Base44 invite access must be revalidated.');
+  if (!input.inviteVerified) problems.push('FitPro invite access must be revalidated.');
   if (!input.separateBackgroundOptIn) problems.push('Background import needs a separate explicit opt-in.');
   if (!input.nativeSchedulerInstalled) problems.push('The native background task worker is not installed or registered.');
   if (!input.nativeHealthCapability) problems.push('A new native build with background health capabilities is required.');

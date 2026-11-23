@@ -277,7 +277,7 @@ export async function enableBackgroundSyncPilot(provider: BackgroundProvider): P
     throw new Error('Stop both Step 7B.2A and 7B.2B diagnostics before enabling background uploads.');
   }
   const invited = await getInviteStatus(token);
-  if (!invited.allowed) throw new Error('Base44 invite access is not currently authorized.');
+  if (!invited.allowed) throw new Error('FitPro invite access is not currently authorized.');
   if (provider === 'health_connect') {
     const hc = await import('react-native-health-connect');
     if (await hc.getSdkStatus() !== hc.SdkAvailabilityStatus.SDK_AVAILABLE || !(await hc.initialize()))

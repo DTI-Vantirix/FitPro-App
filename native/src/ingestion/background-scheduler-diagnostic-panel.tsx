@@ -59,7 +59,7 @@ export function BackgroundSchedulerDiagnosticPanel({ provider, signedIn, consent
   return <View style={styles.panel}>
     <Text style={styles.kicker}>STEP 7B.2A · NATIVE SCHEDULER CHECK</Text>
     <Text style={styles.title}>Background scheduler smoke test</Text>
-    <Text style={styles.copy}>This checks whether the OS can wake a FitPro task. It never reads HealthKit or Health Connect, never accesses workout data, and never calls Base44.</Text>
+    <Text style={styles.copy}>This checks whether the OS can wake a FitPro task. It never reads HealthKit or Health Connect, never accesses workout data, and never calls the FitPro API.</Text>
     <Text style={styles.info}>Scheduler available: {current === null ? 'Checking…' : current.available ? 'YES' : 'NO'}</Text>
     <Text style={styles.info}>Diagnostic registered: {current?.registered ? 'YES' : 'NO'} · Enabled: {current?.enabled ? 'YES' : 'NO'}</Text>
     <Text style={styles.info}>Last observed execution: {current?.lastRun ?? 'None'}</Text>

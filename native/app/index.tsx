@@ -36,7 +36,7 @@ export default function SignIn() {
         setChallenge(result.challenge);
         setMethod(result.challenge.methods.includes('totp') ? 'totp' : 'sms');
         if (result.challenge.nextStep === 'enroll') {
-          setError('Base44 requires MFA enrollment. This Step 1 shell does not enroll new factors. Finish enrollment in the FitPro web app, then return here.');
+          setError('The FitPro API requires MFA enrollment. This Step 1 shell does not enroll new factors. Finish enrollment in the FitPro web app, then return here.');
         } else if (result.challenge.methods.length === 0) {
           setError('MFA required but no supported totp/sms method was returned. Stop.');
         }

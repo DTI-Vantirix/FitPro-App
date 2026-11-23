@@ -159,7 +159,7 @@ export default function ActivitiesScreen() {
     <Text style={styles.brand}>FITPRO / NATIVE</Text>
     {accessStatus !== 'allowed' ? <>
       <SectionHeading kicker="STEP 02 · ACCESS REQUIRED" title="Access not verified."
-        subtitle="Health reads remain disabled until Base44 confirms your invite authorization." />
+        subtitle="Health reads remain disabled until the FitPro API confirms your invite authorization." />
       <ErrorNotice message={accessError ?? sessionError} />
       {accessStatus === 'checking'
         ? <ActivityIndicator color={colors.accent} />
@@ -173,7 +173,7 @@ export default function ActivitiesScreen() {
       <View style={styles.banner}>
         <Text style={styles.bannerTitle}>{fake ? 'OFFLINE SIMULATION' : provider === 'apple' ? 'APPLE HEALTH · READ ONLY' : 'HEALTH CONNECT · READ ONLY'}</Text>
         <Text style={styles.bannerBody}>Adapter: {adapter.displayName}</Text>
-        <Text style={styles.bannerBody}>Consent: accepted · Base44 invite: verified</Text>
+        <Text style={styles.bannerBody}>Consent: accepted · FitPro invite: verified</Text>
         <Text style={styles.bannerBody}>{fake ? 'OS health permissions: NOT REQUESTED' : realPermissionRequestComplete
           ? provider === 'apple' ? 'Health permission request completed (Apple does not disclose which read types were granted).' : 'Health Connect: required read permissions verified.'
           : 'OS health permission: NOT REQUESTED in this screen'}</Text>

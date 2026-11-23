@@ -1,6 +1,6 @@
 /** Step 7A foreground opt-in. Stores only an on/off preference, enabled-at time,
  * and bounded pseudonymous dedupe fingerprints. No raw health samples are stored.
- * Local state is NOT a server-side sync ledger: Base44 remains authoritative.
+ * Local state is NOT a server-side sync ledger: the FitPro API remains authoritative.
  */
 import * as SecureStore from 'expo-secure-store';
 
@@ -16,7 +16,7 @@ export type AutoSyncState = Readonly<{
 export const DISABLED_AUTO_SYNC: AutoSyncState = { enabled: false, enabledAt: null, syncedMarks: [] };
 
 /** Two independent noncryptographic hashes, used ONLY to reduce repeated requests.
- * A hash collision cannot merge server records; Base44 still keys by source/external_id.
+ * A hash collision cannot merge server records; the FitPro API still keys by source/external_id.
  */
 export function activityMark(key: string): string {
   let a = 0x811c9dc5;
