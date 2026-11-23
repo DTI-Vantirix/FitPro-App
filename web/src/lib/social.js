@@ -1,21 +1,22 @@
 import { api } from '@/api/client';
 
 // Terrain backgrounds offered when generating an analytics post.
+// Served from web/public/backgrounds.
 export const BACKGROUNDS = [
   {
     id: 'trees',
     label: 'Tree-lined road',
-    url: 'https://media.base44.com/images/public/6af009164237ed7caaaf8216/2ce664159_generated_image.png',
+    url: '/backgrounds/trees.jpg',
   },
   {
     id: 'river',
     label: 'Riverside dusk',
-    url: 'https://media.base44.com/images/public/6af009164237ed7caaaf8216/ca1c93d7e_generated_image.png',
+    url: '/backgrounds/river.jpg',
   },
   {
     id: 'trail',
     label: 'Mountain trail',
-    url: 'https://media.base44.com/images/public/6af009164237ed7caaaf8216/65da51b9a_generated_image.png',
+    url: '/backgrounds/trail.jpg',
   },
 ];
 
