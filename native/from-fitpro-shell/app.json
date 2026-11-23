@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "FitPro Native Spike",
+    "slug": "fitpro-native-spike",
+    "scheme": "fitprospike",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.fitpro.spike"
+    },
+    "android": {
+      "package": "com.fitpro.spike"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "extra": {
+      "scope": "Step 1 auth and synthetic ingestion test only. No health access."
+    }
+  }
+}
