@@ -24,7 +24,7 @@ function cjs(file, deps = {}, sandboxExtra = {}) {
 }
 
 const mock = { fetch: null };
-const sync = cjs('src/ingestion/activity-sync.ts', { '../config': { INGEST_URL: 'https://fit-pro-a305cc72.base44.app/functions/ingestActivity' } }, {
+const sync = cjs('src/ingestion/activity-sync.ts', { '../config': { INGEST_URL: 'http://192.168.1.50:4000/api/functions/ingestActivity' } }, {
   fetch: (...args) => mock.fetch(...args),
 });
 const run = { kind: 'run', source: 'health_connect', externalId: 'run-uuid-123', routeName: 'Test run',
@@ -61,7 +61,7 @@ mock.fetch = async (url, opts) => {
 const result = await sync.submitHealthActivity(run, 'user-session-token');
 assert.equal(result.action, 'created');
 assert.equal(result.recordId, 'run-server-id');
-assert.equal(captured.url, 'https://fit-pro-a305cc72.base44.app/functions/ingestActivity');
+assert.equal(captured.url, 'http://192.168.1.50:4000/api/functions/ingestActivity');
 assert.equal(captured.opts.headers.Authorization, 'Bearer user-session-token');
 assert.equal(JSON.parse(captured.opts.body).external_id, 'run-uuid-123');
 mock.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, kind: 'run', action: 'updated', run_id: 'run-server-id' }) });

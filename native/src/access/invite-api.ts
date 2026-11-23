@@ -1,8 +1,8 @@
-import { FITPRO_BASE_URL } from '../config';
+import { API_URL } from '../config';
 
-// From the existing read-only base44/functions/inviteAccess/entry.ts.
+// The FitPro API's inviteAccess function (see docs/native-contract.md).
 // This is not a new backend endpoint and does not read or write health data.
-export const INVITE_ACCESS_URL = `${FITPRO_BASE_URL}/functions/inviteAccess`;
+export const INVITE_ACCESS_URL = `${API_URL}/api/functions/inviteAccess`;
 
 export type InviteAccessResult = { allowed: boolean; admin?: boolean; error?: string };
 

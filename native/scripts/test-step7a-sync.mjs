@@ -30,7 +30,7 @@ const secureStore = {
   deleteItemAsync: async (key) => { store.delete(key); },
 };
 const state = transpile('src/ingestion/auto-sync-state.ts', {'expo-secure-store': secureStore});
-const sync = transpile('src/ingestion/activity-sync.ts', { '../config': { INGEST_URL: 'https://fit-pro-a305cc72.base44.app/functions/ingestActivity' } });
+const sync = transpile('src/ingestion/activity-sync.ts', { '../config': { INGEST_URL: 'http://192.168.1.50:4000/api/functions/ingestActivity' } });
 const select = transpile('src/ingestion/auto-sync-selection.ts', {
   './activity-sync': sync, './auto-sync-state': state,
 });

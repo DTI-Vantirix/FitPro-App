@@ -1,4 +1,4 @@
-import { APP_AUTH_URL } from '../config';
+import { API_URL, APP_AUTH_URL } from '../config';
 
 export type MfaMethod = 'totp' | 'sms';
 export type MfaChallenge = {
@@ -11,11 +11,11 @@ export type LoginResult =
   | { kind: 'authenticated'; accessToken: string }
   | { kind: 'mfa'; challenge: MfaChallenge };
 
-/** The same Base44 auth endpoints and body fields used by FitPro's existing web UI. */
+/** FitPro API auth: POST /api/auth/login returns { access_token, user }. Bearer token only, no cookies. */
 async function postAuth(suffix: string, body: unknown, challengeToken?: string): Promise<unknown> {
+  if (!API_URL) throw new Error('EXPO_PUBLIC_API_URL is not set. Add it to native/.env and restart Expo.');
   const response = await fetch(`${APP_AUTH_URL}/${suffix}`, {
     method: 'POST',
-    credentials: 'include',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
@@ -60,7 +60,7 @@ function resultFromAuth(data: unknown): LoginResult {
       ? record.mfa_methods.filter((m): m is MfaMethod => m === 'totp' || m === 'sms')
       : [];
     if (typeof record.mfa_session_token !== 'string' || !record.mfa_session_token) {
-      throw new Error('MFA required but Base44 did not return mfa_session_token. Stop.');
+      throw new Error('MFA required but the FitPro API did not return mfa_session_token. Stop.');
     }
     return {
       kind: 'mfa',
@@ -71,7 +71,7 @@ function resultFromAuth(data: unknown): LoginResult {
       },
     };
   }
-  throw new Error('No access_token or supported MFA challenge in Base44 login response. Stop.');
+  throw new Error('No access_token or supported MFA challenge in the FitPro API login response. Stop.');
 }
 
 export async function login(email: string, password: string): Promise<LoginResult> {
@@ -83,7 +83,7 @@ export async function verifyMfa(
   method: MfaMethod,
   code: string,
 ): Promise<string> {
-  if (!challenge.methods.includes(method)) throw new Error('MFA method was not offered by Base44.');
+  if (!challenge.methods.includes(method)) throw new Error('MFA method was not offered by the FitPro API.');
   const data = await postAuth(
     'mfa/verify',
     { code: code.trim(), method, remember_device: false },

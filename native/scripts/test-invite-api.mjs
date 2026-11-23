@@ -14,7 +14,7 @@ const context = {
   exports: module.exports,
   require: (id) => {
     assert.equal(id, '../config');
-    return { FITPRO_BASE_URL: 'https://fit-pro-a305cc72.base44.app' };
+    return { API_URL: 'http://192.168.1.50:4000' };
   },
   setTimeout, clearTimeout, AbortController,
   fetch: async (url, options) => {
@@ -27,7 +27,7 @@ const { getInviteStatus, redeemInviteCode } = module.exports;
 
 let result = await getInviteStatus('test-user-token');
 assert.equal(result.allowed, false);
-assert.equal(calls[0].url, 'https://fit-pro-a305cc72.base44.app/functions/inviteAccess');
+assert.equal(calls[0].url, 'http://192.168.1.50:4000/api/functions/inviteAccess');
 assert.equal(calls[0].options.headers.Authorization, 'Bearer test-user-token');
 assert.deepEqual(JSON.parse(calls[0].options.body), { action: 'status' });
 
