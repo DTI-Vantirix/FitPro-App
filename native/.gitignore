@@ -15,3 +15,10 @@ android/.gradle/
 google-services*.json
 GoogleService-Info*.plist
 *.bak
+
+# From the shell's own ignore file
+web-build/
+*.log
+.DS_Store
+coverage/
+expo-env.d.ts
