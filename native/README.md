@@ -1,19 +1,27 @@
 # Native shell (Expo)
 
-The Expo / Expo Router shell from the handoff lives here once it's moved in. It
-currently sits in a separate project on the developer's WSL machine
-(`com.fitpro.spike`).
+The Expo / Expo Router shell (`com.fitpro.spike`) lives in this folder. It keeps its
+own `package.json` and is not part of the npm workspaces, because Expo manages its own
+dependency versions. Notes from the shell's earlier Base44 steps are in
+[SHELL_NOTES.md](SHELL_NOTES.md); the install commands in it are out of date.
 
-## Moving it in
+## Running it
 
-1. Copy the Expo project into this folder (keep its own `package.json`; it is not
-   part of the npm workspaces, because Expo manages its own dependency versions).
-2. Keep its tests (`typecheck`, `check:boundaries`, `test:invite`, `test:health`,
-   `test:apple`) and update `check:boundaries` to forbid imports from `../server`
-   and `../web`.
-3. Point it at the new API (below), then rerun every check.
+```
+cd native
+npm install
+cp .env.example .env      # then set EXPO_PUBLIC_API_URL
+npm run typecheck
+npm run check:boundaries
+npm run test:invite && npm run test:health && npm run test:apple && npm run test:android
+npx expo start
+```
 
-## What changes in the shell
+`check:boundaries` fails if anything in the shell imports from outside `native/`
+(so nothing from `../server` or `../web`) or still names a Base44 URL. The other
+step tests are run directly, e.g. `node scripts/test-step6-sync.mjs`.
+
+## What changed from the Base44 shell
 
 Only the backend address and sign-in. Request and response bodies are unchanged.
 
