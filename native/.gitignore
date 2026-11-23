@@ -1,0 +1,17 @@
+# Applies to every Expo project under native/
+node_modules/
+.expo/
+dist/
+ios/Pods/
+ios/build/
+android/build/
+android/.gradle/
+.env*
+*.jks
+*.keystore
+*.p8
+*.p12
+*.mobileprovision
+google-services*.json
+GoogleService-Info*.plist
+*.bak

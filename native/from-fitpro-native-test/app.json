@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "FitPro Native",
+    "slug": "fitpro-native-spike",
+    "scheme": "fitprospike",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.fitpro.spike",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.fitpro.spike",
+      "permissions": [
+        "android.permission.health.READ_EXERCISE",
+        "android.permission.health.READ_DISTANCE",
+        "android.permission.health.READ_HEART_RATE",
+        "android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "FitPro reads running workouts, heart rate, and available GPS routes from Apple Health only after you consent and approve access. Nothing is uploaded during this test.",
+          "NSHealthUpdateUsageDescription": false,
+          "background": true
+        }
+      ],
+      "expo-status-bar",
+      "react-native-health-connect",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 37,
+            "targetSdkVersion": 36,
+            "minSdkVersion": 26
+          }
+        }
+      ],
+      "expo-background-task"
+    ],
+    "extra": {
+      "scope": "Step 5: read-only Apple Health + Android Health Connect; no real uploads or background delivery.",
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "5b34a9e7-647f-4ced-b119-77df818276ef"
+      }
+    },
+    "owner": "antovel.j"
+  }
+}
