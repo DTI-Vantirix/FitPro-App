@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Route as RouteIcon } from 'lucide-react';
+import { Plus, Route as RouteIcon } from 'lucide-react';
 import { api } from '@/api/client';
 import RouteCard from '@/components/routes/RouteCard';
 import { sortZones } from '@/lib/zones';
