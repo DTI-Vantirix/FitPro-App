@@ -1,11 +1,33 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import assert from 'node:assert/strict';
 
 const native = resolve(import.meta.dirname, '..');
 const root = resolve(native, '..');
-assert(!existsSync(join(root, 'src')), 'This deliverable must never ship the web src/ tree.');
-assert(!existsSync(join(root, 'base44')), 'This deliverable must never ship backend files.');
+// The shell lives beside server/ and web/ in one repo but must stay independent of both:
+// no import may resolve outside native/, and nothing may name the server or web packages.
+const sourceFiles = (dir) => readdirSync(dir).flatMap((name) => {
+  if (name === 'node_modules' || name.startsWith('.')) return [];
+  const path = join(dir, name);
+  if (statSync(path).isDirectory()) return sourceFiles(path);
+  return /\.(?:[cm]?[jt]sx?)$/.test(name) ? [path] : [];
+});
+const importPattern = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)['"]([^'"]+)['"]/g;
+for (const file of [...sourceFiles(join(native, 'app')), ...sourceFiles(join(native, 'src')), join(native, 'index.js')]) {
+  for (const [, spec] of readFileSync(file, 'utf8').matchAll(importPattern)) {
+    assert(!/^(?:@fitpro\/|fitpro-)?(?:server|web)(?:\/|$)/.test(spec), `${file} imports the ${spec} package.`);
+    if (!spec.startsWith('.')) continue;
+    const target = resolve(file, '..', spec);
+    assert(target === native || target.startsWith(native + sep), `${file} imports ${spec}, which is outside native/ (../server and ../web are forbidden).`);
+  }
+}
+for (const file of [...sourceFiles(join(native, 'app')), ...sourceFiles(join(native, 'src'))]) {
+  assert(!/base44\.app/i.test(readFileSync(file, 'utf8')), `${file} still points at a Base44 URL.`);
+}
+const config = readFileSync(join(native, 'src/config.ts'), 'utf8');
+assert(config.includes('process.env.EXPO_PUBLIC_API_URL') && !/https?:\/\//.test(config.replace(/\/\*[\s\S]*?\*\//g, '')),
+  'The API address must come from EXPO_PUBLIC_API_URL, never a hard-coded URL.');
+assert(existsSync(join(root, 'server')) && existsSync(join(root, 'web')), 'Expected to run inside the FitPro repo, beside server/ and web/.');
 const workout = readFileSync(join(native, 'src/ingestion/spike-workout.ts'), 'utf8');
 for (const name of ['external_id', 'kind', 'source', 'exercises']) assert(workout.includes(name), `Missing ${name}`);
 assert(!workout.includes('total_volume') && !workout.includes('set_count'), 'Server-computed fields are prohibited.');
@@ -19,7 +41,7 @@ const invite = readFileSync(join(native, 'src/access/invite-api.ts'), 'utf8');
 const gate = readFileSync(join(native, 'src/access/access-gate.tsx'), 'utf8');
 const session = readFileSync(join(native, 'src/auth/session.tsx'), 'utf8');
 const spike = readFileSync(join(native, 'app/spike.tsx'), 'utf8');
-assert(invite.includes('/functions/inviteAccess'), 'Step 2 must use existing inviteAccess backend.');
+assert(invite.includes('${API_URL}/api/functions/inviteAccess'), 'Invite checks must use the FitPro API inviteAccess function.');
 assert(invite.includes("action: 'status'") && invite.includes("action: 'redeem'"), 'Step 2 uses only existing invite actions.');
 assert(gate.includes("status: 'needs_invite'") && gate.includes("status: 'allowed'"), 'Backend gate missing.');
 assert(session.includes('SecureStore.setItemAsync(CONSENT_KEY') && session.includes('SecureStore.deleteItemAsync(CONSENT_KEY'), 'Consent must persist and be revocable.');
