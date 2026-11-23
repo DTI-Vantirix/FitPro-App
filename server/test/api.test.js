@@ -70,8 +70,8 @@ before(async () => {
 });
 
 after(async () => {
-  await new Promise((r) => server.close(r));
-  await db.close();
+  if (server) await new Promise((r) => server.close(r));
+  await db?.close();
 });
 
 let alice;
