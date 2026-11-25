@@ -7,7 +7,7 @@ import { MfaScreen } from "@/components/MfaParts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { UserPlus, Mail, Lock, Loader2 } from "lucide-react";
+import { UserPlus, Mail, Lock, Loader2, Ticket } from "lucide-react";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import AuthLayout from "@/components/AuthLayout";
 import GoogleIcon from "@/components/GoogleIcon";
@@ -15,6 +15,7 @@ import { toast } from "@/components/ui/use-toast";
 import { safeReturnTo } from "@/lib/authReturnTo";
 
 export default function Register() {
+  const [inviteCode, setInviteCode] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -34,7 +35,7 @@ export default function Register() {
     }
     setLoading(true);
     try {
-      await api.auth.register({ email, password });
+      await api.auth.register({ email, password, invite_code: inviteCode });
       setShowOtp(true);
     } catch (err) {
       setError(err.message || "Registration failed");
@@ -180,6 +181,25 @@ export default function Register() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="invite-code">Invite code</Label>
+          <div className="relative">
+            <Ticket className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
+            <Input
+              id="invite-code"
+              type="text"
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              placeholder="FP-XXXX-XXXX"
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+              className="pl-10 h-12"
+              required
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">FitPro is invite-only. Use the code you were sent.</p>
+        </div>
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
           <div className="relative">

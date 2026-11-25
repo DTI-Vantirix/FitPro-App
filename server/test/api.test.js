@@ -49,8 +49,30 @@ async function call(method, url, { body, token, headers = {}, raw } = {}) {
   return { status: res.status, data };
 }
 
+// Sign-up needs an invite code, so tests mint one straight into the database.
+let codeSeq = 0;
+async function mintCode() {
+  codeSeq += 1;
+  const code = `FP-TEST-${String(codeSeq).padStart(4, '0')}`;
+  await db.query(`insert into invite_codes (code, status, note) values ($1, 'available', 'test') returning id`, [code]);
+  return code;
+}
+
 async function signUp(email, password = 'correct-horse-1') {
-  const reg = await call('POST', '/api/auth/register', { body: { email, password, full_name: email.split('@')[0] } });
+  return signUpWith(email, await mintCode(), password);
+}
+
+// An account from before sign-up needed a code: verified, but no accepted invite.
+async function legacyUser(email) {
+  const account = await signUp(email);
+  await db.query('delete from access_grants where user_id = $1 returning id', [account.user.id]);
+  return account;
+}
+
+async function signUpWith(email, inviteCode, password = 'correct-horse-1') {
+  const reg = await call('POST', '/api/auth/register', {
+    body: { email, password, full_name: email.split('@')[0], invite_code: inviteCode },
+  });
   assert.equal(reg.status, 200, JSON.stringify(reg.data));
   const ver = await call('POST', '/api/auth/verify-otp', { body: { email, otp_code: reg.data.dev_code } });
   assert.equal(ver.status, 200, JSON.stringify(ver.data));
@@ -90,7 +112,7 @@ describe('auth', () => {
   });
 
   test('wrong code and wrong password are rejected', async () => {
-    const reg = await call('POST', '/api/auth/register', { body: { email: 'carol@example.com', password: 'longenough' } });
+    const reg = await call('POST', '/api/auth/register', { body: { email: 'carol@example.com', password: 'longenough', invite_code: await mintCode() } });
     const bad = await call('POST', '/api/auth/verify-otp', { body: { email: 'carol@example.com', otp_code: '000000' === reg.data.dev_code ? '111111' : '000000' } });
     assert.equal(bad.status, 400);
     const unverified = await call('POST', '/api/auth/login', { body: { email: 'carol@example.com', password: 'longenough' } });
@@ -104,7 +126,7 @@ describe('auth', () => {
   });
 
   test('duplicate verified email is refused', async () => {
-    const dup = await call('POST', '/api/auth/register', { body: { email: 'alice@example.com', password: 'whatever123' } });
+    const dup = await call('POST', '/api/auth/register', { body: { email: 'alice@example.com', password: 'whatever123', invite_code: await mintCode() } });
     assert.equal(dup.status, 409);
   });
 
@@ -311,6 +333,9 @@ describe('entities and access rules', () => {
 
 describe('invite access', () => {
   let codes;
+  let nina;
+  let omar;
+  let before;
 
   test('non-admins cannot mint codes', async () => {
     const res = await call('POST', '/api/functions/adminInviteCodes', { token: alice.token, body: { action: 'generate' } });
@@ -318,23 +343,26 @@ describe('invite access', () => {
   });
 
   test('admin generates, user redeems, code is single use', async () => {
+    nina = await legacyUser('nina@example.com');
+    omar = await legacyUser('omar@example.com');
+    before = (await call('POST', '/api/functions/adminInviteCodes', { token: admin.token, body: { action: 'list' } })).data;
     const gen = await call('POST', '/api/functions/adminInviteCodes', { token: admin.token, body: { action: 'generate', count: 3, note: 'batch 1' } });
     assert.equal(gen.status, 200);
     codes = gen.data.created;
     assert.equal(codes.length, 3);
     assert.match(codes[0].code, /^FP-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
 
-    assert.deepEqual((await call('POST', '/api/functions/inviteAccess', { token: alice.token, body: { action: 'status' } })).data, { allowed: false });
-    const wrong = await call('POST', '/api/functions/inviteAccess', { token: alice.token, body: { action: 'redeem', code: 'FP-NOPE-NOPE' } });
+    assert.deepEqual((await call('POST', '/api/functions/inviteAccess', { token: nina.token, body: { action: 'status' } })).data, { allowed: false });
+    const wrong = await call('POST', '/api/functions/inviteAccess', { token: nina.token, body: { action: 'redeem', code: 'FP-NOPE-NOPE' } });
     assert.equal(wrong.data.allowed, false);
     const redeem = await call('POST', '/api/functions/inviteAccess', {
-      token: alice.token,
+      token: nina.token,
       body: { action: 'redeem', code: ` ${codes[0].code.toLowerCase()} ` },
     });
     assert.deepEqual(redeem.data, { allowed: true });
-    assert.equal((await call('POST', '/api/functions/inviteAccess', { token: alice.token, body: {} })).data.allowed, true);
+    assert.equal((await call('POST', '/api/functions/inviteAccess', { token: nina.token, body: {} })).data.allowed, true);
 
-    const reuse = await call('POST', '/api/functions/inviteAccess', { token: bob.token, body: { action: 'redeem', code: codes[0].code } });
+    const reuse = await call('POST', '/api/functions/inviteAccess', { token: omar.token, body: { action: 'redeem', code: codes[0].code } });
     assert.equal(reuse.data.allowed, false);
     assert.match(reuse.data.error, /already been used/);
 
@@ -347,10 +375,64 @@ describe('invite access', () => {
     const ok = await call('POST', '/api/functions/adminInviteCodes', { token: admin.token, body: { action: 'revoke', id: codes[1].id } });
     assert.equal(ok.data.code.status, 'revoked');
     const list = await call('POST', '/api/functions/adminInviteCodes', { token: admin.token, body: { action: 'list' } });
-    assert.deepEqual(list.data.stats, { available: 1, used: 1, revoked: 1 });
-    assert.equal(list.data.grants.length, 1);
-    const grant = await call('POST', '/api/entities/AccessGrant/query', { token: alice.token, body: {} });
+    assert.deepEqual(
+      [list.data.stats.available - before.stats.available, list.data.stats.used - before.stats.used, list.data.stats.revoked - before.stats.revoked],
+      [1, 1, 1]
+    );
+    assert.equal(list.data.grants.length - before.grants.length, 1);
+    const grant = await call('POST', '/api/entities/AccessGrant/query', { token: nina.token, body: {} });
     assert.equal(grant.data.items.length, 1, 'a user can read their own grant');
+  });
+});
+
+describe('sign-up needs a code', () => {
+  test('no code, unknown code and used code are refused', async () => {
+    const body = { email: 'erin2@example.com', password: 'longenough1' };
+    assert.equal((await call('POST', '/api/auth/register', { body })).data.error, 'Enter your invite code.');
+    assert.equal(
+      (await call('POST', '/api/auth/register', { body: { ...body, invite_code: 'FP-NOPE-NOPE' } })).data.error,
+      'That code is not recognised.'
+    );
+    const used = await mintCode();
+    await signUpWith('frank@example.com', used);
+    const res = await call('POST', '/api/auth/register', { body: { ...body, invite_code: used } });
+    assert.equal(res.status, 400);
+    assert.equal(res.data.error, 'That code has already been used.');
+  });
+
+  test('a valid code, typed loosely, opens the app after verifying', async () => {
+    const code = await mintCode();
+    const gina = await signUpWith('gina@example.com', `  ${code.toLowerCase()} `);
+    const status = await call('POST', '/api/functions/inviteAccess', { token: gina.token, body: { action: 'status' } });
+    assert.deepEqual(status.data, { allowed: true });
+    const [row] = await db.query('select status, used_by_email from invite_codes where code = $1', [code]);
+    assert.deepEqual({ ...row }, { status: 'used', used_by_email: 'gina@example.com' });
+  });
+
+  test('registering without verifying leaves the code available', async () => {
+    const code = await mintCode();
+    await call('POST', '/api/auth/register', { body: { email: 'hal@example.com', password: 'longenough1', invite_code: code } });
+    const [row] = await db.query('select status from invite_codes where code = $1', [code]);
+    assert.equal(row.status, 'available');
+  });
+
+  test('two sign-ups holding one code: the first to verify wins', async () => {
+    const code = await mintCode();
+    const a = await call('POST', '/api/auth/register', { body: { email: 'ivy@example.com', password: 'longenough1', invite_code: code } });
+    const b = await call('POST', '/api/auth/register', { body: { email: 'jo@example.com', password: 'longenough1', invite_code: code } });
+    assert.equal((await call('POST', '/api/auth/verify-otp', { body: { email: 'ivy@example.com', otp_code: a.data.dev_code } })).status, 200);
+    const late = await call('POST', '/api/auth/verify-otp', { body: { email: 'jo@example.com', otp_code: b.data.dev_code } });
+    assert.equal(late.status, 409);
+    const login = await call('POST', '/api/auth/login', { body: { email: 'jo@example.com', password: 'longenough1' } });
+    assert.equal(login.status, 403);
+    assert.equal(login.data.needs_verification, true);
+  });
+
+  test('an older account with no code can still sign in and redeem one', async () => {
+    const kim = await legacyUser('kim@example.com');
+    assert.equal((await call('POST', '/api/auth/login', { body: { email: 'kim@example.com', password: 'correct-horse-1' } })).status, 200);
+    const res = await call('POST', '/api/functions/inviteAccess', { token: kim.token, body: { action: 'redeem', code: await mintCode() } });
+    assert.deepEqual(res.data, { allowed: true });
   });
 });
 

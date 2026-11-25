@@ -34,8 +34,13 @@ POST {API_URL}/api/auth/login
 -> 403 { "error": "Verify your email first...", "needs_verification": true }
 ```
 
-Sign-up is `POST /api/auth/register` then `POST /api/auth/verify-otp` with the emailed
-6-digit code, which also returns `{ access_token, user }`.
+Sign-up is `POST /api/auth/register` with `{ email, password, full_name?, invite_code }`,
+then `POST /api/auth/verify-otp` with the emailed 6-digit code, which also returns
+`{ access_token, user }`. `invite_code` is required: FitPro is invite-only and the server
+creates no account without a valid unused code (`400` with `"Enter your invite code."`,
+`"That code is not recognised."` or `"That code has already been used."`). The code is
+claimed when the email is verified, not at register; if someone else verified with the same
+code first, `verify-otp` answers `409` and the person registers again with a new code.
 
 Store the token in `expo-secure-store` and send it on every request. Tokens last 30 days
 by default. Any `401` means the token is no longer valid (expired, password changed,

@@ -1,3 +1,4 @@
+import { claimInvite, normalizeCode } from '../functions/inviteAccess.js';
 import { HttpError, clientIp, rateLimiter } from '../lib/http.js';
 import { sendMail } from '../lib/mail.js';
 import { burnPasswordCheck, hashPassword, longToken, sixDigitCode, verifyPassword } from './crypto.js';
@@ -58,6 +59,14 @@ export function registerAuthRoutes(router) {
     const password = readNewPassword(ctx.body.password);
     const fullName = ctx.body.full_name ? String(ctx.body.full_name).trim().slice(0, 120) : null;
     signupLimit(`signup:${clientIp(ctx.req)}`);
+
+    // FitPro is invite-only: no account without a code from the owner. The code
+    // is only held here; it is claimed when the email is verified.
+    const inviteCode = normalizeCode(ctx.body.invite_code);
+    if (!inviteCode) throw new HttpError(400, 'Enter your invite code.');
+    const [invite] = await ctx.db.query('select status from invite_codes where code = $1', [inviteCode]);
+    if (!invite) throw new HttpError(400, 'That code is not recognised.');
+    if (invite.status !== 'available') throw new HttpError(400, 'That code has already been used.');
     mailLimit(`mail:${email}`);
 
     const existing = await findByEmail(ctx.db, email);
@@ -69,14 +78,16 @@ export function registerAuthRoutes(router) {
     if (existing) {
       // Unfinished sign-up: let them start over with a new password and code.
       [user] = await ctx.db.query(
-        `update users set password_hash = $2, full_name = coalesce($3, full_name), updated_date = now()
+        `update users set password_hash = $2, full_name = coalesce($3, full_name),
+                pending_invite_code = $4, updated_date = now()
           where id = $1 returning *`,
-        [existing.id, hash, fullName]
+        [existing.id, hash, fullName, inviteCode]
       );
     } else {
       [user] = await ctx.db.query(
-        `insert into users (email, password_hash, full_name) values ($1, $2, $3) returning *`,
-        [email, hash, fullName]
+        `insert into users (email, password_hash, full_name, pending_invite_code)
+         values ($1, $2, $3, $4) returning *`,
+        [email, hash, fullName, inviteCode]
       );
     }
     return { ok: true, ...(await sendVerifyCode(ctx, user)) };
@@ -88,11 +99,20 @@ export function registerAuthRoutes(router) {
     const user = await findByEmail(ctx.db, email);
     const ok = user && (await consumeCodeForUser(ctx.db, user.id, 'verify_email', ctx.body.otp_code));
     if (!ok) throw new HttpError(400, 'That code is wrong or has expired.');
-    const [verified] = await ctx.db.query(
-      `update users set email_verified_at = coalesce(email_verified_at, now()), updated_date = now()
-        where id = $1 returning *`,
-      [user.id]
-    );
+    const verified = await ctx.db.tx(async (tx) => {
+      // The code they registered with is claimed here, together with the
+      // verification, so the account never ends up verified without access.
+      if (user.pending_invite_code && !(await claimInvite(tx, user, user.pending_invite_code))) {
+        throw new HttpError(409, 'That invite code was just used by someone else. Ask for a new one.');
+      }
+      const [row] = await tx.query(
+        `update users set email_verified_at = coalesce(email_verified_at, now()),
+                pending_invite_code = null, updated_date = now()
+          where id = $1 returning *`,
+        [user.id]
+      );
+      return row;
+    });
     return signedIn(ctx, verified);
   });
 
