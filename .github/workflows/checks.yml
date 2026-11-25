@@ -1,0 +1,127 @@
+name: Checks
+
+# Every push reruns the API tests, the web lint and the browser flows (admin
+# and runner) against a fresh Postgres, the phone app's own checks, and a build and
+# smoke test of the production image. A pull request shows the result of the
+# push to its branch, so there is no separate pull_request trigger.
+on:
+  push:
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: fitpro
+          POSTGRES_PASSWORD: fitpro
+          POSTGRES_DB: fitpro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fitpro"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://fitpro:fitpro@localhost:5432/fitpro_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Create the test database
+        run: PGPASSWORD=fitpro psql -h localhost -U fitpro -d fitpro -c "create database fitpro_test owner fitpro"
+      - name: API tests
+        run: npm test
+      - name: Web lint
+        run: npm run lint
+      - name: Install the test browser
+        run: npx playwright install --with-deps chromium
+      - name: Browser flows
+        run: npm run e2e
+      - name: Keep the browser-test report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/.results/html
+          retention-days: 14
+
+  # The Expo app keeps its own package.json (it is not an npm workspace). This job
+  # cannot run the app on a phone: it type-checks it, runs the boundary check and the
+  # unit tests, and makes sure the native config still resolves.
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: native
+    env:
+      EXPO_PUBLIC_API_URL: http://127.0.0.1:4000
+      EXPO_NO_TELEMETRY: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Boundary check
+        run: npm run check:boundaries
+      - name: Unit tests
+        run: npm test
+      - name: Native config resolves
+        run: npx expo config --type introspect --json > /dev/null
+
+  # Builds the production image exactly as the host will, starts it against a fresh
+  # Postgres and checks it end to end: health, the website, first admin, an upload,
+  # an invite code and error recording.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: fitpro
+          POSTGRES_PASSWORD: fitpro
+          POSTGRES_DB: fitpro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fitpro"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build the image
+        run: docker build -t vantrarun .
+      - name: Start it
+        run: >-
+          docker run -d --name vantrarun --network host
+          -e DATABASE_URL=postgres://fitpro:fitpro@localhost:5432/fitpro
+          -e JWT_SECRET=ci-only-secret-ci-only-secret-0123456789
+          -e ADMIN_EMAIL=owner@example.com
+          -e ADMIN_PASSWORD=ci-only-admin-password
+          vantrarun
+      - name: Smoke test
+        run: node scripts/smoke-image.mjs http://127.0.0.1:10000 owner@example.com ci-only-admin-password
+      - name: Server log
+        if: ${{ !cancelled() }}
+        run: docker logs vantrarun

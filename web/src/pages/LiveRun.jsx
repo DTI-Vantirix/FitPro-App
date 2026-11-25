@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Dumbbell, Pause, Play, Square, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, Pause, Play, Square, TriangleAlert } from 'lucide-react';
 import { api } from '@/api/client';
 import MapView from '@/components/MapView';
 import PaceReadout from '@/components/run/PaceReadout';
 import ZonePicker from '@/components/run/ZonePicker';
 import SplitsList from '@/components/run/SplitsList';
-import LegsList from '@/components/run/LegsList';
 import RunSummary from '@/components/run/RunSummary';
 import HeartRateCard from '@/components/run/HeartRateCard';
 import useHeartRate from '@/hooks/useHeartRate';
@@ -36,12 +35,9 @@ export default function LiveRun() {
   const [geoError, setGeoError] = useState(null);
   const [saved, setSaved] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [atGym, setAtGym] = useState(false);
-  const [legs, setLegs] = useState([]);
   const heart = useHeartRate();
 
   const lastPt = useRef(null);
-  const gymDone = useRef(false);
   const runningRef = useRef(false);
   const elapsedRef = useRef(0);
   const distanceRef = useRef(0);
@@ -52,32 +48,6 @@ export default function LiveRun() {
   const splitsRef = useRef([]);
   const startedAt = useRef(null);
   const watchId = useRef(null);
-  const legsRef = useRef([]);
-  const legStartDist = useRef(0);
-  const legStartElapsed = useRef(0);
-  const legFromRef = useRef('Start');
-
-  const gymLabel = route?.gym_stop?.trim() || 'Gym';
-
-  // Closes the leg in progress — start to gym, then gym to finish.
-  const closeLeg = (toLabel) => {
-    const legDist = distanceRef.current - legStartDist.current;
-    const legTime = elapsedRef.current - legStartElapsed.current;
-    if (legDist <= 0.005 && legTime <= 0) return legsRef.current;
-    legsRef.current = [
-      ...legsRef.current,
-      {
-        index: legsRef.current.length + 1,
-        from: legFromRef.current,
-        to: toLabel,
-        distance_mi: Number(legDist.toFixed(2)),
-        duration_sec: legTime,
-        avg_pace_sec: legDist > 0.01 ? Math.round(legTime / legDist) : 0,
-      },
-    ];
-    setLegs(legsRef.current);
-    return legsRef.current;
-  };
 
   useEffect(() => {
     let alive = true;
@@ -130,19 +100,6 @@ export default function LiveRun() {
   useEffect(() => {
     zoneRef.current = zone;
   }, [zone]);
-
-  const gymPoint = route?.gym_point || null;
-  useEffect(() => {
-    if (!gymPoint || !position || status !== 'running' || gymDone.current) return;
-    if (distanceRef.current < 0.2) return;
-    if (haversineMiles(position, gymPoint) <= 0.05) {
-      gymDone.current = true;
-      runningRef.current = false;
-      closeLeg(gymLabel);
-      setStatus('paused');
-      setAtGym(true);
-    }
-  }, [gymPoint, position, status]);
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -245,14 +202,7 @@ export default function LiveRun() {
     elapsedRef.current = 0;
     distanceRef.current = 0;
     inZoneRef.current = 0;
-    gymDone.current = false;
-    legsRef.current = [];
-    legStartDist.current = 0;
-    legStartElapsed.current = 0;
-    legFromRef.current = 'Start';
-    setLegs([]);
     heart.resetStats();
-    setAtGym(false);
     setStatus('running');
   };
 
@@ -264,19 +214,12 @@ export default function LiveRun() {
   const resume = () => {
     lastPt.current = position;
     runningRef.current = true;
-    if (gymDone.current) {
-      legStartDist.current = distanceRef.current;
-      legStartElapsed.current = elapsedRef.current;
-      legFromRef.current = gymLabel;
-    }
     setStatus('running');
-    setAtGym(false);
   };
 
   const finish = async () => {
     runningRef.current = false;
     setSaving(true);
-    const allLegs = closeLeg('Finish');
     const payload = {
       route_id: route?.id || '',
       route_name: route?.name || 'Free run',
@@ -290,8 +233,6 @@ export default function LiveRun() {
       in_zone_pct: elapsed ? Math.round((inZoneRef.current / elapsed) * 100) : 0,
       splits,
       points: trail.map(({ lat, lng }) => ({ lat, lng })),
-      legs: allLegs,
-      ...(gymPoint ? { gym_point: gymPoint, gym_name: gymLabel } : {}),
       ...(heart.stats.avg
         ? { avg_hr: heart.stats.avg, max_hr: heart.stats.max, hr_device: heart.deviceName }
         : {}),
@@ -307,19 +248,6 @@ export default function LiveRun() {
   }
 
   const live = status === 'running' || status === 'paused';
-
-  const legDist = distance - legStartDist.current;
-  const legTime = Math.max(0, elapsed - legStartElapsed.current);
-  const activeLeg =
-    status === 'running'
-      ? {
-          from: legFromRef.current,
-          to: gymDone.current ? 'Finish' : gymLabel,
-          distance_mi: Number(legDist.toFixed(2)),
-          duration_sec: legTime,
-          avg_pace_sec: legDist > 0.01 ? Math.round(legTime / legDist) : 0,
-        }
-      : null;
 
   return (
     <div className="space-y-4">
@@ -363,7 +291,6 @@ export default function LiveRun() {
         <MapView
           path={route?.path?.length ? route.path : route?.points || []}
           points={route?.points || []}
-          gymPoint={gymPoint}
           trail={trail}
           position={position}
           follow={status === 'running'}
@@ -445,31 +372,6 @@ export default function LiveRun() {
           </>
         ) : (
           <>
-            {atGym && (
-              <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
-                <p className="flex items-center gap-2 font-heading text-sm font-bold text-primary">
-                  <Dumbbell className="h-4 w-4" /> Gym stop reached
-                </p>
-                <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-                  Your run paused automatically. Log the session, then pick the run back up.
-                </p>
-                <div className="mt-3 flex gap-2">
-                  <Link
-                    to="/workouts"
-                    className="flex-1 rounded-full border border-border py-2.5 text-center font-heading text-xs font-medium transition-colors hover:border-primary/40 hover:text-primary"
-                  >
-                    Log workout
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={resume}
-                    className="flex-1 rounded-full bg-primary py-2.5 font-heading text-xs font-semibold text-primary-foreground transition hover:brightness-95"
-                  >
-                    Resume run
-                  </button>
-                </div>
-              </div>
-            )}
             <ZonePicker zones={zones} value={zoneId} onChange={setZoneId} label="Target zone" />
             <div className="flex gap-2">
               <button
@@ -489,12 +391,6 @@ export default function LiveRun() {
                 <Square className="h-3.5 w-3.5" strokeWidth={2.5} /> {saving ? 'Saving…' : 'Finish'}
               </button>
             </div>
-            {gymPoint && (
-              <div>
-                <p className="eyebrow mb-2">Legs</p>
-                <LegsList legs={legs} active={activeLeg} />
-              </div>
-            )}
             <div>
               <p className="eyebrow mb-2">Splits</p>
               <SplitsList splits={splits} limit={4} />

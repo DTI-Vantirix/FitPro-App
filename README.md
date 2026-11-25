@@ -54,6 +54,18 @@ sign-up and sign-in, password reset, the access rules on every kind of record,
 invite codes, the `ingestActivity` contract the native app depends on, the social
 feed, challenges, uploads and account deletion.
 
+```bash
+npm run e2e            # browser flows (Playwright), first time: npx playwright install chromium
+npm run check          # API tests, web lint and browser flows, one summary
+npm run check:watch    # the same, rerun every time a source file changes
+```
+
+The browser flows in `e2e/` drive the built web app, served by the real API, as the
+owner (sign in, generate and revoke invite codes) and as a tester (sign up with a
+code, verify, consent, open every screen, sign out). They use their own database,
+`fitpro_e2e`, created on first run and wiped on every run. GitHub reruns all three
+on every push and pull request (`.github/workflows/checks.yml`).
+
 ## How the pieces fit
 
 - [docs/architecture.md](docs/architecture.md): how the API, database and apps fit
@@ -65,9 +77,19 @@ feed, challenges, uploads and account deletion.
 
 ## Deploying
 
-Not chosen yet. Because this is plain Node + Postgres, it runs on most hosts
-(Fly.io, Railway, Render, a VPS, AWS). The short version: provision Postgres, set
-the variables in `.env.example` (a real `JWT_SECRET` and `RESEND_API_KEY` at
-minimum), run `npm run migrate`, `npm run build`, and start the API with
-`WEB_DIST=web/dist` to serve the web app from the same process. See the deployment
-checklist in [docs/decisions.md](docs/decisions.md).
+One container runs the API and serves the built website; `render.yaml` describes it
+and its Postgres database for [Render](https://render.com) (Virginia). The steps that
+need the owner's accounts — hosting, email, the store builds — are in
+[docs/launch-checklist.md](docs/launch-checklist.md).
+
+```bash
+docker build -t vantrarun .
+docker run -p 10000:10000 -e DATABASE_URL=postgres://... -e JWT_SECRET=<32+ random characters> vantrarun
+node scripts/smoke-image.mjs http://127.0.0.1:10000 <admin email> <admin password>   # against a throwaway database
+```
+
+The image runs migrations at start-up. On a host with no shell, `ADMIN_EMAIL` and
+`ADMIN_PASSWORD` create the first admin once. Uploads stay on disk (`UPLOAD_DIR`)
+unless the `S3_*` variables point at a bucket. Every setting is in `.env.example`.
+It still runs anywhere Node and Postgres do: `npm run build`, then start the API with
+`WEB_DIST=web/dist`.

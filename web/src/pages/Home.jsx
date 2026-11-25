@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
-import { Activity, ArrowUpRight, Dumbbell, Footprints, MapPin, Timer, TrendingUp } from 'lucide-react';
+import { Activity, ArrowUpRight, Footprints, MapPin, Timer, TrendingUp } from 'lucide-react';
 import StatCard from '@/components/StatCard';
 import MiniStat from '@/components/MiniStat';
 import NextSession from '@/components/home/NextSession';
@@ -19,20 +19,17 @@ function startOfWeek(date) {
 
 export default function Home() {
   const [runs, setRuns] = useState([]);
-  const [workouts, setWorkouts] = useState([]);
   const [routes, setRoutes] = useState([]);
 
   useEffect(() => {
     let alive = true;
     Promise.all([
       api.entities.Run.list({ sort: '-started_at', limit: 40 }),
-      api.entities.Workout.list({ sort: '-performed_at', limit: 40 }),
       api.entities.Route.list({ sort: '-created_date', limit: 20 }),
     ])
-      .then(([runPage, workoutPage, routePage]) => {
+      .then(([runPage, routePage]) => {
         if (!alive) return;
         setRuns(runPage.items || []);
-        setWorkouts(workoutPage.items || []);
         setRoutes(routePage.items || []);
       })
       .catch(() => {});
@@ -54,18 +51,15 @@ export default function Home() {
     const distance = thisWeek.reduce((n, r) => n + (Number(r.distance_mi) || 0), 0);
     const lastDistance = lastWeek.reduce((n, r) => n + (Number(r.distance_mi) || 0), 0);
     const time = thisWeek.reduce((n, r) => n + (Number(r.duration_sec) || 0), 0);
-    const gyms = workouts.filter((w) => new Date(w.performed_at || w.created_date) >= weekStart);
-    const gymMinutes = gyms.reduce((n, w) => n + (Number(w.duration_min) || 0), 0);
     return {
       distance,
       delta: lastDistance > 0 ? Math.round(((distance - lastDistance) / lastDistance) * 100) : distance > 0 ? 100 : 0,
       runs: thisWeek.length,
       avgPace: distance > 0.1 ? time / distance : 0,
-      gyms: gyms.length,
       time,
-      totalMinutes: Math.round(time / 60) + gymMinutes,
+      totalMinutes: Math.round(time / 60),
     };
-  }, [runs, workouts]);
+  }, [runs]);
 
   const recent = useMemo(() => {
     const runItems = runs.slice(0, 6).map((r) => ({
@@ -77,46 +71,26 @@ export default function Home() {
       value: formatDuration(r.duration_sec),
       unit: 'time',
     }));
-    const liftItems = workouts.slice(0, 6).map((w) => ({
-      id: `lift-${w.id}`,
-      type: 'workout',
-      title: w.name,
-      date: w.performed_at || w.created_date,
-      meta: `${w.set_count || 0} sets${w.total_volume ? ` · ${Math.round(w.total_volume).toLocaleString('en-US')} lb` : ''}`,
-      value: w.duration_min || 0,
-      unit: 'min',
-    }));
-    return [...runItems, ...liftItems]
-      .sort((a, b) => new Date(b.date) - new Date(a.date))
-      .slice(0, 5);
-  }, [runs, workouts]);
+    return runItems.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+  }, [runs]);
 
   const session = useMemo(() => {
-    const route = routes.find((r) => r.gym_stop) || routes[0];
+    const route = routes[0];
     if (!route) return null;
-    const lastWorkout = workouts[0];
     const miles = Number(route.distance_mi || 0);
     return {
-      title: `${route.name} — run, lift, run home`,
-      total: `${(miles * 2).toFixed(1)} mi total`,
+      title: route.name,
+      total: `${miles.toFixed(1)} mi`,
       steps: [
         {
           icon: Footprints,
-          title: route.gym_stop ? `Run out to ${route.gym_stop}` : 'Run out',
+          title: 'Run the route',
           meta: `${miles.toFixed(1)} mi${route.target_zone_name ? ` · ${route.target_zone_name} zone` : ''}`,
         },
-        {
-          icon: Dumbbell,
-          title: lastWorkout ? `Repeat ${lastWorkout.name}` : 'Gym session',
-          meta: lastWorkout
-            ? `${lastWorkout.set_count || 0} sets · ${lastWorkout.duration_min || 0} min`
-            : 'Log your lifts when you get there',
-        },
-        { icon: Footprints, title: 'Run home', meta: `${miles.toFixed(1)} mi · recovery pace` },
       ],
-      cta: { label: 'Start leg 1', to: `/run?route=${route.id}` },
+      cta: { label: 'Start run', to: `/run?route=${route.id}` },
     };
-  }, [routes, workouts]);
+  }, [routes]);
 
   const routeCards = routes.slice(0, 4).map((r) => ({
     id: r.id,
@@ -161,8 +135,9 @@ export default function Home() {
         <div className="grid grid-cols-2 gap-4">
           <MiniStat icon={Footprints} label="Runs" value={stats.runs} unit="sessions" caption="Since Monday" accent />
           <MiniStat icon={Timer} label="Avg pace" value={formatPace(stats.avgPace)} unit="/mi" caption="This week" />
-          <MiniStat icon={Dumbbell} label="Gym sessions" value={stats.gyms} unit="lifts" caption="Since Monday" />
-          <MiniStat icon={TrendingUp} label="Moving time" value={`${stats.totalMinutes}`} unit="min" caption="Run + lift" />
+          <div className="col-span-2">
+            <MiniStat icon={TrendingUp} label="Moving time" value={`${stats.totalMinutes}`} unit="min" caption="This week" />
+          </div>
         </div>
       </div>
 
@@ -174,9 +149,9 @@ export default function Home() {
             <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
               <MapPin className="h-5 w-5" />
             </span>
-            <h2 className="font-heading text-lg font-bold">Plan the run-to-gym loop</h2>
+            <h2 className="font-heading text-lg font-bold">Plan your first route</h2>
             <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
-              Draw the route to your gym once, set the zone, and every session starts from it.
+              Draw a route once, set the zone, and every run starts from it.
             </p>
             <Link
               to="/routes/new"

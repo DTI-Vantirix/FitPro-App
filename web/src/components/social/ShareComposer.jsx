@@ -21,10 +21,8 @@ function thinPoints(points, max = 160) {
   return pts.filter((_, i) => i % step === 0);
 }
 
-export default function ShareComposer({ open, onOpenChange, profile, initialKind, initialId, onPosted }) {
+export default function ShareComposer({ open, onOpenChange, profile, initialId, onPosted }) {
   const [runs, setRuns] = useState([]);
-  const [workouts, setWorkouts] = useState([]);
-  const [kind, setKind] = useState(initialKind || 'run');
   const [sourceId, setSourceId] = useState(initialId || '');
   const [caption, setCaption] = useState('');
   const [visibility, setVisibility] = useState(
@@ -40,45 +38,30 @@ export default function ShareComposer({ open, onOpenChange, profile, initialKind
     if (!open) return;
     setCreated(null);
     setHint('');
-    setKind(initialKind || 'run');
     setSourceId(initialId || '');
-    Promise.all([
-      api.entities.Run.list({ sort: '-created_date', limit: 8 }),
-      api.entities.Workout.list({ sort: '-created_date', limit: 8 }),
-    ])
-      .then(([runPage, workoutPage]) => {
-        setRuns(runPage.items || []);
-        setWorkouts(workoutPage.items || []);
-      })
+    api.entities.Run.list({ sort: '-created_date', limit: 8 })
+      .then((runPage) => setRuns(runPage.items || []))
       .catch(() => {});
-  }, [open, initialKind, initialId]);
+  }, [open, initialId]);
 
-  const sources = kind === 'run' ? runs : workouts;
-  const selected = sources.find((s) => s.id === sourceId) || null;
-  const cardPoints = useMemo(
-    () => (kind === 'run' ? thinPoints(selected?.points) : []),
-    [kind, selected]
-  );
+  const selected = runs.find((s) => s.id === sourceId) || null;
+  const cardPoints = useMemo(() => thinPoints(selected?.points), [selected]);
 
   const card = useMemo(() => {
     if (!selected) return null;
-    const isRun = kind === 'run';
     return {
-      kind,
-      date: moment(selected.started_at || selected.performed_at || selected.created_date)
+      kind: 'run',
+      date: moment(selected.started_at || selected.created_date)
         .format('DD MMM YYYY')
         .toUpperCase(),
       distance_mi: selected.distance_mi || 0,
       avg_pace_sec: selected.avg_pace_sec || 0,
-      duration_sec: selected.duration_sec || (selected.duration_min || 0) * 60,
-      duration_min: selected.duration_min || Math.round((selected.duration_sec || 0) / 60),
-      volume_lb: selected.total_volume || 0,
-      set_count: selected.set_count || 0,
-      zone_name: isRun ? selected.target_zone_name || '' : '',
-      title: isRun ? selected.route_name || 'Free run' : selected.name || 'Gym session',
+      duration_sec: selected.duration_sec || 0,
+      zone_name: selected.target_zone_name || '',
+      title: selected.route_name || 'Free run',
       handle: profile?.handle || '',
     };
-  }, [selected, kind, profile]);
+  }, [selected, profile]);
 
   const uploadBackground = async (file, type) => {
     if (!file) return;
@@ -90,20 +73,17 @@ export default function ShareComposer({ open, onOpenChange, profile, initialKind
   const save = async () => {
     if (!selected) return;
     setPosting(true);
-    const isRun = kind === 'run';
     const payload = {
-      kind,
+      kind: 'run',
       ref_id: selected.id,
-      title: isRun ? selected.route_name || 'Free run' : selected.name || 'Gym session',
+      title: selected.route_name || 'Free run',
       caption: caption.trim(),
       distance_mi: selected.distance_mi || 0,
-      duration_sec: selected.duration_sec || (selected.duration_min || 0) * 60,
+      duration_sec: selected.duration_sec || 0,
       avg_pace_sec: selected.avg_pace_sec || 0,
-      zone_name: isRun ? selected.target_zone_name || '' : '',
+      zone_name: selected.target_zone_name || '',
       in_zone_pct: selected.in_zone_pct || 0,
-      volume_lb: selected.total_volume || 0,
-      set_count: selected.set_count || 0,
-      route_points: isRun ? thinPoints(selected.points) : [],
+      route_points: thinPoints(selected.points),
       background_type: bg.type,
       background_url: bg.url,
       visibility,
@@ -150,37 +130,13 @@ export default function ShareComposer({ open, onOpenChange, profile, initialKind
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="flex gap-2">
-            {[
-              { id: 'run', label: 'Run' },
-              { id: 'workout', label: 'Workout' },
-            ].map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => {
-                  setKind(t.id);
-                  setSourceId('');
-                }}
-                className={cn(
-                  'rounded-full border px-3.5 py-1.5 font-heading text-xs font-medium transition-colors',
-                  kind === t.id
-                    ? 'border-primary/60 bg-primary/10 text-primary'
-                    : 'border-border text-muted-foreground'
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
           <div className="no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1">
-            {sources.length === 0 && (
+            {runs.length === 0 && (
               <p className="px-1 py-2 text-xs text-muted-foreground">
-                Nothing logged yet — record a {kind} first.
+                Nothing logged yet — record a run first.
               </p>
             )}
-            {sources.map((s) => (
+            {runs.map((s) => (
               <button
                 key={s.id}
                 type="button"
@@ -193,12 +149,10 @@ export default function ShareComposer({ open, onOpenChange, profile, initialKind
                 )}
               >
                 <span className="block max-w-[150px] truncate font-heading text-xs font-semibold">
-                  {s.route_name || s.name || 'Session'}
+                  {s.route_name || 'Free run'}
                 </span>
                 <span className="num mt-0.5 block text-[10px] uppercase tracking-[0.1em]">
-                  {s.distance_mi
-                    ? `${Number(s.distance_mi).toFixed(2)} mi`
-                    : `${s.set_count || 0} sets`}
+                  {Number(s.distance_mi || 0).toFixed(2)} mi
                 </span>
               </button>
             ))}
@@ -315,7 +269,7 @@ export default function ShareComposer({ open, onOpenChange, profile, initialKind
               disabled={!selected || posting}
               className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
             >
-              <Upload className="h-4 w-4" /> {posting ? 'Posting…' : 'Post to FitPro'}
+              <Upload className="h-4 w-4" /> {posting ? 'Posting…' : 'Post to VantraRun'}
             </button>
           ) : (
             <div className="space-y-2.5 rounded-xl border border-primary/30 bg-primary/5 p-3.5">

@@ -1,3 +1,4 @@
+import { claimInvite, normalizeCode } from '../functions/inviteAccess.js';
 import { HttpError, clientIp, rateLimiter } from '../lib/http.js';
 import { sendMail } from '../lib/mail.js';
 import { burnPasswordCheck, hashPassword, longToken, sixDigitCode, verifyPassword } from './crypto.js';
@@ -15,6 +16,9 @@ const VERIFY_TTL_MIN = 15;
 const RESET_TTL_MIN = 60;
 
 const loginLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
+// The address a request claims to come from can be forged behind some proxies, so wrong
+// passwords are also counted per account, whatever address they arrive from.
+const loginEmailLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 25 });
 const codeLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
 // Per email address: stops one inbox being flooded. Per IP: stops mass sign-ups,
 // but loose enough for many people on one network (a gym's Wi-Fi).
@@ -42,8 +46,8 @@ async function sendVerifyCode(ctx, user) {
   await storeCode(ctx.db, user.id, 'verify_email', code, VERIFY_TTL_MIN);
   await sendMail(ctx.config, {
     to: user.email,
-    subject: 'Your FitPro verification code',
-    text: `Your FitPro code is ${code}. It expires in ${VERIFY_TTL_MIN} minutes.\n\nIf you didn't sign up, ignore this email.`,
+    subject: 'Your VantraRun verification code',
+    text: `Your VantraRun code is ${code}. It expires in ${VERIFY_TTL_MIN} minutes.\n\nIf you didn't sign up, ignore this email.`,
   });
   return ctx.config.exposeDevCodes ? { dev_code: code } : {};
 }
@@ -58,6 +62,14 @@ export function registerAuthRoutes(router) {
     const password = readNewPassword(ctx.body.password);
     const fullName = ctx.body.full_name ? String(ctx.body.full_name).trim().slice(0, 120) : null;
     signupLimit(`signup:${clientIp(ctx.req)}`);
+
+    // VantraRun is invite-only: no account without a code from the owner. The code
+    // is only held here; it is claimed when the email is verified.
+    const inviteCode = normalizeCode(ctx.body.invite_code);
+    if (!inviteCode) throw new HttpError(400, 'Enter your invite code.');
+    const [invite] = await ctx.db.query('select status from invite_codes where code = $1', [inviteCode]);
+    if (!invite) throw new HttpError(400, 'That code is not recognised.');
+    if (invite.status !== 'available') throw new HttpError(400, 'That code has already been used.');
     mailLimit(`mail:${email}`);
 
     const existing = await findByEmail(ctx.db, email);
@@ -69,14 +81,16 @@ export function registerAuthRoutes(router) {
     if (existing) {
       // Unfinished sign-up: let them start over with a new password and code.
       [user] = await ctx.db.query(
-        `update users set password_hash = $2, full_name = coalesce($3, full_name), updated_date = now()
+        `update users set password_hash = $2, full_name = coalesce($3, full_name),
+                pending_invite_code = $4, updated_date = now()
           where id = $1 returning *`,
-        [existing.id, hash, fullName]
+        [existing.id, hash, fullName, inviteCode]
       );
     } else {
       [user] = await ctx.db.query(
-        `insert into users (email, password_hash, full_name) values ($1, $2, $3) returning *`,
-        [email, hash, fullName]
+        `insert into users (email, password_hash, full_name, pending_invite_code)
+         values ($1, $2, $3, $4) returning *`,
+        [email, hash, fullName, inviteCode]
       );
     }
     return { ok: true, ...(await sendVerifyCode(ctx, user)) };
@@ -88,11 +102,20 @@ export function registerAuthRoutes(router) {
     const user = await findByEmail(ctx.db, email);
     const ok = user && (await consumeCodeForUser(ctx.db, user.id, 'verify_email', ctx.body.otp_code));
     if (!ok) throw new HttpError(400, 'That code is wrong or has expired.');
-    const [verified] = await ctx.db.query(
-      `update users set email_verified_at = coalesce(email_verified_at, now()), updated_date = now()
-        where id = $1 returning *`,
-      [user.id]
-    );
+    const verified = await ctx.db.tx(async (tx) => {
+      // The code they registered with is claimed here, together with the
+      // verification, so the account never ends up verified without access.
+      if (user.pending_invite_code && !(await claimInvite(tx, user, user.pending_invite_code))) {
+        throw new HttpError(409, 'That invite code was just used by someone else. Ask for a new one.');
+      }
+      const [row] = await tx.query(
+        `update users set email_verified_at = coalesce(email_verified_at, now()),
+                pending_invite_code = null, updated_date = now()
+          where id = $1 returning *`,
+        [user.id]
+      );
+      return row;
+    });
     return signedIn(ctx, verified);
   });
 
@@ -107,6 +130,7 @@ export function registerAuthRoutes(router) {
   router.add('POST', '/api/auth/login', async (ctx) => {
     const email = readEmail(ctx.body.email);
     loginLimit(`login:${clientIp(ctx.req)}:${email}`);
+    loginEmailLimit(`login-email:${email}`);
     const user = await findByEmail(ctx.db, email);
     const ok = user?.password_hash
       ? await verifyPassword(String(ctx.body.password || ''), user.password_hash)
@@ -192,7 +216,7 @@ export function registerAuthRoutes(router) {
     const link = `${ctx.config.appUrl}/reset-password?token=${encodeURIComponent(token)}`;
     await sendMail(ctx.config, {
       to: user.email,
-      subject: 'Reset your FitPro password',
+      subject: 'Reset your VantraRun password',
       text: `Reset your password here (valid for ${RESET_TTL_MIN} minutes):\n${link}\n\nIf you didn't ask for this, ignore this email.`,
     });
     return { ok: true, ...(ctx.config.exposeDevCodes ? { dev_token: token } : {}) };
@@ -202,9 +226,15 @@ export function registerAuthRoutes(router) {
     const next = readNewPassword(ctx.body.newPassword ?? ctx.body.new_password);
     const userId = await consumeLinkToken(ctx.db, 'reset_password', ctx.body.resetToken ?? ctx.body.reset_token);
     if (!userId) throw new HttpError(400, 'This reset link is invalid or has expired. Request a new one.');
+    // Opening the reset link proves the email, so it verifies the account, except
+    // for a sign-up that hasn't claimed its invite code yet: that one still has
+    // to go through verify-otp, which is where the code is claimed.
     await ctx.db.query(
       `update users set password_hash = $2, token_version = token_version + 1,
-              email_verified_at = coalesce(email_verified_at, now()), updated_date = now()
+              email_verified_at = case when pending_invite_code is null
+                                       then coalesce(email_verified_at, now())
+                                       else email_verified_at end,
+              updated_date = now()
         where id = $1 returning id`,
       [userId, await hashPassword(next)]
     );
@@ -213,7 +243,7 @@ export function registerAuthRoutes(router) {
 
   // What the sign-in screens can offer. Social sign-in and MFA come later.
   router.add('GET', '/api/auth/options', async () => ({
-    name: 'FitPro',
+    name: 'VantraRun',
     auth_config: { mfa_policy: 'off', providers: [] },
   }));
 }

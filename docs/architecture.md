@@ -50,9 +50,17 @@ little to learn or upgrade.
   entity JSON (rules, required fields, defaults, enums) and the column types from
   the live database. `query.js` turns the app's Mongo-style filters (`$in`, `$gte`,
   `$or`, ...) into SQL. `service.js` applies the access rules.
-- `src/functions/`: the six backend functions, ported from
-  `docs/reference/base44-functions/`. Behaviour is the same; they now use SQL
+- `src/functions/`: the six backend functions ported from
+  `docs/reference/base44-functions/`, plus `routeDirections` (turn-by-turn
+  directions for a saved route, from the same Valhalla router). Behaviour is the same; they now use SQL
   directly, and the invite claim and the health-data upsert are atomic.
+  `adminClientErrors` lists the error reports below.
+- `src/storage.js`: where uploads live. Local disk, or an S3-compatible bucket when the
+  `S3_*` settings are present (requests signed here, no SDK).
+- `src/errors.js`: error reports kept in our own table (`client_errors`): crashes the
+  phone app posts to `POST /api/client-errors`, and the API's own unexpected errors.
+- `src/auth/bootstrap.js`: creates the first admin from `ADMIN_EMAIL` / `ADMIN_PASSWORD`
+  on a host with no shell. It never changes an existing account.
 - `migrations/`: numbered SQL files, applied in order by `npm run migrate` (and on
   API start unless `MIGRATE_ON_START=false`).
 

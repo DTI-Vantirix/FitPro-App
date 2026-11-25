@@ -72,10 +72,10 @@ export default function Friends() {
 
   const shareInvite = async (app) => {
     if (!link) return;
-    const text = 'Run with me on FitPro';
+    const text = 'Run with me on VantraRun';
     if (!app && navigator.share) {
       try {
-        await navigator.share({ title: 'FitPro', text, url: link });
+        await navigator.share({ title: 'VantraRun', text, url: link });
         return;
       } catch {
         return;
@@ -106,7 +106,7 @@ export default function Friends() {
         <p className="eyebrow">Your circle</p>
         <h1 className="mt-1 font-heading text-3xl font-extrabold leading-none">Friends</h1>
         <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-          Find athletes by handle inside FitPro. Facebook and Instagram don’t hand over a friend list, so the
+          Find athletes by handle inside VantraRun. Facebook and Instagram don’t hand over a friend list, so the
           invite link is how you bring people over from there.
         </p>
       </div>

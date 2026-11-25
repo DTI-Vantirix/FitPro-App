@@ -1,0 +1,96 @@
+{
+  "expo": {
+    "name": "VantraRun",
+    "slug": "fitpro-native-spike",
+    "scheme": "vantrarun",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.vantrarun.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": [
+          "location",
+          "audio",
+          "bluetooth-central"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.vantrarun.app",
+      "permissions": [
+        "android.permission.health.READ_EXERCISE",
+        "android.permission.health.READ_DISTANCE",
+        "android.permission.health.READ_HEART_RATE",
+        "android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "VantraRun reads running workouts, heart rate and available GPS routes from Apple Health only when you choose to import a run. It never writes to Apple Health.",
+          "NSHealthUpdateUsageDescription": false,
+          "background": true
+        }
+      ],
+      "expo-status-bar",
+      "react-native-health-connect",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 37,
+            "targetSdkVersion": 36,
+            "minSdkVersion": 26
+          }
+        }
+      ],
+      "expo-background-task",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "VantraRun uses your location during a run to measure distance and pace and to follow your route, including while the screen is locked. Location is only used while a run is in progress.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": true,
+          "motionUsagePermission": false
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": [
+            "central"
+          ],
+          "neverForLocation": true,
+          "bluetoothAlwaysPermission": "VantraRun connects to your heart-rate strap or watch to show live heart rate during a run."
+        }
+      ],
+      "expo-notifications"
+    ],
+    "extra": {
+      "scope": "VantraRun run coach (GPS, zones, cues, directions) plus read-only Apple Health and Health Connect manual import.",
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "5b34a9e7-647f-4ced-b119-77df818276ef"
+      }
+    },
+    "owner": "antovel.j"
+  }
+}

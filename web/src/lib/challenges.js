@@ -1,10 +1,12 @@
 export const METRICS = {
   distance: { label: 'Miles run', unit: 'mi', goalHint: '100' },
   runs: { label: 'Runs logged', unit: 'runs', goalHint: '20' },
-  workouts: { label: 'Gym sessions', unit: 'sessions', goalHint: '16' },
 };
 
-export const METRIC_ORDER = ['distance', 'runs', 'workouts'];
+export const METRIC_ORDER = ['distance', 'runs'];
+
+// Gym is hidden for now: challenges on these metrics stay stored but are not listed.
+export const HIDDEN_METRICS = ['workouts'];
 
 export function currentMonthKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;

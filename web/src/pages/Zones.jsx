@@ -117,8 +117,8 @@ export default function Zones() {
           </h2>
           <p className="mt-1.5 max-w-md text-sm leading-relaxed text-muted-foreground">
             {profile
-              ? 'Your profile is set. FitPro turns it into five pace zones, each with its heart-rate band and talk test.'
-              : 'Add your age, height and weight and FitPro estimates your max heart rate, VO2max and threshold pace — then builds the five zones around it.'}
+              ? 'Your profile is set. VantraRun turns it into five pace zones, each with its heart-rate band and talk test.'
+              : 'Add your age, height and weight and VantraRun estimates your max heart rate, VO2max and threshold pace — then builds the five zones around it.'}
           </p>
           {profile ? (
             <button
@@ -168,7 +168,7 @@ export default function Zones() {
       )}
 
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Pick a target zone before each run — FitPro tells you the moment you drift faster or slower than that band.
+        Pick a target zone before each run — VantraRun tells you the moment you drift faster or slower than that band.
         Change the zone per route any time from the route card.
       </p>
 

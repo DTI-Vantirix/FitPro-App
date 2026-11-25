@@ -13,7 +13,6 @@ const pinIcon = (label, tone) =>
   });
 
 const START_ICON = pinIcon('START', 'start');
-const GYM_ICON = pinIcon('GYM', 'gym');
 const FINISH_ICON = pinIcon('FINISH', 'finish');
 
 function Fit({ points, fitKey }) {
@@ -52,7 +51,6 @@ function ClickCatcher({ onAddPoint }) {
 export default function MapView({
   points = [],
   path = [],
-  gymPoint = null,
   startPoint = null,
   finishPoint = null,
   trail = [],
@@ -128,7 +126,6 @@ export default function MapView({
           })}
 
         {startPin && <Marker position={[startPin.lat, startPin.lng]} icon={START_ICON} interactive={false} />}
-        {gymPoint && <Marker position={[gymPoint.lat, gymPoint.lng]} icon={GYM_ICON} interactive={false} />}
         {finishPin && <Marker position={[finishPin.lat, finishPin.lng]} icon={FINISH_ICON} interactive={false} />}
 
         {position && (

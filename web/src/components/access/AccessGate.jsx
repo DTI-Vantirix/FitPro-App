@@ -68,7 +68,7 @@ export default function AccessGate() {
         </span>
         <h1 className="mt-4 font-heading text-2xl font-extrabold leading-tight">Invite only</h1>
         <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-          FitPro is open to a small group of testers. Enter the single-use code you were given to unlock the app.
+          VantraRun is open to a small group of testers. Enter the single-use code you were given to unlock the app.
         </p>
 
         <label className="mt-5 block">
@@ -90,7 +90,7 @@ export default function AccessGate() {
           disabled={busy || code.trim().length < 6}
           className="mt-4 w-full rounded-full bg-primary py-3.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
         >
-          {busy ? 'Checking…' : 'Unlock FitPro'}
+          {busy ? 'Checking…' : 'Unlock VantraRun'}
         </button>
 
         <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">

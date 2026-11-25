@@ -1,0 +1,49 @@
+# Render blueprint: the whole hosted side of VantraRun.
+#   Render dashboard -> New -> Blueprint -> pick this repository.
+# It creates one web service (the API, which also serves the website) and one
+# Postgres database, both in Virginia. Step-by-step: docs/launch-checklist.md.
+#
+# Plans are the smallest paid ones (free services sleep and the free database
+# expires). Listed prices on 2026-11-25: web $7, database $6, disk $0.25 per GB,
+# so about $13 a month. Check https://render.com/pricing before confirming.
+
+databases:
+  - name: vantrarun-db
+    databaseName: vantrarun
+    user: vantrarun
+    plan: 0.1c-256mb
+    region: virginia
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: vantrarun
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    region: virginia
+    plan: 0.5c-512mb
+    healthCheckPath: /api/health
+    # Deploy a new commit only after the GitHub checks pass on it.
+    autoDeployTrigger: checksPass
+    disk:
+      name: vantrarun-uploads
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vantrarun-db
+          property: connectionString
+      # Signs every sign-in. Generated once by Render and never shown in the repository.
+      - key: JWT_SECRET
+        generateValue: true
+      # Asked for when the blueprint is created (see the checklist). The site's own
+      # address (for links in emails) comes from Render automatically.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false

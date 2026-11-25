@@ -76,7 +76,7 @@ export default function HeartRateCard({ heart, hrMax = 0, zones = [] }) {
 
       {!supported && (
         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-          This browser cannot reach Bluetooth monitors. Open FitPro in Chrome on Android or on a desktop to pair a
+          This browser cannot reach Bluetooth monitors. Open VantraRun in Chrome on Android or on a desktop to pair a
           strap. On an iPhone, Bluetooth pairing needs a native app build.
         </p>
       )}

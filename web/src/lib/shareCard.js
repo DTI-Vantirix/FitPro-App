@@ -114,7 +114,7 @@ export function drawCard(ctx, { card, points, media }) {
   ctx.textAlign = 'left';
   ctx.fillStyle = '#C9F84A';
   ctx.font = `800 30px ${HEAD}`;
-  ctx.fillText('FITPRO', 72, 108);
+  ctx.fillText('VANTRARUN', 72, 108);
   ctx.textAlign = 'right';
   ctx.fillStyle = 'rgba(240,240,232,0.6)';
   ctx.font = `500 24px ${MONO}`;
@@ -123,16 +123,13 @@ export function drawCard(ctx, { card, points, media }) {
   drawRoute(ctx, points, { x: 120, y: 200, w: 840, h: 500 });
 
   // Headline stat
-  const isRun = card.kind === 'run';
   ctx.textAlign = 'left';
   ctx.fillStyle = 'rgba(240,240,232,0.5)';
   ctx.font = `600 24px ${MONO}`;
-  ctx.fillText(isRun ? 'DISTANCE' : 'VOLUME', 72, 830);
+  ctx.fillText('DISTANCE', 72, 830);
 
-  const big = isRun
-    ? Number(card.distance_mi || 0).toFixed(2)
-    : Math.round(Number(card.volume_lb || 0)).toLocaleString();
-  const unit = isRun ? 'MI' : 'LB';
+  const big = Number(card.distance_mi || 0).toFixed(2);
+  const unit = 'MI';
 
   ctx.fillStyle = '#F5F5EE';
   ctx.font = `900 200px ${HEAD}`;
@@ -143,15 +140,9 @@ export function drawCard(ctx, { card, points, media }) {
   ctx.fillText(unit, 68 + width + 20, 998);
 
   // Three columns
-  if (isRun) {
-    column(ctx, 72, 'PACE', `${formatPace(card.avg_pace_sec)}`);
-    column(ctx, 402, 'TIME', formatDuration(card.duration_sec || 0));
-    column(ctx, 732, 'ZONE', card.zone_name || '—');
-  } else {
-    column(ctx, 72, 'SETS', `${card.set_count || 0}`);
-    column(ctx, 402, 'TIME', `${card.duration_min || 0} min`);
-    column(ctx, 732, 'TYPE', 'GYM');
-  }
+  column(ctx, 72, 'PACE', `${formatPace(card.avg_pace_sec)}`);
+  column(ctx, 402, 'TIME', formatDuration(card.duration_sec || 0));
+  column(ctx, 732, 'ZONE', card.zone_name || '—');
 
   // Footer
   ctx.fillStyle = 'rgba(255,255,255,0.12)';
@@ -188,7 +179,7 @@ export function loadBackground(type, url) {
   });
 }
 
-export function canvasToFile(canvas, name = 'fitpro-post.png') {
+export function canvasToFile(canvas, name = 'vantrarun-post.png') {
   return new Promise((resolve) => {
     canvas.toBlob((blob) => {
       if (!blob) return resolve(null);
@@ -197,7 +188,7 @@ export function canvasToFile(canvas, name = 'fitpro-post.png') {
   });
 }
 
-export async function saveCanvas(canvas, name = 'fitpro-post.png') {
+export async function saveCanvas(canvas, name = 'vantrarun-post.png') {
   const file = await canvasToFile(canvas, name);
   if (!file) return false;
   const href = URL.createObjectURL(file);

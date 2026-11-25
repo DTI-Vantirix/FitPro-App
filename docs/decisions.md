@@ -34,27 +34,74 @@ another user's record when an admin synced).
 **Invite codes:** generated with a cryptographic RNG (was `Math.random`), claimed
 atomically, and redemption is rate limited (10 tries per 15 minutes per user).
 
+**2026-11-25 — Sign-up requires an invite code.** The owner hands out the codes
+(Settings → invite codes, admin only). `register` refuses to create an account
+without a valid unused code; the code is claimed when the email is verified, so an
+abandoned sign-up doesn't use it up. Accounts that already existed keep working and
+can still redeem a code after signing in. Release is invite-only testing: TestFlight
+internal (testers added to the owner's team) and Play internal testing.
+
+**2026-11-25 — Gym hidden for now.** The owner wants the first release to be a
+run coach, with gym logging built back up later. The website no longer shows the
+gym log, gym stops on routes and runs, workout posts or the `workouts` challenge
+metric. Nothing was deleted: the `workouts` table, the `workout` ingest kind, old
+data and the gym source files (`web/src/pages/Workouts.jsx`,
+`web/src/components/workout/`, `web/src/lib/exercises.js`) are all still there.
+
+**2026-11-25 — Checks rerun on every change.** `npm run check` runs the API
+tests, the web lint and the Playwright browser flows (`e2e/`, admin and runner);
+`npm run check:watch` reruns them whenever a source file changes; the GitHub
+workflow `.github/workflows/checks.yml` reruns them on every push and pull request.
+
+**2026-11-25 — Hosting: Render, Virginia, one container.** The API serves the built
+website from the same process (`Dockerfile`), described with its Postgres database
+in `render.yaml`. Smallest paid plans (about $13 a month at the listed prices that day).
+Chosen over Fly.io for less upkeep: deploys from GitHub after the checks pass, HTTPS
+and the database are managed. The environment starts empty; nothing is copied from a
+development database. Steps for the owner: `docs/launch-checklist.md`.
+
+**2026-11-25 — Uploads: disk by default, any S3-compatible bucket by configuration.**
+`server/src/storage.js` signs requests itself (AWS Signature V4, checked against AWS's
+published examples), so the server still has one dependency. The bucket stays private;
+files are read back through the API.
+
+**2026-11-25 — Error monitoring in our own database.** The phone app posts crashes to
+`POST /api/client-errors`; the API records its own unexpected errors; admins read
+them in Settings. A report is a message, a stack trace, the platform and the app
+version. No monitoring SDK, so the no-analytics rule holds.
+
+**2026-11-25 — The app is VantraRun, `com.vantrarun.app`.** Name and id given by the
+owner. The Expo slug and project id are unchanged (internal). The website and its
+emails were renamed to VantraRun the same day at the owner's request; code names, the
+database, storage keys and the `fitpro` run source are unchanged. Build numbers are
+managed by EAS.
+
+**2026-11-25 — Privacy policy: comprehensive, no fixed retention.** Owner's decision:
+data is held until the person deletes it or their account. The page lists the
+companies involved (Render, Resend, the routing and map providers), so it must be
+updated if any of those change. The consent version was raised to `2026-11-25`, so
+anyone who had accepted the earlier text is asked again.
+
 ## Not built yet (deliberately deferred)
 
 | Feature | State now | Notes |
 | --- | --- | --- |
 | Google sign-in | Button shows "isn't set up yet" | Needs a Google OAuth client. Apple sign-in becomes **required** by App Review if Google is offered in the iOS app. |
 | Two-step sign-in (MFA) | `/api/auth/mfa/*` answers 501; screens kept | TOTP is straightforward to add on this server. |
-| Account deletion button | API done (`DELETE /api/auth/me`), no button yet | **Required by both app stores.** Add to Settings → Your data. |
+| Account deletion button | Web: done (Settings → Your data, asks for the password). Native: not yet | **Required by both app stores.** |
 | File storage | Local disk (`server/uploads`) | Move to S3/R2 before deploying more than one server. |
 | Rate limits | In memory, per process | Fine for one server; Redis if scaled out. |
-| Social share backgrounds | Still load from `media.base44.com` (`web/src/lib/social.js`) | Download and self-host the three images. |
 | MCP / OAuth consent page | Removed (Base44 platform feature, wasn't routed) | |
 
 ## Open questions (from the handoff, still open)
 
-1. MVP release: invite-only TestFlight / Play internal testing, or public beta?
+1. ~~MVP release: invite-only TestFlight / Play internal testing, or public beta?~~
+   Decided 2026-11-25: invite-only internal testing with 10 testers.
 2. iOS first, Android first, or both? Is Google Health Connect in the first release?
 3. Is real activity upload now approved? (The API is ready; the shell still runs
    on the fake adapter.) Deletion/"unsync" of synced activities?
-4. Should the **server** also require an accepted invite for `ingestActivity`?
-   Today only the app enforces the invite gate; enforcing it server-side is a
-   one-line check and fails closed.
+4. ~~Should the **server** also require an accepted invite for `ingestActivity`?~~
+   Decided 2026-11-25: yes. `ingestActivity` answers 403 without an accepted code.
 5. Background sync: in scope? Needs its own design and permission model.
 6. Health-data retention, export, and the privacy policy wording.
 7. Hosting: which provider and region.

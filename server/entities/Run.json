@@ -102,6 +102,22 @@
       "type": "number",
       "description": "Peak heart rate from a paired monitor"
     },
+    "min_hr": {
+      "type": "number",
+      "description": "Lowest heart rate during the run"
+    },
+    "hr_target_min": {
+      "type": "number",
+      "description": "Lower bound of the target heart-rate zone, in bpm"
+    },
+    "hr_target_max": {
+      "type": "number",
+      "description": "Upper bound of the target heart-rate zone, in bpm"
+    },
+    "hr_in_zone_pct": {
+      "type": "number",
+      "description": "Percent of the run spent inside the target heart-rate zone"
+    },
     "hr_device": {
       "type": "string",
       "description": "Name of the paired heart-rate monitor"
@@ -124,7 +140,7 @@
     },
     "source": {
       "type": "string",
-      "description": "Where this run came from: live, garmin, apple, health_connect, gpx_import, manual"
+      "description": "Where this run came from: fitpro (recorded by the app), live (recorded on the website), garmin, apple, health_connect, gpx_import, manual"
     },
     "external_id": {
       "type": "string",

@@ -3,7 +3,7 @@ import { HttpError } from '../lib/http.js';
 // Snaps tapped waypoints to walkable roads with a Valhalla router. Falls back to
 // straight lines when the router is slow or down, so route building never breaks.
 
-function decodePolyline(encoded, precision = 6) {
+export function decodePolyline(encoded, precision = 6) {
   const factor = 10 ** precision;
   const coords = [];
   let index = 0;
@@ -30,6 +30,13 @@ function decodePolyline(encoded, precision = 6) {
     coords.push([lat / factor, lng / factor]);
   }
   return coords;
+}
+
+// The request to a Valhalla router. A hosted provider's key rides along as api_key.
+export function routerRequestUrl(config, payload) {
+  const joiner = config.routerUrl.includes('?') ? '&' : '?';
+  const key = config.routerApiKey ? `&api_key=${encodeURIComponent(config.routerApiKey)}` : '';
+  return `${config.routerUrl}${joiner}json=${encodeURIComponent(JSON.stringify(payload))}${key}`;
 }
 
 export function haversineMiles(a, b) {
@@ -61,12 +68,12 @@ export default async function snapRoute({ body, config }) {
   if (!config.routerUrl || config.routerUrl === 'off') return straightPath(points);
 
   const payload = { locations: points, costing: 'pedestrian', units: 'miles', directions_type: 'none' };
-  const url = `${config.routerUrl}?json=${encodeURIComponent(JSON.stringify(payload))}`;
+  const url = routerRequestUrl(config, payload);
 
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(9000),
-      headers: { 'User-Agent': 'FitPro route builder' },
+      headers: { 'User-Agent': 'VantraRun route builder' },
     });
     if (!res.ok) throw new Error(`router responded ${res.status}`);
     const data = await res.json();

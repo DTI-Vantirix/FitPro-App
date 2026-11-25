@@ -7,6 +7,9 @@ import ShareComposer from '@/components/social/ShareComposer';
 import { loadMyProfile } from '@/lib/social';
 import { cn } from '@/lib/utils';
 
+// Gym is hidden for now: older workout posts stay stored but are not shown.
+const visiblePosts = (posts) => (posts || []).filter((post) => post.kind !== 'workout');
+
 export default function Feed() {
   const [params] = useSearchParams();
   const [me, setMe] = useState(null);
@@ -27,7 +30,7 @@ export default function Feed() {
         const p = await loadMyProfile(user);
         if (alive) setProfile(p);
         const res = await api.functions.invoke('socialFeed', {});
-        if (alive) setPosts(res.data?.posts || []);
+        if (alive) setPosts(visiblePosts(res.data?.posts));
       })
       .catch(() => {
         if (alive) setPosts([]);
@@ -40,8 +43,8 @@ export default function Feed() {
   useEffect(() => {
     const kind = params.get('compose');
     const id = params.get('id');
-    if (kind === 'run' || kind === 'workout') {
-      setInitial({ kind, id: id || '' });
+    if (kind === 'run') {
+      setInitial({ id: id || '' });
       setComposer(true);
     }
   }, [params]);
@@ -49,7 +52,7 @@ export default function Feed() {
   useEffect(() => {
     if (tab !== 'discover' || discover) return;
     api.entities.Post.filter({ visibility: 'public' }, { sort: '-created_date', limit: 30 })
-      .then((page) => setDiscover(page.items || []))
+      .then((page) => setDiscover(visiblePosts(page.items)))
       .catch(() => setDiscover([]));
   }, [tab, discover]);
 
@@ -110,7 +113,7 @@ export default function Feed() {
           </p>
           <p className="mx-auto mt-1.5 max-w-sm text-xs leading-relaxed text-muted-foreground">
             {tab === 'feed'
-              ? 'Post a run or workout, then add friends so you can see each other’s sessions.'
+              ? 'Post a run, then add friends so you can see each other’s sessions.'
               : 'When athletes share a run publicly, it shows up here.'}
           </p>
           <button
@@ -150,12 +153,11 @@ export default function Feed() {
         open={composer}
         onOpenChange={setComposer}
         profile={profile}
-        initialKind={initial.kind}
         initialId={initial.id}
         onPosted={() => {
           api.functions
             .invoke('socialFeed', {})
-            .then((res) => setPosts(res.data?.posts || []))
+            .then((res) => setPosts(visiblePosts(res.data?.posts)))
             .catch(() => {});
           setDiscover(null);
         }}

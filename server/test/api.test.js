@@ -9,6 +9,7 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
+import { bootstrapAdmin } from '../src/auth/bootstrap.js';
 import { loadRegistry } from '../src/entities/registry.js';
 import { migrate } from '../src/migrate.js';
 import { createPsqlDb } from './psql-db.js';
@@ -49,8 +50,30 @@ async function call(method, url, { body, token, headers = {}, raw } = {}) {
   return { status: res.status, data };
 }
 
+// Sign-up needs an invite code, so tests mint one straight into the database.
+let codeSeq = 0;
+async function mintCode() {
+  codeSeq += 1;
+  const code = `FP-TEST-${String(codeSeq).padStart(4, '0')}`;
+  await db.query(`insert into invite_codes (code, status, note) values ($1, 'available', 'test') returning id`, [code]);
+  return code;
+}
+
 async function signUp(email, password = 'correct-horse-1') {
-  const reg = await call('POST', '/api/auth/register', { body: { email, password, full_name: email.split('@')[0] } });
+  return signUpWith(email, await mintCode(), password);
+}
+
+// An account from before sign-up needed a code: verified, but no accepted invite.
+async function legacyUser(email) {
+  const account = await signUp(email);
+  await db.query('delete from access_grants where user_id = $1 returning id', [account.user.id]);
+  return account;
+}
+
+async function signUpWith(email, inviteCode, password = 'correct-horse-1') {
+  const reg = await call('POST', '/api/auth/register', {
+    body: { email, password, full_name: email.split('@')[0], invite_code: inviteCode },
+  });
   assert.equal(reg.status, 200, JSON.stringify(reg.data));
   const ver = await call('POST', '/api/auth/verify-otp', { body: { email, otp_code: reg.data.dev_code } });
   assert.equal(ver.status, 200, JSON.stringify(ver.data));
@@ -70,8 +93,8 @@ before(async () => {
 });
 
 after(async () => {
-  await new Promise((r) => server.close(r));
-  await db.close();
+  if (server) await new Promise((r) => server.close(r));
+  await db?.close();
 });
 
 let alice;
@@ -90,7 +113,7 @@ describe('auth', () => {
   });
 
   test('wrong code and wrong password are rejected', async () => {
-    const reg = await call('POST', '/api/auth/register', { body: { email: 'carol@example.com', password: 'longenough' } });
+    const reg = await call('POST', '/api/auth/register', { body: { email: 'carol@example.com', password: 'longenough', invite_code: await mintCode() } });
     const bad = await call('POST', '/api/auth/verify-otp', { body: { email: 'carol@example.com', otp_code: '000000' === reg.data.dev_code ? '111111' : '000000' } });
     assert.equal(bad.status, 400);
     const unverified = await call('POST', '/api/auth/login', { body: { email: 'carol@example.com', password: 'longenough' } });
@@ -104,7 +127,7 @@ describe('auth', () => {
   });
 
   test('duplicate verified email is refused', async () => {
-    const dup = await call('POST', '/api/auth/register', { body: { email: 'alice@example.com', password: 'whatever123' } });
+    const dup = await call('POST', '/api/auth/register', { body: { email: 'alice@example.com', password: 'whatever123', invite_code: await mintCode() } });
     assert.equal(dup.status, 409);
   });
 
@@ -311,6 +334,9 @@ describe('entities and access rules', () => {
 
 describe('invite access', () => {
   let codes;
+  let nina;
+  let omar;
+  let before;
 
   test('non-admins cannot mint codes', async () => {
     const res = await call('POST', '/api/functions/adminInviteCodes', { token: alice.token, body: { action: 'generate' } });
@@ -318,23 +344,26 @@ describe('invite access', () => {
   });
 
   test('admin generates, user redeems, code is single use', async () => {
+    nina = await legacyUser('nina@example.com');
+    omar = await legacyUser('omar@example.com');
+    before = (await call('POST', '/api/functions/adminInviteCodes', { token: admin.token, body: { action: 'list' } })).data;
     const gen = await call('POST', '/api/functions/adminInviteCodes', { token: admin.token, body: { action: 'generate', count: 3, note: 'batch 1' } });
     assert.equal(gen.status, 200);
     codes = gen.data.created;
     assert.equal(codes.length, 3);
     assert.match(codes[0].code, /^FP-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
 
-    assert.deepEqual((await call('POST', '/api/functions/inviteAccess', { token: alice.token, body: { action: 'status' } })).data, { allowed: false });
-    const wrong = await call('POST', '/api/functions/inviteAccess', { token: alice.token, body: { action: 'redeem', code: 'FP-NOPE-NOPE' } });
+    assert.deepEqual((await call('POST', '/api/functions/inviteAccess', { token: nina.token, body: { action: 'status' } })).data, { allowed: false });
+    const wrong = await call('POST', '/api/functions/inviteAccess', { token: nina.token, body: { action: 'redeem', code: 'FP-NOPE-NOPE' } });
     assert.equal(wrong.data.allowed, false);
     const redeem = await call('POST', '/api/functions/inviteAccess', {
-      token: alice.token,
+      token: nina.token,
       body: { action: 'redeem', code: ` ${codes[0].code.toLowerCase()} ` },
     });
     assert.deepEqual(redeem.data, { allowed: true });
-    assert.equal((await call('POST', '/api/functions/inviteAccess', { token: alice.token, body: {} })).data.allowed, true);
+    assert.equal((await call('POST', '/api/functions/inviteAccess', { token: nina.token, body: {} })).data.allowed, true);
 
-    const reuse = await call('POST', '/api/functions/inviteAccess', { token: bob.token, body: { action: 'redeem', code: codes[0].code } });
+    const reuse = await call('POST', '/api/functions/inviteAccess', { token: omar.token, body: { action: 'redeem', code: codes[0].code } });
     assert.equal(reuse.data.allowed, false);
     assert.match(reuse.data.error, /already been used/);
 
@@ -347,10 +376,84 @@ describe('invite access', () => {
     const ok = await call('POST', '/api/functions/adminInviteCodes', { token: admin.token, body: { action: 'revoke', id: codes[1].id } });
     assert.equal(ok.data.code.status, 'revoked');
     const list = await call('POST', '/api/functions/adminInviteCodes', { token: admin.token, body: { action: 'list' } });
-    assert.deepEqual(list.data.stats, { available: 1, used: 1, revoked: 1 });
-    assert.equal(list.data.grants.length, 1);
-    const grant = await call('POST', '/api/entities/AccessGrant/query', { token: alice.token, body: {} });
+    assert.deepEqual(
+      [list.data.stats.available - before.stats.available, list.data.stats.used - before.stats.used, list.data.stats.revoked - before.stats.revoked],
+      [1, 1, 1]
+    );
+    assert.equal(list.data.grants.length - before.grants.length, 1);
+    const grant = await call('POST', '/api/entities/AccessGrant/query', { token: nina.token, body: {} });
     assert.equal(grant.data.items.length, 1, 'a user can read their own grant');
+  });
+});
+
+describe('sign-up needs a code', () => {
+  test('no code, unknown code and used code are refused', async () => {
+    const body = { email: 'erin2@example.com', password: 'longenough1' };
+    assert.equal((await call('POST', '/api/auth/register', { body })).data.error, 'Enter your invite code.');
+    assert.equal(
+      (await call('POST', '/api/auth/register', { body: { ...body, invite_code: 'FP-NOPE-NOPE' } })).data.error,
+      'That code is not recognised.'
+    );
+    const used = await mintCode();
+    await signUpWith('frank@example.com', used);
+    const res = await call('POST', '/api/auth/register', { body: { ...body, invite_code: used } });
+    assert.equal(res.status, 400);
+    assert.equal(res.data.error, 'That code has already been used.');
+  });
+
+  test('a valid code, typed loosely, opens the app after verifying', async () => {
+    const code = await mintCode();
+    const gina = await signUpWith('gina@example.com', `  ${code.toLowerCase()} `);
+    const status = await call('POST', '/api/functions/inviteAccess', { token: gina.token, body: { action: 'status' } });
+    assert.deepEqual(status.data, { allowed: true });
+    const [row] = await db.query('select status, used_by_email from invite_codes where code = $1', [code]);
+    assert.deepEqual({ ...row }, { status: 'used', used_by_email: 'gina@example.com' });
+  });
+
+  test('registering without verifying leaves the code available', async () => {
+    const code = await mintCode();
+    await call('POST', '/api/auth/register', { body: { email: 'hal@example.com', password: 'longenough1', invite_code: code } });
+    const [row] = await db.query('select status from invite_codes where code = $1', [code]);
+    assert.equal(row.status, 'available');
+  });
+
+  test('two sign-ups holding one code: the first to verify wins', async () => {
+    const code = await mintCode();
+    const a = await call('POST', '/api/auth/register', { body: { email: 'ivy@example.com', password: 'longenough1', invite_code: code } });
+    const b = await call('POST', '/api/auth/register', { body: { email: 'jo@example.com', password: 'longenough1', invite_code: code } });
+    assert.equal((await call('POST', '/api/auth/verify-otp', { body: { email: 'ivy@example.com', otp_code: a.data.dev_code } })).status, 200);
+    const late = await call('POST', '/api/auth/verify-otp', { body: { email: 'jo@example.com', otp_code: b.data.dev_code } });
+    assert.equal(late.status, 409);
+    const login = await call('POST', '/api/auth/login', { body: { email: 'jo@example.com', password: 'longenough1' } });
+    assert.equal(login.status, 403);
+    assert.equal(login.data.needs_verification, true);
+  });
+
+  test('a password reset does not verify an account that still owes its code', async () => {
+    const code = await mintCode();
+    const email = 'pat@example.com';
+    await call('POST', '/api/auth/register', { body: { email, password: 'longenough1', invite_code: code } });
+    const ask = await call('POST', '/api/auth/reset-password-request', { body: { email } });
+    const reset = await call('POST', '/api/auth/reset-password', { body: { reset_token: ask.data.dev_token, new_password: 'another-pass-1' } });
+    assert.equal(reset.status, 200, JSON.stringify(reset.data));
+
+    const login = await call('POST', '/api/auth/login', { body: { email, password: 'another-pass-1' } });
+    assert.equal(login.status, 403, 'still has to verify, which is where the code is claimed');
+    assert.equal(login.data.needs_verification, true);
+    const [row] = await db.query('select status from invite_codes where code = $1', [code]);
+    assert.equal(row.status, 'available');
+
+    const ver = await call('POST', '/api/auth/verify-otp', { body: { email, otp_code: login.data.dev_code } });
+    assert.equal(ver.status, 200);
+    const [after] = await db.query('select status, used_by_email from invite_codes where code = $1', [code]);
+    assert.deepEqual({ ...after }, { status: 'used', used_by_email: email });
+  });
+
+  test('an older account with no code can still sign in and redeem one', async () => {
+    const kim = await legacyUser('kim@example.com');
+    assert.equal((await call('POST', '/api/auth/login', { body: { email: 'kim@example.com', password: 'correct-horse-1' } })).status, 200);
+    const res = await call('POST', '/api/functions/inviteAccess', { token: kim.token, body: { action: 'redeem', code: await mintCode() } });
+    assert.deepEqual(res.data, { allowed: true });
   });
 });
 
@@ -425,6 +528,145 @@ describe('ingestActivity (native contract)', () => {
     const unauth = await call('POST', '/api/functions/ingestActivity', { body: run });
     assert.deepEqual(unauth, { status: 401, data: { error: 'Unauthorized' } });
   });
+
+  test('no accepted invite code -> 403, nothing stored', async () => {
+    const lee = await legacyUser('lee@example.com');
+    const res = await call('POST', '/api/functions/ingestActivity', { token: lee.token, body: run });
+    assert.deepEqual(res, { status: 403, data: { error: 'Redeem your invite code before syncing activities.' } });
+    const mine = await call('POST', '/api/entities/Run/query', { token: lee.token, body: {} });
+    assert.equal(mine.data.items.length, 0);
+  });
+
+  test('admins upload without a code', async () => {
+    await db.query('delete from access_grants where user_id = $1 returning id', [admin.user.id]);
+    const res = await call('POST', '/api/functions/ingestActivity', { token: admin.token, body: { ...run, external_id: 'HK-ADMIN-1' } });
+    assert.equal(res.status, 200, JSON.stringify(res.data));
+  });
+});
+
+describe('runs recorded by FitPro', () => {
+  const liveRun = {
+    kind: 'run', source: 'fitpro', external_id: 'fp-run-0001',
+    distance_mi: 3.1, duration_sec: 1600, started_at: '2026-11-20T12:00:00Z',
+    target_zone_name: 'Zone 2', target_fast_sec: 495, target_slow_sec: 540,
+    in_zone_pct: 71.6, min_hr: 98.4, avg_hr: 141, max_hr: 163,
+    hr_target_min: 125, hr_target_max: 145, hr_in_zone_pct: 64,
+  };
+  const ingest = (who, body) => call('POST', '/api/functions/ingestActivity', { token: who.token, body });
+  const stored = async (who, id) => (await call('GET', `/api/entities/Run/${id}`, { token: who.token })).data;
+
+  test('a FitPro run stores its zone and heart-rate stats', async () => {
+    const route = await call('POST', '/api/entities/Route', { token: alice.token, body: { name: 'River loop' } });
+    const res = await ingest(alice, { ...liveRun, route_id: route.data.id });
+    assert.equal(res.data.action, 'created', JSON.stringify(res.data));
+    const run = await stored(alice, res.data.run_id);
+    assert.equal(run.route_id, route.data.id);
+    assert.equal(run.route_name, 'Free run');
+    assert.deepEqual(
+      [run.target_zone_name, run.target_fast_sec, run.target_slow_sec, run.in_zone_pct],
+      ['Zone 2', 495, 540, 72]
+    );
+    assert.deepEqual(
+      [run.min_hr, run.max_hr, run.hr_target_min, run.hr_target_max, run.hr_in_zone_pct],
+      [98, 163, 125, 145, 64]
+    );
+  });
+
+  test('a retried FitPro upload updates the same run', async () => {
+    const again = await ingest(alice, liveRun);
+    assert.equal(again.data.action, 'updated');
+  });
+
+  test('bad optional values are dropped, never rejected', async () => {
+    const bobRoute = await call('POST', '/api/entities/Route', { token: bob.token, body: { name: 'Not yours' } });
+    const res = await ingest(alice, {
+      ...liveRun, external_id: 'fp-run-0002', started_at: '2026-11-21T12:00:00Z',
+      route_id: bobRoute.data.id, target_fast_sec: 600, target_slow_sec: 500,
+      in_zone_pct: 140, min_hr: 5, hr_target_max: 999,
+    });
+    assert.equal(res.status, 200, JSON.stringify(res.data));
+    const run = await stored(alice, res.data.run_id);
+    for (const f of ['route_id', 'target_fast_sec', 'target_slow_sec', 'in_zone_pct', 'min_hr', 'hr_target_max']) {
+      assert.equal(run[f] ?? null, null, f);
+    }
+    assert.equal(run.hr_target_min, 125);
+  });
+
+  test('a route deleted before the upload arrives does not block it', async () => {
+    const res = await ingest(alice, {
+      ...liveRun, external_id: 'fp-run-0003', started_at: '2026-11-22T12:00:00Z',
+      route_id: '00000000-0000-4000-8000-000000000000',
+    });
+    assert.equal(res.data.action, 'created', JSON.stringify(res.data));
+    const junk = await ingest(alice, { ...liveRun, external_id: 'fp-run-0004', started_at: '2026-11-24T12:00:00Z', route_id: 'not-a-uuid' });
+    assert.equal(junk.data.action, 'created', JSON.stringify(junk.data));
+  });
+
+  test("the watch's copy of a FitPro run is skipped", async () => {
+    const res = await ingest(alice, {
+      kind: 'run', source: 'apple', external_id: 'HK-DUP-1',
+      distance_mi: 3.0, duration_sec: 1500, started_at: '2026-11-20T12:01:00Z',
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.data.action, 'skipped');
+    assert.equal(res.data.reason, 'overlaps_fitpro_run');
+    assert.equal(res.data.source, 'apple');
+    const original = await ingest(alice, liveRun);
+    assert.equal(res.data.run_id, original.data.run_id);
+    const [count] = await db.query(`select count(*)::int as n from runs where external_id = 'HK-DUP-1'`, []);
+    assert.equal(count.n, 0);
+  });
+
+  test('a run that only brushes a FitPro run is imported', async () => {
+    const res = await ingest(alice, {
+      kind: 'run', source: 'apple', external_id: 'HK-LATER-1',
+      distance_mi: 2, duration_sec: 1200, started_at: '2026-11-20T12:25:00Z',
+    });
+    assert.equal(res.data.action, 'created');
+  });
+
+  test('a FitPro run that stopped early does not swallow the full run from the watch', async () => {
+    const stub = await ingest(alice, { ...liveRun, external_id: 'fp-run-stub', distance_mi: 0.2, duration_sec: 120, started_at: '2026-11-19T12:00:00Z' });
+    assert.equal(stub.data.action, 'created');
+    const full = await ingest(alice, {
+      kind: 'run', source: 'apple', external_id: 'HK-FULL-1',
+      distance_mi: 6.2, duration_sec: 3600, started_at: '2026-11-19T12:00:00Z',
+    });
+    assert.equal(full.data.action, 'created', 'two minutes of overlap is not the same run as an hour');
+  });
+
+  test("another person's FitPro run never causes a skip", async () => {
+    const res = await ingest(bob, {
+      kind: 'run', source: 'apple', external_id: 'HK-BOB-1',
+      distance_mi: 3, duration_sec: 1500, started_at: '2026-11-20T12:01:00Z',
+    });
+    assert.equal(res.data.action, 'created');
+  });
+
+  test('a run already imported keeps updating after a FitPro run overlaps it', async () => {
+    const imported = { kind: 'run', source: 'apple', external_id: 'HK-BOB-2', distance_mi: 3, duration_sec: 1500, started_at: '2026-11-23T12:00:00Z' };
+    assert.equal((await ingest(bob, imported)).data.action, 'created');
+    const live = await ingest(bob, { ...liveRun, external_id: 'fp-run-bob-1', started_at: '2026-11-23T12:00:30Z' });
+    assert.equal(live.data.action, 'created', 'a FitPro upload that arrives after the import still saves');
+    assert.equal((await ingest(bob, imported)).data.action, 'updated');
+  });
+});
+
+describe('route directions', () => {
+  test('router off -> not available; not your route -> 404', async () => {
+    const route = await call('POST', '/api/entities/Route', {
+      token: alice.token,
+      body: { name: 'Two points', points: [{ lat: 40.7, lng: -74.0 }, { lat: 40.71, lng: -74.0 }] },
+    });
+    const mine = await call('POST', '/api/functions/routeDirections', { token: alice.token, body: { route_id: route.data.id } });
+    assert.deepEqual(mine, { status: 200, data: { available: false, maneuvers: [] } });
+    const theirs = await call('POST', '/api/functions/routeDirections', { token: bob.token, body: { route_id: route.data.id } });
+    assert.deepEqual(theirs, { status: 404, data: { error: 'Route not found.' } });
+    const junk = await call('POST', '/api/functions/routeDirections', { token: alice.token, body: { route_id: 'nope' } });
+    assert.equal(junk.status, 404);
+    const none = await call('POST', '/api/functions/routeDirections', { token: alice.token, body: {} });
+    assert.equal(none.status, 404);
+  });
 });
 
 describe('social feed', () => {
@@ -467,6 +709,178 @@ describe('uploads', () => {
     const anon = await call('POST', '/api/uploads', { raw: 'x', headers: { 'Content-Type': 'image/png' } });
     assert.equal(anon.status, 401);
     assert.equal((await fetch(`${base}/uploads/..%2f..%2fetc%2fpasswd`)).status, 404);
+  });
+});
+
+describe('first admin on a new host', () => {
+  const login = (email, password) => call('POST', '/api/auth/login', { body: { email, password } });
+
+  test('nothing happens unless both settings are present and the password is long enough', async () => {
+    assert.equal(await bootstrapAdmin(db, {}), 'skipped');
+    const said = [];
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'owner@example.com' }, (line) => said.push(line)), 'skipped');
+    assert.deepEqual(said, [], 'the password setting removed after set-up is not worth a warning');
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'owner@example.com', ADMIN_PASSWORD: 'short-pw' }, (line) => said.push(line)), 'skipped');
+    assert.match(said[0], /at least 12 characters/);
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'owner@example.com', ADMIN_PASSWORD: 'short-pw' }), 'skipped');
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'not-an-email', ADMIN_PASSWORD: 'a-long-enough-password' }), 'skipped');
+    assert.equal((await db.query(`select id from users where email = 'owner@example.com'`, [])).length, 0);
+  });
+
+  test('creates a verified admin who can sign in and needs no invite code', async () => {
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: ' Owner@Example.com ', ADMIN_PASSWORD: 'a-long-enough-password' }), 'created');
+    const signedIn = await login('owner@example.com', 'a-long-enough-password');
+    assert.equal(signedIn.status, 200, JSON.stringify(signedIn.data));
+    assert.equal(signedIn.data.user.role, 'admin');
+    const access = await call('POST', '/api/functions/inviteAccess', { token: signedIn.data.access_token, body: { action: 'status' } });
+    assert.equal(access.data.allowed, true);
+  });
+
+  test('a second start changes nothing, even with a different password', async () => {
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'owner@example.com', ADMIN_PASSWORD: 'a-different-password' }), 'exists');
+    assert.equal((await login('owner@example.com', 'a-long-enough-password')).status, 200);
+    assert.equal((await login('owner@example.com', 'a-different-password')).status, 401);
+  });
+
+  test('an existing ordinary account with that email is never promoted or reset', async () => {
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'bob@example.com', ADMIN_PASSWORD: 'a-long-enough-password' }), 'exists');
+    const stillBob = await login('bob@example.com', 'correct-horse-1');
+    assert.equal(stillBob.status, 200);
+    assert.equal(stillBob.data.user.role, 'user');
+    assert.equal((await login('bob@example.com', 'a-long-enough-password')).status, 401);
+  });
+});
+
+describe('requests nobody should be able to hurt the server with', () => {
+  const raw = (path) => fetch(base + path);
+  const serverErrors = async () => (await db.query(`select count(*)::int as n from client_errors where platform = 'server'`, []))[0].n;
+
+  test('a path that is not a valid address is a 400, and the server keeps running', async () => {
+    const res = await raw('//');
+    assert.equal(res.status, 400);
+    assert.equal((await call('GET', '/api/health')).status, 200);
+  });
+
+  test('a badly encoded path is a 400 and is not recorded as a server error', async () => {
+    const before = await serverErrors();
+    for (const path of ['/uploads/%E0%A4%A', '/api/entities/Run/%E0%A4%A', '/api/functions/%E0%A4%A']) {
+      const res = await raw(path);
+      assert.equal(res.status, 400, path);
+    }
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(await serverErrors(), before);
+  });
+
+  test('sign-in guesses against one email are limited even from many addresses', async () => {
+    process.env.TRUST_PROXY = 'true';
+    try {
+      let last;
+      for (let i = 0; i < 40 && last !== 429; i++) {
+        last = (await call('POST', '/api/auth/login', {
+          body: { email: 'guess-target@example.com', password: `wrong-${i}` },
+          headers: { 'X-Forwarded-For': `203.0.113.${i}` },
+        })).status;
+      }
+      assert.equal(last, 429);
+    } finally {
+      delete process.env.TRUST_PROXY;
+    }
+  });
+
+  test('a download the reader abandons does not hold the file open', async () => {
+    const big = Buffer.alloc(8 * 1024 * 1024, 7);
+    big.set([0x89, 0x50, 0x4e, 0x47]);
+    const up = await call('POST', '/api/uploads', { token: bob.token, raw: big, headers: { 'Content-Type': 'image/png' } });
+    assert.equal(up.status, 201);
+    const name = up.data.file_url.split('/').pop();
+    for (let i = 0; i < 3; i++) {
+      const controller = new AbortController();
+      const res = await fetch(base + up.data.file_url, { signal: controller.signal });
+      await res.body.getReader().read();
+      controller.abort();
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    // On every platform a file that is still open cannot be renamed away and replaced cleanly;
+    // the portable check is that removing it works and a later request is a clean 404.
+    fs.rmSync(path.join(uploadDir, name));
+    assert.equal((await fetch(base + up.data.file_url)).status, 404);
+    assert.equal((await call('GET', '/api/health')).status, 200);
+  });
+});
+
+describe('error reports', () => {
+  const report = (token, body) => call('POST', '/api/client-errors', { token, body });
+  let owner;
+
+  test('only a signed-in person can send one', async () => {
+    assert.equal((await report(undefined, { message: 'boom' })).status, 401);
+    assert.equal((await report(bob.token, {})).status, 400);
+    assert.equal((await report(bob.token, { message: '   ' })).status, 400);
+  });
+
+  test('a report is stored against the sender, with long fields cut down', async () => {
+    const sent = await report(bob.token, {
+      message: 'm'.repeat(900), stack: 's'.repeat(9000), context: 'c'.repeat(900), platform: 'ios', app_version: '1.0.0 (12)',
+      user_id: alice.user.id, extra: { anything: true },
+    });
+    assert.equal(sent.status, 201, JSON.stringify(sent.data));
+    assert.deepEqual(sent.data, { ok: true });
+    const [row] = await db.query('select * from client_errors where user_id = $1', [bob.user.id]);
+    assert.deepEqual([row.message.length, row.stack.length, row.context.length, row.platform, row.app_version], [500, 4000, 200, 'ios', '1.0.0 (12)']);
+    // only the API itself may label a report as coming from the server
+    await report(bob.token, { message: 'pretending', platform: 'server' });
+    const [fake] = await db.query(`select platform from client_errors where message = 'pretending'`, []);
+    assert.equal(fake.platform, 'app');
+    await db.query(`delete from client_errors where message = 'pretending' returning id`, []);
+  });
+
+  test('admins read them newest first; nobody else can', async () => {
+    owner = (await call('POST', '/api/auth/login', { body: { email: 'owner@example.com', password: 'a-long-enough-password' } })).data;
+    await report(bob.token, { message: 'second report', platform: 'android' });
+    assert.equal((await call('POST', '/api/functions/adminClientErrors', { token: bob.token, body: { action: 'list' } })).status, 403);
+    const list = await call('POST', '/api/functions/adminClientErrors', { token: owner.access_token, body: { action: 'list' } });
+    assert.equal(list.status, 200);
+    assert.equal(list.data.errors[0].message, 'second report');
+    assert.equal(list.data.errors[0].user_email, 'bob@example.com');
+    assert.equal(list.data.errors.length, 2);
+    assert.equal(list.data.errors[0].password_hash, undefined);
+  });
+
+  test('an unexpected server error is recorded too, without the request body', async () => {
+    const before = (await db.query(`select count(*)::int as n from client_errors where platform = 'server'`, []))[0].n;
+    const crash = await call('POST', '/api/functions/adminClientErrors', { token: owner.access_token, body: { action: 'test-crash', secret: 'do-not-store-me' } });
+    assert.equal(crash.status, 500);
+    // the record is written just after the reply goes out
+    let rows = [];
+    for (let i = 0; i < 40 && rows.length <= before; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      rows = await db.query(`select * from client_errors where platform = 'server' order by created_date desc`, []);
+    }
+    assert.equal(rows.length, before + 1);
+    assert.equal(rows[0].context, 'POST /api/functions/adminClientErrors');
+    // the same failure again and again is recorded once, not once per request
+    for (let i = 0; i < 3; i++) await call('POST', '/api/functions/adminClientErrors', { token: owner.access_token, body: { action: 'test-crash' } });
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal((await db.query(`select id from client_errors where platform = 'server'`, [])).length, before + 1);
+    assert.ok(!JSON.stringify(rows[0]).includes('do-not-store-me'));
+  });
+
+  test('one person cannot flood the table', async () => {
+    let last;
+    for (let i = 0; i < 20; i++) last = await report(bob.token, { message: `flood ${i}` });
+    assert.equal(last.status, 429);
+    const [{ n }] = await db.query('select count(*)::int as n from client_errors where user_id = $1', [bob.user.id]);
+    assert.equal(n, 19, 'twenty accepted in the hour, one of which was removed above');
+  });
+
+  test('admins can clear the list; deleting an account deletes its reports', async () => {
+    const carol = await signUp('errors-carol@example.com');
+    await report(carol.token, { message: 'from carol' });
+    await call('DELETE', '/api/auth/me', { token: carol.token, body: { password: 'correct-horse-1' } });
+    assert.equal((await db.query('select id from client_errors where user_id = $1', [carol.user.id])).length, 0);
+    const cleared = await call('POST', '/api/functions/adminClientErrors', { token: owner.access_token, body: { action: 'clear' } });
+    assert.equal(cleared.status, 200);
+    assert.equal((await db.query('select id from client_errors', [])).length, 0);
   });
 });
 
