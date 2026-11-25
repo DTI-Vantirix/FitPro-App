@@ -9,6 +9,7 @@ import { activitySyncKey, ActivitySyncError, buildActivityPayload, submitHealthA
 import { appendImportReceipt, loadImportHistory, type ImportOutcome, type ImportReceipt } from './import-history';
 import { loadAutoSyncState, markActivitySynced, setAutoSyncEnabled, type AutoSyncState } from './auto-sync-state';
 import { eligibleAutoActivities } from './auto-sync-selection';
+import { AUTO_HEALTH_IMPORT_ENABLED } from './auto-import-policy';
 
 type AdapterId = 'fake' | 'apple' | 'health_connect';
 type Props = Readonly<{
@@ -111,7 +112,7 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
       const previous = appState.current;
       appState.current = next;
       if (next !== 'active') controller.current?.abort();
-      if (previous !== 'active' && next === 'active' && focused && active && autoPrefs?.enabled) {
+      if (AUTO_HEALTH_IMPORT_ENABLED && previous !== 'active' && next === 'active' && focused && active && autoPrefs?.enabled) {
         onForegroundResume?.();
       }
     });
@@ -119,7 +120,7 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
   }, [focused, active, autoPrefs?.enabled, onForegroundResume]);
 
   async function toggleAuto() {
-    if (!active || !historyReady || autoSaving || storageError) return;
+    if (!AUTO_HEALTH_IMPORT_ENABLED || !active || !historyReady || autoSaving || storageError) return;
     const enabled = !autoPrefs?.enabled;
     if (!enabled) controller.current?.abort();
     setAutoSaving(true);
@@ -139,7 +140,7 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
   // One pass for each newly completed adapter read; never poll, run in background,
   // or queue stale activities. Manual and auto paths share the same in-flight guard.
   useEffect(() => {
-    if (!active || !focused || !historyReady || !autoPrefs?.enabled || storageError || busyGuard.current) return;
+    if (!AUTO_HEALTH_IMPORT_ENABLED || !active || !focused || !historyReady || !autoPrefs?.enabled || storageError || busyGuard.current) return;
     if (checkedRead.current === activities) return;
     checkedRead.current = activities;
     if (adapterId === 'health_connect' && readWarnings.some((w) => w.includes('distance matched by exact workout interval from a different app'))) {
@@ -233,7 +234,9 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
             outcome = response.action;
             text = response.action === 'created'
               ? 'Imported successfully (created in FitPro).'
-              : 'Imported successfully (updated existing FitPro record).';
+              : response.action === 'skipped'
+                ? 'Already in FitPro: this is the same run FitPro recorded, so nothing was added.'
+                : 'Imported successfully (updated existing FitPro record).';
           } catch (cause: unknown) {
             if (running.signal.aborted) break;
             outcome = 'failed';
@@ -273,6 +276,8 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
     </View>;
   }
   return <View style={styles.panel}>
+    {!AUTO_HEALTH_IMPORT_ENABLED && <Text style={styles.description}>Automatic import is switched off, so a run recorded in FitPro and on your watch is not saved twice. Import a run by hand below.</Text>}
+    {AUTO_HEALTH_IMPORT_ENABLED && <>
     <Text style={styles.kicker}>STEP 07A · FOREGROUND AUTO SYNC (OPT-IN)</Text>
     <Text style={styles.title}>Automatically import new workouts</Text>
     <Text style={styles.description}>Off by default. Once enabled, newly completed workouts can be uploaded after an authorized Activities read or when you return to this screen. An upload may include distance, duration, heart rate, and GPS route if provided. Nothing runs while FitPro is closed.</Text>
@@ -282,6 +287,7 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
       onPress={() => { void toggleAuto(); }} />}
     {autoPrefs !== null && <Text style={styles.small}>Setting: {autoPrefs.enabled ? 'ON' : 'OFF'} · Existing workouts remain manual · Maximum 5 new imports per read</Text>}
     {!!autoStatus && <Text accessibilityLiveRegion="polite" selectable style={styles.result}>{autoStatus}</Text>}
+    </>}
     <Text style={styles.kicker}>STEP 06 · MANUAL IMPORT (ALWAYS AVAILABLE)</Text>
     <Text style={styles.title}>Import selected activities</Text>
     <Text style={styles.description}>Manual imports always remain available. The existing ingestActivity endpoint receives selected records; fake records are never eligible.</Text>
@@ -320,7 +326,7 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
           {record.httpStatus !== undefined ? ` · HTTP ${record.httpStatus}` : ''}
           {'\n'}ID: {record.activityKey.slice(0, 84)}
         </Text>)}
-      <Text style={styles.footnote}>Automatic import is optional, foreground-only and requires prior read permission. Local receipts/settings clear on sign-out or consent withdrawal. Existing FitPro records are not deleted. No background sync or automatic retry.</Text>
+      <Text style={styles.footnote}>Local receipts clear on sign-out or consent withdrawal. Existing FitPro records are not deleted. Nothing is imported automatically.</Text>
     </>}
   </View>;
 }

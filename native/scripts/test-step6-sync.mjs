@@ -66,6 +66,9 @@ assert.equal(captured.opts.headers.Authorization, 'Bearer user-session-token');
 assert.equal(JSON.parse(captured.opts.body).external_id, 'run-uuid-123');
 mock.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, kind: 'run', action: 'updated', run_id: 'run-server-id' }) });
 assert.equal((await sync.submitHealthActivity(run, 'user-session-token')).action, 'updated');
+// The server skips an imported copy of a run FitPro recorded itself: success, not an error.
+mock.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, kind: 'run', action: 'skipped', reason: 'overlaps_fitpro_run', run_id: 'fitpro-run-id', source: 'health_connect' }) });
+assert.deepEqual({ ...(await sync.submitHealthActivity(run, 'user-session-token')) }, { action: 'skipped', recordId: 'fitpro-run-id' });
 mock.fetch = async () => ({ ok: false, status: 400, text: async () => JSON.stringify({ error: 'distance_mi must be between 0 and 500' }) });
 await assert.rejects(sync.submitHealthActivity(run, 'user-session-token'), (err) => err.httpStatus === 400 && err.message.includes('distance_mi'));
 await assert.rejects(sync.submitHealthActivity({ ...run, source: 'manual' }, 'user-session-token'), /cannot be uploaded/);

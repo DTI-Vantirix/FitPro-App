@@ -1,7 +1,7 @@
 name: Checks
 
 # Every push reruns the API tests, the web lint and the browser flows (admin
-# and runner) against a fresh Postgres. A pull request shows the result of the
+# and runner) against a fresh Postgres, and the phone app's own checks. A pull request shows the result of the
 # push to its branch, so there is no separate pull_request trigger.
 on:
   push:
@@ -54,3 +54,32 @@ jobs:
           name: playwright-report
           path: e2e/.results/html
           retention-days: 14
+
+  # The Expo app keeps its own package.json (it is not an npm workspace). This job
+  # cannot run the app on a phone: it type-checks it, runs the boundary check and the
+  # unit tests, and makes sure the native config still resolves.
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: native
+    env:
+      EXPO_PUBLIC_API_URL: http://127.0.0.1:4000
+      EXPO_NO_TELEMETRY: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Boundary check
+        run: npm run check:boundaries
+      - name: Unit tests
+        run: npm test
+      - name: Native config resolves
+        run: npx expo config --type introspect --json > /dev/null

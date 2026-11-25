@@ -44,9 +44,11 @@ export default function ConsentScreen() {
   return <ScrollView style={styles.root} contentContainerStyle={styles.content}>
     <Text style={styles.brand}>FITPRO / NATIVE</Text>
     <SectionHeading kicker="STEP 02 · YOUR CHOICE" title="Your health data. Your choice."
-      subtitle="Review what future activity imports would involve before you choose to continue." />
+      subtitle="Review what FitPro records and sends before you choose to continue." />
     <View style={styles.panel}>
-      <Text style={styles.title}>What you would authorize</Text>
+      <Text style={styles.title}>Runs you record in FitPro</Text>
+      <Text style={styles.body}>When you start a run, FitPro uses your location to measure distance and pace, and your heart rate if you connect a sensor. The finished run (route, distance, time, splits, heart-rate summary) is saved to your FitPro account. Location is used only while a run is being recorded.</Text>
+      <Text style={styles.title}>Importing from your phone's health services</Text>
       <Text style={styles.body}>FitPro may import your workouts and runs from your phone's health services after you separately grant the operating system's health permissions in a future step.</Text>
       <Text style={styles.title}>What could be sent</Text>
       <Text style={styles.body}>Activity details may include workout names, exercises, sets, weights, run distance, duration, heart rate, route coordinates and other fields supported by the FitPro ingestion contract.</Text>

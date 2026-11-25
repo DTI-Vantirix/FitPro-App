@@ -11,6 +11,7 @@ import { useAccessGate } from '../src/access/access-gate';
 import { Action, ErrorNotice, SectionHeading } from '../src/components/Ui';
 import { getHealthAdapter, isAppleHealthBuildAvailable, isAndroidHealthBuildAvailable,
   type NormalizedActivity, type NormalizedRun, type NormalizedWorkout } from '../src/health';
+import { AUTO_HEALTH_IMPORT_ENABLED } from '../src/ingestion/auto-import-policy';
 import { colors } from '../src/theme';
 
 function when(iso: string): string {
@@ -166,7 +167,7 @@ export default function ActivitiesScreen() {
         : <Action label="Retry invite verification" onPress={() => { void refresh(); }} />}
     </> : <>
       <SectionHeading kicker="STEP 05 · HEALTH ADAPTER" title="Your activities."
-        subtitle="Choose sample records or read running workouts from your phone. Health data stays on the device unless you explicitly enable foreground auto-import or select a manual import." />
+        subtitle="Choose sample records or read running workouts from your phone. Health data stays on the device unless you select a run to import." />
       <Action label="Sample activities (offline)" onPress={() => chooseProvider('fake')} disabled={fake || permissionBusy} secondary />
       {Platform.OS === 'ios' && <Action label="Apple Health (read-only)" onPress={() => chooseProvider('apple')} disabled={provider === 'apple' || permissionBusy} secondary />}
       {Platform.OS === 'android' && <Action label="Health Connect (read-only)" onPress={() => chooseProvider('health_connect')} disabled={provider === 'health_connect' || permissionBusy} secondary />}
@@ -177,7 +178,7 @@ export default function ActivitiesScreen() {
         <Text style={styles.bannerBody}>{fake ? 'OS health permissions: NOT REQUESTED' : realPermissionRequestComplete
           ? provider === 'apple' ? 'Health permission request completed (Apple does not disclose which read types were granted).' : 'Health Connect: required read permissions verified.'
           : 'OS health permission: NOT REQUESTED in this screen'}</Text>
-        <Text style={styles.bannerBody}>Activity uploads: MANUAL / OPTIONAL FOREGROUND AUTO (FAKE DISABLED)</Text>
+        <Text style={styles.bannerBody}>Activity uploads: MANUAL ONLY (FAKE DISABLED)</Text>
         <Text accessibilityLiveRegion="polite" style={styles.bannerStatus}>
           {loading ? 'Reading activities…' : lastSuccessfulRead
             ? `Last successful read: #${lastSuccessfulRead.number} · ${lastSuccessfulRead.count} activities`
@@ -205,10 +206,12 @@ export default function ActivitiesScreen() {
         {items.map((item) => <ActivityCard key={`${item.source}:${item.externalId}`} item={item} fake={fake} />)}
       </>}
       <ManualImportPanel activities={items} adapterId={adapter.id} authorized={authorized && hasRead && !loading && !loadError} readWarnings={warnings} onForegroundResume={() => setReadCount((value) => value + 1)} />
+      {AUTO_HEALTH_IMPORT_ENABLED && <>
       <BackgroundReadinessPanel provider={adapter.id} signedIn={Boolean(accessToken)} consentAccepted={consentAccepted} inviteVerified={accessStatus === 'allowed'} />
       <BackgroundSchedulerDiagnosticPanel provider={adapter.id} signedIn={Boolean(accessToken)} consentAccepted={consentAccepted} inviteVerified={accessStatus === 'allowed'} />
       <BackgroundHealthReadDiagnosticPanel provider={adapter.id} signedIn={Boolean(accessToken)} consentAccepted={consentAccepted} inviteVerified={accessStatus === 'allowed'} />
       <BackgroundSyncPilotPanel provider={adapter.id} signedIn={Boolean(accessToken)} consentAccepted={consentAccepted} inviteVerified={accessStatus === 'allowed'} />
+      </>}
       <View style={styles.reloadFeedback} accessibilityLiveRegion="polite">
         {loading ? <Text style={styles.readingStatus}>Reload in progress…</Text>
           : loadError ? <Text style={styles.readingError}>Read failed. Error details are shown above.</Text>
@@ -221,7 +224,7 @@ export default function ActivitiesScreen() {
       <Action label={loading ? 'Reloading activities…' : `Reload ${fake ? 'fake' : provider === 'apple' ? 'Apple Health' : 'Health Connect'} activities`}
         onPress={() => setReadCount((value) => value + 1)} busy={loading} disabled={!canRead || permissionBusy} secondary />
     </>}
-    <Action label="Back to ingestion test" onPress={() => router.replace('/spike')} secondary />
+    <Action label="Back to home" onPress={() => router.replace('/home')} secondary />
   </ScrollView>;
 }
 

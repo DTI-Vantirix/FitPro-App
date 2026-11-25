@@ -6,7 +6,7 @@
 
 **Architecture:** All run behaviour is a pure TypeScript engine under `native/src/run/` (no React, no Expo imports) that turns location fixes, heart-rate samples and clock ticks into state and cue events. A thin controller (`native/src/run/device/`) feeds it from `expo-location`, Bluetooth and a timer, and plays its cues through speech, haptics and local notifications. Screens only read the controller's state. Finished runs are files on the device; an upload queue sends them through `ingestActivity` and never deletes one the server has not accepted.
 
-**Tech Stack:** Expo SDK 58, Expo Router, `expo-location` + `expo-task-manager` (background GPS), `react-native-maps`, `expo-speech`, `expo-haptics`, `expo-notifications`, `react-native-ble-plx` (heart-rate straps, Garmin broadcast), `expo-file-system` (run files), `expo-crypto` (run id), `expo-keep-awake`. Tests are plain `node scripts/test-*.mjs` files that transpile the module under test with `typescript` and run it in `node:vm`, as the existing ones do.
+**Tech Stack:** Expo SDK 58, Expo Router, `expo-location` + `expo-task-manager` (background GPS), `react-native-maps`, `expo-speech`, `expo-notifications`, `react-native-ble-plx` (heart-rate straps, Garmin broadcast), `expo-file-system` (run files), `expo-crypto` (run id), `expo-keep-awake`. Tests are plain `node scripts/test-*.mjs` files that transpile the module under test with `typescript` and run it in node (shared loader: `scripts/run-test-kit.mjs`).
 
 **Spec:** `docs/superpowers/specs/2026-11-25-native-run-coach-design.md` sections 9.1–9.3 and 13. Server contract: `docs/native-contract.md`.
 
@@ -30,7 +30,7 @@
 | GPS fix accepted when | horizontal accuracy ≤ 35 m, and implied speed from the previous accepted fix ≤ 12 m/s |
 | Distance added when | the accepted fix is ≥ 3 m from the previous accepted fix (jitter guard) |
 | Live pace | distance over the last 30 s of unpaused fixes; unknown until the window holds ≥ 10 s and ≥ 15 m |
-| Live heart rate | median of samples from the last 10 s; unknown ("no sensor") when the newest sample is older than 15 s |
+| Live heart rate | median of samples from the last 10 s; unknown ("no sensor") when there are none |
 | Cue when status changes | only after the new status has held 10 s |
 | Reminder | once, after 120 s continuously out of range; none after that until it has been back in |
 | Start grace | no pace or heart-rate cue in the first 60 s of the run |
@@ -107,7 +107,7 @@ export function rollingPaceSec(points: Fix[], nowMs: number): number | null;
 ```ts
 export type Metric = 'pace' | 'hr';
 export type Cue = { metric: Metric | 'route' | 'turn'; kind: 'left' | 'returned' | 'reminder' | 'info'; text: string; at: number };
-export type MetricCueState = { announced: 'in' | 'out-high' | 'out-low'; candidate: string | null; candidateSince: number; outSince: number | null; reminded: boolean };
+export type MetricCueState = { announced: 'in' | 'high' | 'low'; candidate: 'in' | 'high' | 'low' | null; candidateSince: number; outMs: number; lastAt: number | null; reminded: boolean };
 export function initialMetricCueState(): MetricCueState;
 export function stepMetricCue(state: MetricCueState, metric: Metric, status: 'in' | 'high' | 'low' | 'unknown', nowMs: number, opts: { muted: boolean; graceUntil: number }): { state: MetricCueState; cue: Cue | null };
 ```
@@ -123,7 +123,7 @@ export function stepMetricCue(state: MetricCueState, metric: Metric, status: 'in
 **Produces:**
 ```ts
 export type Maneuver = { index: number; instruction: string; verbal: string; type: number; lat: number; lng: number; at_mi: number };
-export type NavState = { announced: number[]; offRoute: boolean; offSince: number | null };
+export type NavState = { announced: number[]; offRoute: boolean; offSince: number | null; along: number };
 export function initialNavState(): NavState;
 export function stepNav(nav: NavState, input: { path: LatLng[]; maneuvers: Maneuver[]; position: LatLng; nowMs: number }): { nav: NavState; next: { maneuver: Maneuver; metersAway: number } | null; cues: Cue[] };
 ```
@@ -134,7 +134,7 @@ The next maneuver is the first whose `at_mi` is ahead of the runner's along-rout
 
 ### Task 5: Run engine and summary (pure)
 
-**Files:** Create `native/src/run/engine.ts`, `native/src/run/payload.ts`, `native/scripts/test-run-engine.mjs`.
+**Files:** Create `native/src/run/engine.ts`, `native/src/run/payload.ts`, `native/src/run/format.ts`, `native/scripts/test-run-engine.mjs`.
 
 **Produces:**
 ```ts
@@ -150,9 +150,9 @@ export function resumeRun(state: RunState, nowMs: number): RunState;
 export function finishRun(state: RunState, nowMs: number): RunState;
 export function setMute(state: RunState, mute: { pace: boolean; hr: boolean }): RunState;
 // payload.ts
-export type RunSummary = { externalId: string; startedAt: string; mode: RunMode; routeName: string; distanceMi: number; durationSec: number; avgPaceSec: number | null; splits: { mile: number; pace_sec: number }[]; hr: { min: number; max: number; avg: number } | null; paceInZonePct: number | null; hrInZonePct: number | null; zone: { name: string; fast_sec: number; slow_sec: number; hrMin: number | null; hrMax: number | null }; points: LatLng[] };
+export type RunSummary = { externalId: string; startedAt: string; mode: RunMode; routeId: string | null; hrDevice: string | null; routeName: string; distanceMi: number; durationSec: number; avgPaceSec: number | null; splits: { mile: number; pace_sec: number }[]; hr: { min: number; max: number; avg: number } | null; paceInZonePct: number | null; hrInZonePct: number | null; zone: { name: string; fast_sec: number; slow_sec: number; hrMin: number | null; hrMax: number | null }; points: LatLng[] };
 export function summarize(state: RunState): RunSummary;
-export function buildRunPayload(summary: RunSummary, routeId: string | null, hrDevice: string | null): Record<string, unknown> | null; // null when distance or duration is not > 0
+export function buildRunPayload(summary: RunSummary): Record<string, unknown> | null; // null when the run is under 0.01 mi or has no duration
 ```
 `onClock` is safe to call from both the 1 s timer and each fix: it advances by `nowMs - lastClock` (capped at 5 s per call so a suspended timer cannot credit zone time it did not observe) and is a no-op when paused.
 
@@ -194,7 +194,7 @@ export function sendRun(token: string, payload: Record<string, unknown>): Promis
 
 ### Task 7: Bluetooth heart-rate parsing (pure) and device adapters
 
-**Files:** Create `native/src/run/hr-parse.ts`, `native/scripts/test-run-hr-parse.mjs`, `native/src/run/device/heart-rate.ts`, `native/src/run/device/location.ts`, `native/src/run/device/alerts.ts`, `native/src/run/device/run-files.ts`. Modify `native/app.json` (plugins and usage strings), `native/index.js` (define the location task before the router starts).
+**Files:** Create `native/src/run/hr-parse.ts`, `native/scripts/test-run-hr-parse.mjs`, `native/src/run/device/heart-rate.ts`, `native/src/run/device/location.ts`, `native/src/run/device/alerts.ts`, `native/src/run/device/run-files.ts`, `native/src/run/device/prefs.ts`. Modify `native/app.json` (plugins and usage strings), `native/index.js` (define the location task before the router starts).
 
 **Produces:**
 ```ts
@@ -211,14 +211,14 @@ export async function prepareAlerts(): Promise<void>; export function playCue(cu
 // device/run-files.ts
 export const runStore: RunStore; export function saveCheckpoint(state: RunState): void; export function loadCheckpoint(): RunState | null; export function clearCheckpoint(): void;
 ```
-`app.json`: `expo-location` plugin with `isIosBackgroundLocationEnabled`, `isAndroidBackgroundLocationEnabled`, `isAndroidForegroundServiceEnabled` and the three location strings; `react-native-ble-plx` with `isBackgroundEnabled: true`, `modes: ['central']`, `neverForLocation: true` and a Bluetooth string; `expo-notifications`; `ios.infoPlist.UIBackgroundModes` gains `audio` so spoken cues play with the screen locked. The Android health permission list in `app.json` is untouched (the boundary check pins it).
+`app.json`: `expo-location` plugin with `isIosBackgroundLocationEnabled`, `isAndroidBackgroundLocationEnabled`, `isAndroidForegroundServiceEnabled` and the three location strings; `react-native-ble-plx` with `isBackgroundEnabled: true`, `modes: ['central']`, `neverForLocation: true` and a Bluetooth string; `expo-notifications`; `ios.infoPlist.UIBackgroundModes` is `location`, `audio` (spoken cues with the screen locked) and `bluetooth-central`; vibration uses React Native's `Vibration`, so `expo-haptics` is not needed. The Android health permission list in `app.json` is untouched (the boundary check pins it).
 
 - [ ] Parser tests: `[0x00, 72]` → 72; `[0x01, 0x2C, 0x01]` → 300 → null (out of 30..240); `[0x01, 0xA0, 0x00]` → 160; empty → null.
 - [ ] Implement adapters; `npm run typecheck`; `npx expo config --type prebuild` succeeds and shows the background modes and permissions; commit.
 
 ### Task 8: Run controller
 
-**Files:** Create `native/src/run/controller.ts`, `native/src/run/use-run.ts`, `native/scripts/test-run-controller.mjs`.
+**Files:** Create `native/src/run/controller.ts`, `native/src/run/runtime.ts`, `native/src/run/use-run.tsx`, `native/scripts/test-run-controller.mjs`.
 
 **Produces:** `createRunController(deps)` where `deps` are the adapters from Task 7 behind interfaces, so the controller is tested in node with fakes: `begin(config, mute)`, `pause()`, `resume()`, `finish(): Promise<string /* externalId */>`, `discard()`, `setMute()`, `getState()`, `subscribe(listener)`, `recover()`. `use-run.ts` exposes it to React with `useSyncExternalStore`.
 
@@ -227,19 +227,19 @@ export const runStore: RunStore; export function saveCheckpoint(state: RunState)
 
 ### Task 9: Sign-up, first-time setup, home, settings, account deletion
 
-**Files:** Create `native/app/signup.tsx`, `native/app/setup.tsx`, `native/app/home.tsx`, `native/app/settings.tsx`, `native/src/run/profile-gate.ts` (pure: `needsSetup(profile, zones)`), test in `test-run-zones.mjs`. Modify `native/app/index.tsx` (link to sign-up; handle `needs_verification`), `native/app/invite.tsx` and `native/app/consent.tsx` (land on `/home`; consent copy covers runs recorded by the app), `native/app/_layout.tsx`, `native/src/auth/session.tsx` (owner id), `native/app/activities.tsx`, `native/src/ingestion/manual-import-panel.tsx` (automatic import off: `AUTO_HEALTH_IMPORT_ENABLED = false` hides the toggle and stops the auto effect; manual import untouched), `native/scripts/check-boundaries.mjs` (new screens exist; `auto import` constant is false; no run write through `/api/entities/Run`).
+**Files:** Create `native/app/signup.tsx`, `native/app/setup.tsx`, `native/app/home.tsx`, `native/app/settings.tsx`, `needsSetup(profile, zones)` in `native/src/run/zones.ts` (pure), test in `test-run-zones.mjs`; `native/src/run/ui/Screen.tsx` (`Gated`: sign-in, consent, invite, then setup). Modify `native/app/index.tsx` (link to sign-up; handle `needs_verification`), `native/app/invite.tsx` and `native/app/consent.tsx` (land on `/home`; consent copy covers runs recorded by the app), `native/app/_layout.tsx`, `native/src/auth/session.tsx` (owner id), `native/app/activities.tsx`, `native/src/ingestion/manual-import-panel.tsx` (automatic import off: `AUTO_HEALTH_IMPORT_ENABLED = false` hides the toggle and stops the auto effect; manual import untouched), `native/scripts/check-boundaries.mjs` (new screens exist; `auto import` constant is false; no run write through `/api/entities/Run`).
 
 - Sign-up: name, email, password (≥ 8), invite code → `register` → 6-digit code → `verifyEmailCode` → `saveSession` → consent. A 409 on verify offers "Use a different invite code".
 - Setup: max heart rate (100–230, with "estimate from age": `208 − 0.7 × age`), threshold pace `m:ss` → `saveProfile` then `applyZones`.
 - Home: Start a run; runs waiting to upload with a Retry button; recovered-run prompt; Import from health; Settings.
-- Settings: cue mutes default, sign out (warns when runs are waiting), delete account (password, typed confirmation "DELETE", then local runs for that owner are removed and the session cleared), developer tools (the existing ingestion test and diagnostics).
+- Settings: sign out (warns when runs are waiting), delete account (password, typed confirmation "DELETE", then local runs for that owner are removed and the session cleared), developer tools (the existing ingestion test and diagnostics).
 
 - [ ] `needsSetup` tests: no profile, no `hr_max`, fewer than one zone → true; complete → false.
 - [ ] Build screens; typecheck; boundaries; commit.
 
 ### Task 10: Start, live and summary screens
 
-**Files:** Create `native/app/run-start.tsx`, `native/app/run-live.tsx`, `native/app/run-summary.tsx`, `native/src/run/ui/RunMap.tsx`, `native/src/run/ui/format.ts` (+ tests in `test-run-engine.mjs`).
+**Files:** Create `native/app/run-start.tsx`, `native/app/run-live.tsx`, `native/app/run-summary.tsx`, `native/src/run/ui/RunMap.tsx` (display text is `native/src/run/format.ts`, tested in `test-run-engine.mjs`).
 
 - Start: three mode cards; route list for pre-mapped (fetches directions on select, keeps them in the run config; when unavailable shows "Spoken turns unavailable — the route is still drawn"); zone picker defaulting per `defaultZone`; heart-rate sensor scan/connect; pace-cue and heart-rate-cue switches; permission requests; Start generates `external_id` with `expo-crypto` `randomUUID()`.
 - Live: layout from spec 9.2; map hidden in free run; "no sensor" when heart rate is unknown; both statuses always shown side by side; mute switches; Pause/Resume; Finish (confirm). Screen kept awake.

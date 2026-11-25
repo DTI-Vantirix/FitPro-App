@@ -59,6 +59,27 @@ token and returns the user.
 Fail closed: if either check can't be completed (network error, 5xx), treat the user as
 not allowed.
 
+### Other routes the app uses
+
+The run experience reads and writes a few records besides runs. These are the same
+routes the website uses; nothing here is new on the server. All need the bearer token.
+
+| What | Route |
+| ---- | ----- |
+| The signed-in user | `GET /api/auth/me` -> `{ id, email, ... }` |
+| Resend the sign-up code | `POST /api/auth/resend-otp { email }` |
+| Delete the account | `DELETE /api/auth/me { password }` -> `{ ok: true, deleted: true }`; `401` when the password is wrong. Removes the user and every record they own |
+| Profile (`hr_max`, `threshold_sec`) | `POST /api/entities/Profile/query`, then `POST /api/entities/Profile` or `PUT /api/entities/Profile/:id` |
+| Pace zones | `POST /api/entities/PaceZone/query`; first-time setup writes the five zones with `PUT` or `POST /api/entities/PaceZone/bulk` (and `DELETE /api/entities/PaceZone/:id` to clear a non-standard set), exactly as the website's onboarding does |
+| Saved routes (read only) | `POST /api/entities/Route/query` |
+| Turn directions for a route | `POST /api/functions/routeDirections { route_id }` -> `{ available, maneuvers: [{ index, instruction, verbal, type, lat, lng, at_mi }] }`; `404` for a route the caller does not own. `available: false` means the route is still drawn but turns are not spoken |
+
+Every query the app sends carries `q: { "created_by_id": "<the user's id>" }`. An admin's
+token can read other people's records, and the app must only ever show and change the
+signed-in person's own.
+
+Runs and workouts are **never** read or written through `/api/entities` by the app.
+
 ---
 
 ## Shared shape

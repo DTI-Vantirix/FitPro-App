@@ -10,7 +10,12 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.fitpro.spike",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": [
+          "location",
+          "audio",
+          "bluetooth-central"
+        ]
       }
     },
     "android": {
@@ -20,6 +25,10 @@
         "android.permission.health.READ_DISTANCE",
         "android.permission.health.READ_HEART_RATE",
         "android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
     },
     "plugins": [
@@ -46,10 +55,33 @@
         }
       ],
       "expo-background-task",
-      "react-native-ble-plx"
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "FitPro uses your location during a run to measure distance and pace and to follow your route.",
+          "locationAlwaysAndWhenInUsePermission": "FitPro keeps recording your run when the screen is locked or you switch apps. Location is only used while a run is in progress.",
+          "locationAlwaysPermission": "FitPro keeps recording your run when the screen is locked or you switch apps. Location is only used while a run is in progress.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true,
+          "motionUsagePermission": false
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": [
+            "central"
+          ],
+          "neverForLocation": true,
+          "bluetoothAlwaysPermission": "FitPro connects to your heart-rate strap or watch to show live heart rate during a run."
+        }
+      ],
+      "expo-notifications"
     ],
     "extra": {
-      "scope": "Step 5: read-only Apple Health + Android Health Connect; no real uploads or background delivery.",
+      "scope": "Stage 1B: run coach (GPS, zones, cues, directions) plus read-only Apple Health and Health Connect manual import.",
       "router": {
         "asyncRoutes": {
           "web": true
