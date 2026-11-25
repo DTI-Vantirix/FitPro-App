@@ -1,10 +1,10 @@
 name: Checks
 
-# Every push and pull request reruns the API tests, the web lint and the
-# browser flows (admin and runner) against a fresh Postgres.
+# Every push reruns the API tests, the web lint and the browser flows (admin
+# and runner) against a fresh Postgres. A pull request shows the result of the
+# push to its branch, so there is no separate pull_request trigger.
 on:
   push:
-  pull_request:
 
 concurrency:
   group: checks-${{ github.ref }}

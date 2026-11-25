@@ -13,7 +13,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: Boolean(process.env.CI),
-  retries: process.env.CI ? 1 : 0,
+  // No retries: a retried sign-up would find its account already there.
+  retries: 0,
   timeout: 30_000,
   reporter: [
     ['list'],
