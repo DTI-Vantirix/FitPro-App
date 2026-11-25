@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Dumbbell, Footprints, Timer, TrendingUp } from 'lucide-react';
+import { Footprints, Timer, TrendingUp } from 'lucide-react';
 import { api } from '@/api/client';
 import MiniStat from '@/components/MiniStat';
 import { PaceTrendChart, WeeklyDistanceChart } from '@/components/analytics/Charts';
@@ -16,32 +16,25 @@ function startOfWeek(date) {
 
 export default function Analytics() {
   const [runs, setRuns] = useState(null);
-  const [workouts, setWorkouts] = useState(null);
 
   useEffect(() => {
     let alive = true;
-    Promise.all([
-      api.entities.Run.list({ sort: '-started_at', limit: 200 }),
-      api.entities.Workout.list({ sort: '-performed_at', limit: 200 }),
-    ])
-      .then(([runPage, workoutPage]) => {
+    api.entities.Run.list({ sort: '-started_at', limit: 200 })
+      .then((runPage) => {
         if (!alive) return;
         setRuns(runPage.items || []);
-        setWorkouts(workoutPage.items || []);
       })
       .catch(() => {
         if (!alive) return;
         setRuns([]);
-        setWorkouts([]);
       });
     return () => {
       alive = false;
     };
   }, []);
 
-  const loading = runs === null || workouts === null;
+  const loading = runs === null;
   const runList = runs || [];
-  const workoutList = workouts || [];
 
   const weekly = useMemo(() => {
     const buckets = [];
@@ -72,7 +65,6 @@ export default function Analytics() {
   const totals = useMemo(() => {
     const miles = runList.reduce((n, r) => n + (Number(r.distance_mi) || 0), 0);
     const time = runList.reduce((n, r) => n + (Number(r.duration_sec) || 0), 0);
-    const volume = workoutList.reduce((n, w) => n + (Number(w.total_volume) || 0), 0);
     const zoneCounts = runList.reduce((acc, r) => {
       const key = r.target_zone_name || 'Unzoned';
       acc[key] = (acc[key] || 0) + 1;
@@ -81,24 +73,22 @@ export default function Analytics() {
     return {
       miles,
       time,
-      volume,
       avgPace: miles > 0.1 ? time / miles : 0,
       zones: Object.entries(zoneCounts).sort((a, b) => b[1] - a[1]),
     };
-  }, [runList, workoutList]);
+  }, [runList]);
 
   const best = useMemo(() => {
     const longest = [...runList].sort((a, b) => (b.distance_mi || 0) - (a.distance_mi || 0))[0];
     const fastest = [...runList].filter((r) => r.avg_pace_sec).sort((a, b) => a.avg_pace_sec - b.avg_pace_sec)[0];
-    const heaviest = [...workoutList].sort((a, b) => (b.total_volume || 0) - (a.total_volume || 0))[0];
-    return { longest, fastest, heaviest };
-  }, [runList, workoutList]);
+    return { longest, fastest };
+  }, [runList]);
 
   if (loading) {
     return <div className="panel h-64 animate-pulse" />;
   }
 
-  if (!runList.length && !workoutList.length) {
+  if (!runList.length) {
     return (
       <div className="panel flex flex-col items-center gap-3 px-6 py-16 text-center">
         <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
@@ -106,7 +96,7 @@ export default function Analytics() {
         </span>
         <h1 className="font-heading text-lg font-bold">No training data yet</h1>
         <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-          Log a run or a gym session and your distance, pace and volume trends build up here.
+          Log a run and your distance and pace trends build up here.
         </p>
         <Link
           to="/run"
@@ -133,11 +123,10 @@ export default function Analytics() {
         </Link>
       </header>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <MiniStat icon={Footprints} label="Total distance" value={totals.miles.toFixed(1)} unit="mi" caption={`${runList.length} runs`} accent />
         <MiniStat icon={Timer} label="Avg pace" value={formatPace(totals.avgPace)} unit="/mi" caption="Across all runs" />
         <MiniStat icon={TrendingUp} label="Moving time" value={formatDuration(totals.time)} unit="hrs" caption="Running only" />
-        <MiniStat icon={Dumbbell} label="Lifted" value={Math.round(totals.volume).toLocaleString('en-US')} unit="lb" caption={`${workoutList.length} sessions`} />
       </div>
 
       <section className="panel p-5">
@@ -195,7 +184,6 @@ export default function Analytics() {
             {[
               { label: 'Longest run', value: best.longest ? `${Number(best.longest.distance_mi).toFixed(2)} mi` : '—', sub: best.longest?.route_name || '' },
               { label: 'Fastest avg pace', value: best.fastest ? `${formatPace(best.fastest.avg_pace_sec)} /mi` : '—', sub: best.fastest?.route_name || '' },
-              { label: 'Heaviest session', value: best.heaviest ? `${Math.round(best.heaviest.total_volume || 0).toLocaleString('en-US')} lb` : '—', sub: best.heaviest?.name || '' },
             ].map((row) => (
               <li key={row.label} className="flex items-center justify-between gap-3 py-2.5 first:pt-1 last:pb-0">
                 <div className="min-w-0">

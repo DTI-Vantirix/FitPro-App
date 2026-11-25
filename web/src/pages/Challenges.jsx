@@ -3,6 +3,7 @@ import { Plus, Trophy } from 'lucide-react';
 import { api } from '@/api/client';
 import ChallengeCard from '@/components/challenges/ChallengeCard';
 import ChallengeForm from '@/components/challenges/ChallengeForm';
+import { HIDDEN_METRICS } from '@/lib/challenges';
 import { loadMyProfile } from '@/lib/social';
 
 export default function Challenges() {
@@ -26,7 +27,7 @@ export default function Challenges() {
           api.entities.ChallengeMember.filter({ user_id: user.id }, { limit: 100 }),
         ]);
         if (!alive) return;
-        setChallenges(page.items || []);
+        setChallenges((page.items || []).filter((c) => !HIDDEN_METRICS.includes(c.metric)));
         setMine(memberPage.items || []);
       })
       .catch(() => {
@@ -56,7 +57,7 @@ export default function Challenges() {
       </div>
 
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Compete on one number a month. The group sees your miles or session count — never your routes, splits or
+        Compete on one number a month. The group sees your miles or run count — never your routes, splits or
         run times.
       </p>
 
@@ -67,7 +68,7 @@ export default function Challenges() {
           <Trophy className="mx-auto h-6 w-6 text-primary" />
           <p className="mt-3 font-heading text-base font-bold">No challenge groups yet</p>
           <p className="mx-auto mt-1.5 max-w-sm text-xs leading-relaxed text-muted-foreground">
-            Start one for the month — a 100 mile goal, 20 runs, or 16 gym sessions — and anyone who joins
+            Start one for the month — a 100 mile goal or 20 runs — and anyone who joins
             climbs the same board.
           </p>
         </div>

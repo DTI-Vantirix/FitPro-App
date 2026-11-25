@@ -9,13 +9,13 @@ const SECTIONS = [
       'Account: your email address, and your name if your sign-in method provides one.',
       'Training profile: age, sex, height and weight. These produce your max heart rate, threshold pace and the five pace zones.',
       'Runs: start time, distance, duration, pace, mile splits, the GPS track of the route, heart rate from a strap you paired, and any notes you add.',
-      'Routes and workouts: the routes you build or import, the gym location on a route, and the weights, reps and sets you log.',
+      'Routes: the routes you build or import.',
     ],
   },
   {
     title: 'Where it lives',
     body: [
-      'Everything is stored in this app’s own hosted database and is tied to your account. The app is built so that your records are readable only by you: another signed-in person on this app cannot open your runs, routes or workouts.',
+      'Everything is stored in this app’s own hosted database and is tied to your account. The app is built so that your records are readable only by you: another signed-in person on this app cannot open your runs or routes.',
       'We do not sell your data, and we do not share it with advertisers, data brokers or insurers.',
     ],
   },
@@ -37,7 +37,7 @@ const SECTIONS = [
   {
     title: 'Your choices',
     body: [
-      'Delete all training data: Settings → Your data wipes your runs, routes, workouts, profile and zones immediately. It cannot be undone.',
+      'Delete all training data: Settings → Your data wipes your runs, routes, profile and zones immediately. It cannot be undone.',
       'Delete your whole account: Settings → Your data → Delete account asks for your password, then removes your account and every record tied to it. It cannot be undone.',
       'Withdraw consent: stop using the app and delete your data. The next sign-in will ask for consent again only if your account still exists.',
     ],

@@ -69,8 +69,8 @@ export default function SocialProfileCard() {
       <div>
         <h2 className="font-heading text-base font-bold">Social profile</h2>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          How friends find you and who sees what you post. Nothing is ever posted automatically — every run or
-          workout you share is one you pick.
+          How friends find you and who sees what you post. Nothing is ever posted automatically — every run you
+          share is one you pick.
         </p>
       </div>
 

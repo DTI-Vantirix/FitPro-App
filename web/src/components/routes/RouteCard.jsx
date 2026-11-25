@@ -10,7 +10,6 @@ export default function RouteCard({ route, zones = [], onZoneChange, onDelete })
         <MapView
           path={route.path?.length ? route.path : route.points || []}
           points={route.points || []}
-          gymPoint={route.gym_point || null}
           fitKey={route.id}
           className="h-36 w-full"
           initialZoom={14}
@@ -23,9 +22,6 @@ export default function RouteCard({ route, zones = [], onZoneChange, onDelete })
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 className="truncate font-heading text-sm font-bold">{route.name}</h3>
-            {route.gym_stop ? (
-              <p className="mt-1 truncate text-[11px] text-muted-foreground">Gym · {route.gym_stop}</p>
-            ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button

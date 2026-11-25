@@ -118,7 +118,8 @@ const auth = {
     setToken(result.access_token);
     return result;
   },
-  register: ({ email, password, full_name }) => request('POST', '/api/auth/register', { email, password, full_name }),
+  register: ({ email, password, full_name, invite_code }) =>
+    request('POST', '/api/auth/register', { email, password, full_name, invite_code }),
   verifyOtp: ({ email, otpCode }) => request('POST', '/api/auth/verify-otp', { email, otp_code: otpCode }),
   resendOtp: (email) => request('POST', '/api/auth/resend-otp', { email }),
   async changePassword({ currentPassword, newPassword }) {

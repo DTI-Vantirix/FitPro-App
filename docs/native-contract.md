@@ -34,8 +34,13 @@ POST {API_URL}/api/auth/login
 -> 403 { "error": "Verify your email first...", "needs_verification": true }
 ```
 
-Sign-up is `POST /api/auth/register` then `POST /api/auth/verify-otp` with the emailed
-6-digit code, which also returns `{ access_token, user }`.
+Sign-up is `POST /api/auth/register` with `{ email, password, full_name?, invite_code }`,
+then `POST /api/auth/verify-otp` with the emailed 6-digit code, which also returns
+`{ access_token, user }`. `invite_code` is required: FitPro is invite-only and the server
+creates no account without a valid unused code (`400` with `"Enter your invite code."`,
+`"That code is not recognised."` or `"That code has already been used."`). The code is
+claimed when the email is verified, not at register; if someone else verified with the same
+code first, `verify-otp` answers `409` and the person registers again with a new code.
 
 Store the token in `expo-secure-store` and send it on every request. Tokens last 30 days
 by default. Any `401` means the token is no longer valid (expired, password changed,
@@ -65,7 +70,8 @@ not allowed.
 | `source`      | string | no       | Max 40 chars. Defaults to `"manual"`                          |
 | `notes`       | string | no       | Max 2000 chars                                                |
 
-`source` values in use: `apple`, `health_connect`, `garmin`, `manual`.
+`source` values in use: `fitpro` (a run recorded live by the FitPro app), `apple`,
+`health_connect`, `garmin`, `manual`.
 
 ### Dedupe rule (critical)
 
@@ -93,6 +99,26 @@ timestamp, and not a hash of the values (an edited activity must still match).
 
 Server computes `avg_pace_sec = round(duration_sec / distance_mi)`.
 
+### Runs recorded by FitPro (`source: "fitpro"`)
+
+`external_id` is an id the phone generates when the run starts, so a retried upload
+updates the same run. `route_name` defaults to `"Free run"`. These optional fields carry
+the route, the zone the runner aimed for and the heart-rate stats:
+
+| field | rule |
+| ----- | ---- |
+| `route_id` | a route the caller owns |
+| `target_zone_name` | string, max 80 chars |
+| `target_fast_sec`, `target_slow_sec` | both `> 0` and `fast <= slow`, rounded |
+| `in_zone_pct` | `0..100`, rounded: share of the run inside the pace zone |
+| `hr_in_zone_pct` | `0..100`, rounded: share of the run inside the heart-rate zone |
+| `min_hr`, `hr_target_min`, `hr_target_max` | bpm `20..260`, rounded |
+
+**A value that breaks its rule is dropped, never a 400.** The phone queues runs while
+offline and retries them, so an optional field must not be able to block an upload: a
+`route_id` for a route that was since deleted, or that belongs to someone else, is left
+out and the run is still saved. The two pace targets are kept or dropped together.
+
 Response:
 
 ```json
@@ -103,6 +129,22 @@ Response:
 
 `action` is `"created"` or `"updated"`. **Show this on screen during the spike** — it is
 the proof the upsert works.
+
+### Imported copies of a FitPro run are skipped
+
+A runner who also records on their watch would get the run twice. When an incoming run's
+`source` is not `fitpro`, the caller has no record yet for that `(source, external_id)`,
+and they already have a run recorded by FitPro (`fitpro`, or `live` from the website)
+that shares at least half of the longer run's time span with it, nothing is written
+(so a FitPro run stopped after two minutes never hides the hour a watch recorded):
+
+```json
+{ "ok": true, "kind": "run", "action": "skipped", "reason": "overlaps_fitpro_run",
+  "run_id": "<the FitPro run>", "source": "apple" }
+```
+
+A run's span is `started_at` to `started_at + duration_sec`. Treat `skipped` as success:
+do not retry it and do not show it as an error.
 
 ---
 
@@ -154,6 +196,7 @@ All errors are `{ "error": "<message>" }` with the message written for a human:
 | ------ | ---------------------------------------------------------------- |
 | 400    | missing `external_id`, bad `distance_mi`/`duration_sec`, invalid `started_at`/`performed_at`, no usable exercises, unknown `kind` |
 | 401    | no app-user session                                              |
+| 403    | signed in, but no accepted invite code (admins are exempt): `"Redeem your invite code before syncing activities."` |
 | 500    | unexpected — surface the message, do not retry in a loop          |
 
 The shell should surface 400s verbatim next to the affected activity. A 400 means the
@@ -186,3 +229,6 @@ Only the fields documented above. Treat anything else in the response as opaque.
 - Splits are whole miles only (`mile` is rounded), so sub-mile splits cannot be expressed.
 - Strength sets have no RPE, rest time or set type (warmup/failure).
 - There is no delete or "unsync" endpoint. Re-syncing deletes nothing.
+- Duplicate skipping works one way only. If the watch's copy of a run is imported
+  **before** FitPro's own upload arrives (the phone was offline at the finish), both
+  records are kept; nothing merges or removes the imported one.

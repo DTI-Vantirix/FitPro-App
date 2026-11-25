@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { Check, Share2 } from 'lucide-react';
 import { api } from '@/api/client';
 import SplitsList from '@/components/run/SplitsList';
-import LegsList from '@/components/run/LegsList';
 import MapView from '@/components/MapView';
 import { formatDuration, formatPace } from '@/lib/format';
 import { simplifyPath } from '@/lib/geo';
@@ -40,7 +39,6 @@ export default function RunSummary({ run }) {
             trail={run.points}
             startPoint={run.points[0]}
             finishPoint={run.points[run.points.length - 1]}
-            gymPoint={run.gym_point || null}
             fitKey={run.id || 'run'}
             className="h-52 w-full"
           />
@@ -66,17 +64,6 @@ export default function RunSummary({ run }) {
           </div>
         ))}
       </div>
-      {run.legs?.length > 0 && (
-        <div className="panel p-5">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <p className="eyebrow">Legs</p>
-            {run.gym_name ? (
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{run.gym_name}</p>
-            ) : null}
-          </div>
-          <LegsList legs={run.legs} />
-        </div>
-      )}
 
       <div className="panel p-5">
         <p className="eyebrow mb-3">Splits</p>

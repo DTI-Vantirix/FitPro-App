@@ -3,7 +3,7 @@ import { HttpError } from '../lib/http.js';
 // Snaps tapped waypoints to walkable roads with a Valhalla router. Falls back to
 // straight lines when the router is slow or down, so route building never breaks.
 
-function decodePolyline(encoded, precision = 6) {
+export function decodePolyline(encoded, precision = 6) {
   const factor = 10 ** precision;
   const coords = [];
   let index = 0;

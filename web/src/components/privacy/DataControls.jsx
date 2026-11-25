@@ -13,6 +13,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 
+// Workout stays in this list while gym is hidden, so stored gym logs are still wiped.
 const PURGE = [
   ['Run', 'runs'],
   ['Route', 'routes'],
@@ -66,7 +67,7 @@ export default function DataControls() {
       <div>
         <h2 className="font-heading text-base font-bold">Your data</h2>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          FitPro keeps your GPS tracks, heart rate and gym logs so you can look back at them. You can erase all of it
+          FitPro keeps your GPS tracks and heart rate so you can look back at them. You can erase all of it
           yourself, without asking anyone.
         </p>
       </div>
@@ -74,7 +75,7 @@ export default function DataControls() {
       <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-3.5 py-3">
         <p className="text-xs font-medium text-foreground">Delete all training data</p>
         <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-          Removes every run, route, workout, pace zone and your training profile. Permanent — there is no undo and no
+          Removes every run, route, pace zone and your training profile. Permanent — there is no undo and no
           backup.
         </p>
         <AlertDialog>
@@ -91,7 +92,7 @@ export default function DataControls() {
             <AlertDialogHeader>
               <AlertDialogTitle>Delete all your training data?</AlertDialogTitle>
               <AlertDialogDescription>
-                Every run, route, workout, pace zone and your profile will be removed from this app. This cannot be
+                Every run, route, pace zone and your profile will be removed from this app. This cannot be
                 undone.
               </AlertDialogDescription>
             </AlertDialogHeader>

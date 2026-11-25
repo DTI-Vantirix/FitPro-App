@@ -34,6 +34,25 @@ another user's record when an admin synced).
 **Invite codes:** generated with a cryptographic RNG (was `Math.random`), claimed
 atomically, and redemption is rate limited (10 tries per 15 minutes per user).
 
+**2026-11-25 — Sign-up requires an invite code.** The owner hands out the codes
+(Settings → invite codes, admin only). `register` refuses to create an account
+without a valid unused code; the code is claimed when the email is verified, so an
+abandoned sign-up doesn't use it up. Accounts that already existed keep working and
+can still redeem a code after signing in. Release is invite-only testing: TestFlight
+internal (testers added to the owner's team) and Play internal testing.
+
+**2026-11-25 — Gym hidden for now.** The owner wants the first release to be a
+run coach, with gym logging built back up later. The website no longer shows the
+gym log, gym stops on routes and runs, workout posts or the `workouts` challenge
+metric. Nothing was deleted: the `workouts` table, the `workout` ingest kind, old
+data and the gym source files (`web/src/pages/Workouts.jsx`,
+`web/src/components/workout/`, `web/src/lib/exercises.js`) are all still there.
+
+**2026-11-25 — Checks rerun on every change.** `npm run check` runs the API
+tests, the web lint and the Playwright browser flows (`e2e/`, admin and runner);
+`npm run check:watch` reruns them whenever a source file changes; the GitHub
+workflow `.github/workflows/checks.yml` reruns them on every push and pull request.
+
 ## Not built yet (deliberately deferred)
 
 | Feature | State now | Notes |
@@ -47,13 +66,13 @@ atomically, and redemption is rate limited (10 tries per 15 minutes per user).
 
 ## Open questions (from the handoff, still open)
 
-1. MVP release: invite-only TestFlight / Play internal testing, or public beta?
+1. ~~MVP release: invite-only TestFlight / Play internal testing, or public beta?~~
+   Decided 2026-11-25: invite-only internal testing with 10 testers.
 2. iOS first, Android first, or both? Is Google Health Connect in the first release?
 3. Is real activity upload now approved? (The API is ready; the shell still runs
    on the fake adapter.) Deletion/"unsync" of synced activities?
-4. Should the **server** also require an accepted invite for `ingestActivity`?
-   Today only the app enforces the invite gate; enforcing it server-side is a
-   one-line check and fails closed.
+4. ~~Should the **server** also require an accepted invite for `ingestActivity`?~~
+   Decided 2026-11-25: yes. `ingestActivity` answers 403 without an accepted code.
 5. Background sync: in scope? Needs its own design and permission model.
 6. Health-data retention, export, and the privacy policy wording.
 7. Hosting: which provider and region.

@@ -43,3 +43,7 @@ base44/.app.jsonc
 server/uploads/
 server/.env
 web/.env.local
+
+# Playwright output
+e2e/.results/
+.checks/
