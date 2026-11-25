@@ -54,6 +54,18 @@ sign-up and sign-in, password reset, the access rules on every kind of record,
 invite codes, the `ingestActivity` contract the native app depends on, the social
 feed, challenges, uploads and account deletion.
 
+```bash
+npm run e2e            # browser flows (Playwright), first time: npx playwright install chromium
+npm run check          # API tests, web lint and browser flows, one summary
+npm run check:watch    # the same, rerun every time a source file changes
+```
+
+The browser flows in `e2e/` drive the built web app, served by the real API, as the
+owner (sign in, generate and revoke invite codes) and as a tester (sign up with a
+code, verify, consent, open every screen, sign out). They use their own database,
+`fitpro_e2e`, created on first run and wiped on every run. GitHub reruns all three
+on every push and pull request (`.github/workflows/checks.yml`).
+
 ## How the pieces fit
 
 - [docs/architecture.md](docs/architecture.md): how the API, database and apps fit
