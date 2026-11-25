@@ -1,4 +1,4 @@
-// FitPro API client. It keeps the same surface the app used with the Base44 SDK
+// VantraRun API client. It keeps the same surface the app used with the Base44 SDK
 // (api.entities.Run.list(), api.auth.me(), api.functions.invoke(), ...), so pages
 // and components didn't need rewriting — only their import changed.
 //
@@ -51,7 +51,7 @@ export async function request(method, path, body, { raw = false, headers = {} } 
       body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
     });
   } catch {
-    throw new ApiError("Can't reach FitPro. Check your connection and try again.", 0, null);
+    throw new ApiError("Can't reach VantraRun. Check your connection and try again.", 0, null);
   }
   const text = await res.text();
   let data = null;

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import ZoneTable from '@/components/zones/ZoneTable';
 import DataControls from '@/components/privacy/DataControls';
+import ErrorReportsCard from '@/components/admin/ErrorReportsCard';
 import InviteCodesCard from '@/components/admin/InviteCodesCard';
 import SocialProfileCard from '@/components/social/SocialProfileCard';
 import AccountCard from '@/components/settings/AccountCard';
@@ -110,7 +111,7 @@ export default function Settings() {
             <div>
               <h2 className="font-heading text-base font-bold">Your numbers</h2>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                Age, height and weight give FitPro your max heart rate and threshold pace, which set the five zones.
+                Age, height and weight give VantraRun your max heart rate and threshold pace, which set the five zones.
               </p>
             </div>
 
@@ -235,6 +236,8 @@ export default function Settings() {
           <SocialProfileCard />
 
           <InviteCodesCard />
+
+          <ErrorReportsCard />
 
           <DataControls />
         </>

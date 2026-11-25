@@ -48,7 +48,7 @@ export default function ConsentGate() {
           <p className="eyebrow">Before your first run</p>
           <h1 className="mt-1 font-heading text-xl font-bold leading-tight">Your training data, in your hands</h1>
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            FitPro records health and location data, so we ask once before using it. Nothing is shared or sold.
+            VantraRun records health and location data, so we ask once before using it. Nothing is shared or sold.
           </p>
         </div>
 
@@ -75,7 +75,7 @@ export default function ConsentGate() {
             className="mt-0.5 h-4 w-4 shrink-0 rounded accent-primary"
           />
           <span>
-            I agree to FitPro storing my health and location data as described in the{' '}
+            I agree to VantraRun storing my health and location data as described in the{' '}
             <Link to="/privacy" className="text-primary hover:underline">
               privacy policy
             </Link>

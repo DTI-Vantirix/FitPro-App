@@ -122,8 +122,20 @@ const payloadSource = readFileSync(join(native, 'src/run/payload.ts'), 'utf8');
 assert(payloadSource.includes("source: 'fitpro'") && !/avg_pace_sec\s*:/.test(payloadSource), 'Run payload must be source "fitpro" and never send server-computed pace.');
 assert(readFileSync(join(native, 'app/run-start.tsx'), 'utf8').includes('Crypto.randomUUID()'), 'external_id must be generated when the run starts.');
 assert(readFileSync(join(native, 'app/settings.tsx'), 'utf8').includes('deleteAccount(accessToken, password)'), 'Native account deletion missing.');
-// Store identity is not decided yet (Stage 1C): the placeholder id must not change here.
-assert(cfg.expo.ios.bundleIdentifier === 'com.fitpro.spike' && cfg.expo.android.package === 'com.fitpro.spike', 'Bundle id must not change before Stage 1C.');
+// Store identity (owner, 2026-11-25). A bundle id can never change once the store apps exist.
+assert(cfg.expo.ios.bundleIdentifier === 'com.vantrarun.app' && cfg.expo.android.package === 'com.vantrarun.app', 'Bundle id and package must be com.vantrarun.app.');
+assert(cfg.expo.name === 'VantraRun', 'The app is called VantraRun.');
+// Secrets never live in the repository: the Android map key arrives through app.config.js at build time.
+assert(!JSON.stringify(cfg).includes('googleMaps') && !/AIza[0-9A-Za-z_-]{20,}/.test(JSON.stringify(cfg)), 'No map key in app.json.');
+assert(readFileSync(join(native, 'app.config.js'), 'utf8').includes('process.env.GOOGLE_MAPS_ANDROID_KEY'), 'app.config.js must read the Android map key from the environment.');
+const eas = JSON.parse(readFileSync(join(native, 'eas.json'), 'utf8'));
+for (const profile of ['preview', 'production']) {
+  assert(/^https:\/\/[a-z0-9.-]+$/.test(eas.build?.[profile]?.env?.EXPO_PUBLIC_API_URL ?? ''), `eas.json ${profile} must name the hosted API by an https address.`);
+}
+assert(eas.build.development?.developmentClient === true && eas.build.production?.autoIncrement === true, 'eas.json profiles are incomplete.');
+// Crash reports go to our own API and nowhere else.
+const reporter = readFileSync(join(native, 'src/diagnostics/error-reports.ts'), 'utf8');
+assert(reporter.includes('`${API_URL}/api/client-errors`') && !/https?:\/\//.test(reporter), 'Error reports may only go to the FitPro API.');
 assert(cfg.expo.ios.infoPlist.UIBackgroundModes.includes('location'), 'Background location mode missing: runs would stop when the screen locks.');
 const locationPlugin = cfg.expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-location');
 assert(locationPlugin?.[1]?.isIosBackgroundLocationEnabled && locationPlugin?.[1]?.isAndroidForegroundServiceEnabled, 'Background location is not configured.');

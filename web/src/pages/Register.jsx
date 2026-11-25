@@ -212,7 +212,7 @@ export default function Register() {
               required
             />
           </div>
-          <p className="text-xs text-muted-foreground">FitPro is invite-only. Use the code you were sent.</p>
+          <p className="text-xs text-muted-foreground">VantraRun is invite-only. Use the code you were sent.</p>
         </div>
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>

@@ -25,7 +25,7 @@ export default function RootLayout() {
         <Stack.Screen name="spike" options={{ title: 'Ingestion test' }} />
         <Stack.Screen name="activities" options={{ title: 'Import from health' }} />
         <Stack.Screen name="setup" options={{ title: 'Set your zones', headerBackVisible: false }} />
-        <Stack.Screen name="home" options={{ title: 'FitPro', headerShown: false }} />
+        <Stack.Screen name="home" options={{ title: 'VantraRun', headerShown: false }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
         <Stack.Screen name="run-start" options={{ title: 'Start a run' }} />
         <Stack.Screen name="run-live" options={{ title: 'Run', headerBackVisible: false, gestureEnabled: false }} />

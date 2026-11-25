@@ -35,7 +35,7 @@ const DEVICES = [
     name: 'Apple Watch',
     tone: 'later',
     tag: 'Native app only',
-    note: 'Apple Health data can only be read by an iOS app through HealthKit — there is no web or cloud API, and no live stream. The iPhone build of FitPro is the route in.',
+    note: 'Apple Health data can only be read by an iOS app through HealthKit — there is no web or cloud API, and no live stream. The iPhone build of VantraRun is the route in.',
   },
   {
     name: 'Samsung Galaxy Watch · Wear OS',

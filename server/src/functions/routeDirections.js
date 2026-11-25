@@ -1,6 +1,6 @@
 import { HttpError } from '../lib/http.js';
 import { isUuid } from '../lib/serialize.js';
-import { decodePolyline } from './snapRoute.js';
+import { decodePolyline, routerRequestUrl } from './snapRoute.js';
 
 // Turn-by-turn directions for one of the caller's saved routes. The app fetches
 // them when a route is opened to run and keeps them for the run, so a connection
@@ -67,11 +67,11 @@ export default async function routeDirections({ db, user, body, config }) {
   if (locations.length < 2) return UNAVAILABLE;
 
   const payload = { locations, costing: 'pedestrian', units: 'miles' };
-  const url = `${config.routerUrl}?json=${encodeURIComponent(JSON.stringify(payload))}`;
+  const url = routerRequestUrl(config, payload);
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(9000),
-      headers: { 'User-Agent': 'FitPro route directions' },
+      headers: { 'User-Agent': 'VantraRun route directions' },
     });
     if (!res.ok) throw new Error(`router responded ${res.status}`);
     const maneuvers = toManeuvers((await res.json())?.trip);

@@ -61,8 +61,8 @@ function Setup() {
     <Brand />
     <SectionHeading kicker="ONE-TIME SETUP" title={hasZones ? 'Your max heart rate.' : 'Set your zones.'}
       subtitle={hasZones
-        ? 'You already have zones. FitPro needs your max heart rate to turn each zone into a heart-rate range. Your zones are not changed.'
-        : 'Two numbers. FitPro builds five training zones from them, each with its own pace range and heart-rate range.'} />
+        ? 'You already have zones. VantraRun needs your max heart rate to turn each zone into a heart-rate range. Your zones are not changed.'
+        : 'Two numbers. VantraRun builds five training zones from them, each with its own pace range and heart-rate range.'} />
     <ErrorNotice message={error ?? account.error} />
     <Field label="MAX HEART RATE (BPM)" value={hrMax} onChangeText={setHrMax} keyboardType="number-pad" />
     {hrMax.trim() !== '' && !hrOk && <Text style={styles.body}>Enter a whole number between 100 and 230.</Text>}
@@ -89,7 +89,7 @@ function Setup() {
       </Text>)}
     </Panel>}
     <Action label="Save and continue" onPress={() => { void save(); }} busy={busy} disabled={!hrOk || (!hasZones && !threshold)} />
-    <Note>You can change zones later on the FitPro website.</Note>
+    <Note>You can change zones later on the website.</Note>
   </Screen>;
 }
 

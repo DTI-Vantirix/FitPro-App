@@ -121,9 +121,9 @@ export function postText(post) {
   if (post.kind === 'run') {
     const bits = [`${Number(post.distance_mi || 0).toFixed(2)} mi`];
     if (post.zone_name) bits.push(post.zone_name);
-    return `${bits.join(' · ')} — logged on FitPro`;
+    return `${bits.join(' · ')} — logged on VantraRun`;
   }
   const bits = [`${Number(post.volume_lb || 0).toLocaleString()} lb moved`];
   if (post.set_count) bits.push(`${post.set_count} sets`);
-  return `${bits.join(' · ')} — logged on FitPro`;
+  return `${bits.join(' · ')} — logged on VantraRun`;
 }

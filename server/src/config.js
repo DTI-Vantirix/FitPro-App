@@ -19,6 +19,16 @@ const list = (value) =>
 
 export function loadConfig(env = process.env) {
   const production = env.NODE_ENV === 'production';
+  // Render sets this to the service's public https address.
+  const hostUrl = env.RENDER_EXTERNAL_URL || '';
+  const s3 = {
+    endpoint: (env.S3_ENDPOINT || '').replace(/\/+$/, ''),
+    bucket: env.S3_BUCKET || '',
+    region: env.S3_REGION || 'auto',
+    accessKeyId: env.S3_ACCESS_KEY_ID || '',
+    secretAccessKey: env.S3_SECRET_ACCESS_KEY || '',
+  };
+  const s3Ready = Boolean(s3.endpoint && s3.bucket && s3.accessKeyId && s3.secretAccessKey);
 
   const jwtSecret = env.JWT_SECRET || (production ? '' : 'dev-only-secret-do-not-use-in-production');
   if (production && jwtSecret.length < 32) {
@@ -32,19 +42,23 @@ export function loadConfig(env = process.env) {
     jwtSecret,
     tokenTtlSec: (Number(env.TOKEN_TTL_DAYS) || 30) * 24 * 60 * 60,
     // Where the web app lives; used for links in emails (password reset).
-    appUrl: (env.APP_URL || 'http://localhost:5173').replace(/\/$/, ''),
+    appUrl: (env.APP_URL || hostUrl || 'http://localhost:5173').replace(/\/$/, ''),
     // Public base URL of this API, used to build upload URLs. Empty = same origin.
     publicUrl: (env.PUBLIC_URL || '').replace(/\/$/, ''),
+    // Uploads go to this bucket when every S3_* setting is present; otherwise to uploadDir.
+    storage: { s3: s3Ready ? s3 : null },
     corsOrigins: list(env.CORS_ORIGINS || 'http://localhost:5173'),
     uploadDir: path.resolve(env.UPLOAD_DIR || path.join(SERVER_ROOT, 'uploads')),
     maxUploadBytes: (Number(env.MAX_UPLOAD_MB) || 50) * 1024 * 1024,
     // Built web app to serve from this process (optional; handy for single-box deploys).
     webDist: env.WEB_DIST ? path.resolve(env.WEB_DIST) : '',
     mail: {
-      from: env.MAIL_FROM || 'FitPro <no-reply@fitpro.local>',
+      from: env.MAIL_FROM || 'VantraRun <no-reply@vantrarun.local>',
       resendApiKey: env.RESEND_API_KEY || '',
     },
     routerUrl: env.ROUTER_URL || 'https://valhalla1.openstreetmap.de/route',
+    // For a hosted Valhalla provider that wants a key (sent as api_key). Empty = none.
+    routerApiKey: env.ROUTER_API_KEY || '',
     // Outside production, auth responses include the emailed code so you can
     // test sign-up without a mail provider. Never on in production.
     exposeDevCodes: !production && env.EXPOSE_DEV_CODES !== 'false',

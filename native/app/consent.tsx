@@ -42,20 +42,20 @@ export default function ConsentScreen() {
   }
 
   return <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-    <Text style={styles.brand}>FITPRO / NATIVE</Text>
+    <Text style={styles.brand}>VANTRARUN</Text>
     <SectionHeading kicker="STEP 02 · YOUR CHOICE" title="Your health data. Your choice."
-      subtitle="Review what FitPro records and sends before you choose to continue." />
+      subtitle="Review what VantraRun records and sends before you choose to continue." />
     <View style={styles.panel}>
-      <Text style={styles.title}>Runs you record in FitPro</Text>
-      <Text style={styles.body}>When you start a run, FitPro uses your location to measure distance and pace, and your heart rate if you connect a sensor. The finished run (route, distance, time, splits, heart-rate summary) is saved to your FitPro account. Location is used only while a run is being recorded.</Text>
+      <Text style={styles.title}>Runs you record in VantraRun</Text>
+      <Text style={styles.body}>When you start a run, VantraRun uses your location to measure distance and pace, and your heart rate if you connect a sensor. The finished run (route, distance, time, splits, heart-rate summary) is saved to your VantraRun account. Location is used only while a run is being recorded.</Text>
       <Text style={styles.title}>Importing from your phone's health services</Text>
-      <Text style={styles.body}>FitPro may import your workouts and runs from your phone's health services after you separately grant the operating system's health permissions in a future step.</Text>
+      <Text style={styles.body}>VantraRun may import your workouts and runs from your phone's health services after you separately grant the operating system's health permissions in a future step.</Text>
       <Text style={styles.title}>What could be sent</Text>
-      <Text style={styles.body}>Activity details may include workout names, exercises, sets, weights, run distance, duration, heart rate, route coordinates and other fields supported by the FitPro ingestion contract.</Text>
+      <Text style={styles.body}>Activity details may include workout names, exercises, sets, weights, run distance, duration, heart rate, route coordinates and other fields supported by the VantraRun ingestion contract.</Text>
       <Text style={styles.title}>Where it would go</Text>
-      <Text style={styles.body}>When you choose to sync, selected activity data will be sent to your existing FitPro account through the FitPro API. This shell uses no advertising or analytics SDKs.</Text>
+      <Text style={styles.body}>When you choose to sync, selected activity data will be sent to your existing VantraRun account through the VantraRun API. This shell uses no advertising or analytics SDKs.</Text>
       <Text style={styles.title}>You remain in control</Text>
-      <Text style={styles.body}>Apple Health permissions are requested separately, only after your consent and invite authorization have passed and you explicitly select Apple Health. You can withdraw this local consent later. Withdrawing does not delete records already uploaded to FitPro or revoke a server session.</Text>
+      <Text style={styles.body}>Apple Health permissions are requested separately, only after your consent and invite authorization have passed and you explicitly select Apple Health. You can withdraw this local consent later. Withdrawing does not delete records already uploaded to VantraRun or revoke a server session.</Text>
     </View>
     <ErrorNotice message={error ?? sessionError} />
     <Action label="I understand and agree to continue" onPress={accept} busy={busy} />

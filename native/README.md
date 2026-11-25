@@ -1,6 +1,6 @@
 # Native shell (Expo)
 
-The Expo / Expo Router app (`com.fitpro.spike` until the store id is settled) lives in this folder.
+The Expo / Expo Router app, VantraRun (`com.vantrarun.app`), lives in this folder.
 It is the run coach: sign-up, first-time zone setup, starting a run, the live run screen and
 the post-run summary, plus the earlier read-only health import. It keeps its
 own `package.json` and is not part of the npm workspaces, because Expo manages its own
@@ -63,6 +63,18 @@ Cue timing and GPS thresholds are constants at the top of `cues.ts`, `tracker.ts
 `directions.ts`, and are listed in `docs/superpowers/plans/2026-11-25-stage1b-native-run-experience.md`.
 
 Not built yet: Apple Watch heart rate (Stage 2), sharing to the feed (Stage 3), editing
-zones and building routes in the app (Stage 4), store identity and signing (Stage 1C).
+zones and building routes in the app (Stage 4).
 On Android the map needs a Google Maps key at build time (Stage 1C); until
 `android.config.googleMaps.apiKey` is set the map is replaced by a notice and never created.
+
+## Builds (Stage 1C)
+
+`eas.json` has three profiles: `development` (dev client, talks to the API in `.env`),
+`preview` (an installable Android APK / internal iOS build against the hosted API) and
+`production` (store builds; build numbers are counted by EAS). The hosted API address
+is in `eas.json`. `app.config.js` adds the Android Google Maps key from the
+`GOOGLE_MAPS_ANDROID_KEY` build variable, so no key is in the repository.
+
+Crashes are reported to the FitPro API only (`src/diagnostics/`, `POST /api/client-errors`);
+there is no monitoring SDK. The commands and the account steps are in
+[../docs/launch-checklist.md](../docs/launch-checklist.md).

@@ -114,7 +114,7 @@ export function drawCard(ctx, { card, points, media }) {
   ctx.textAlign = 'left';
   ctx.fillStyle = '#C9F84A';
   ctx.font = `800 30px ${HEAD}`;
-  ctx.fillText('FITPRO', 72, 108);
+  ctx.fillText('VANTRARUN', 72, 108);
   ctx.textAlign = 'right';
   ctx.fillStyle = 'rgba(240,240,232,0.6)';
   ctx.font = `500 24px ${MONO}`;
@@ -179,7 +179,7 @@ export function loadBackground(type, url) {
   });
 }
 
-export function canvasToFile(canvas, name = 'fitpro-post.png') {
+export function canvasToFile(canvas, name = 'vantrarun-post.png') {
   return new Promise((resolve) => {
     canvas.toBlob((blob) => {
       if (!blob) return resolve(null);
@@ -188,7 +188,7 @@ export function canvasToFile(canvas, name = 'fitpro-post.png') {
   });
 }
 
-export async function saveCanvas(canvas, name = 'fitpro-post.png') {
+export async function saveCanvas(canvas, name = 'vantrarun-post.png') {
   const file = await canvasToFile(canvas, name);
   if (!file) return false;
   const href = URL.createObjectURL(file);

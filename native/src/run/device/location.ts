@@ -50,7 +50,7 @@ export async function startTracking(onFix: (fix: Fix) => void): Promise<void> {
     showsBackgroundLocationIndicator: true,
     foregroundService: {
       notificationTitle: 'Recording your run',
-      notificationBody: 'FitPro is tracking distance and pace.',
+      notificationBody: 'VantraRun is tracking distance and pace.',
       killServiceOnDestroy: false,
     },
   });

@@ -67,7 +67,7 @@ export default function DataControls() {
       <div>
         <h2 className="font-heading text-base font-bold">Your data</h2>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          FitPro keeps your GPS tracks and heart rate so you can look back at them. You can erase all of it
+          VantraRun keeps your GPS tracks and heart rate so you can look back at them. You can erase all of it
           yourself, without asking anyone.
         </p>
       </div>
@@ -110,7 +110,7 @@ export default function DataControls() {
       <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-3.5 py-3">
         <p className="text-xs font-medium text-foreground">Delete account</p>
         <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-          Closes your FitPro account and removes everything tied to it: your login, training data, posts, friends and
+          Closes your VantraRun account and removes everything tied to it: your login, training data, posts, friends and
           challenge entries. Permanent — there is no undo and no backup.
         </p>
         <AlertDialog
@@ -133,7 +133,7 @@ export default function DataControls() {
           <AlertDialogContent>
             <form onSubmit={deleteAccount} className="space-y-4">
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete your FitPro account?</AlertDialogTitle>
+                <AlertDialogTitle>Delete your VantraRun account?</AlertDialogTitle>
                 <AlertDialogDescription>
                   Your account and everything in it will be removed for good. Enter your password to confirm.
                 </AlertDialogDescription>

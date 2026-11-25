@@ -3,6 +3,7 @@ import path from 'node:path';
 import { registerAuthRoutes } from './auth/routes.js';
 import { authenticate } from './auth/users.js';
 import { registerEntityRoutes } from './entities/routes.js';
+import { recordServerError, registerErrorRoutes } from './errors.js';
 import { createEntityService } from './entities/service.js';
 import { registerFunctionRoutes } from './functions/index.js';
 import { HttpError, REPLY, Router, readJson, sendJson } from './lib/http.js';
@@ -47,6 +48,7 @@ export function createApp({ db, config, registry }) {
   registerEntityRoutes(router, entities);
   registerFunctionRoutes(router);
   registerUploadRoutes(router);
+  registerErrorRoutes(router);
 
   const cors = (req, res) => {
     const origin = req.headers.origin;
@@ -75,8 +77,16 @@ export function createApp({ db, config, registry }) {
 
   return async function handle(req, res) {
     const started = Date.now();
-    const url = new URL(req.url, 'http://localhost');
+    // A fallback so the error path always has something to log if the address is unusable.
+    let url = { pathname: String(req.url || '').slice(0, 200) };
+    let userId = null;
     try {
+      try {
+        url = new URL(req.url, 'http://localhost');
+        decodeURIComponent(url.pathname);
+      } catch {
+        throw new HttpError(400, 'That address is not valid.');
+      }
       cors(req, res);
       if (req.method === 'OPTIONS') {
         res.writeHead(204);
@@ -112,20 +122,27 @@ export function createApp({ db, config, registry }) {
         user: await authenticate(req, db, config),
       };
 
+      userId = ctx.user?.id ?? null;
+
       const result = await match.handler(ctx);
       if (result === HANDLED) return;
       if (result && result[REPLY]) sendJson(res, result.status, result.body);
       else sendJson(res, 200, result);
     } catch (raw) {
-      const error = raw instanceof HttpError ? raw : databaseError(raw) || raw;
+      // A path segment that cannot be decoded is the caller's mistake, not ours.
+      const mapped = raw instanceof URIError ? new HttpError(400, 'That address is not valid.') : raw;
+      const error = mapped instanceof HttpError ? mapped : databaseError(mapped) || mapped;
       if (error instanceof HttpError) {
         const headers = error.extra?.retryAfter ? { 'Retry-After': String(error.extra.retryAfter) } : {};
         const { retryAfter, ...extra } = error.extra || {};
         if (!res.headersSent) sendJson(res, error.status, { error: error.message, ...extra }, headers);
       } else {
         console.error(`[error] ${req.method} ${url.pathname}`, error);
+        recordServerError(db, error, { method: req.method, pathname: url.pathname, userId });
         const message = config.production ? 'Something went wrong on our side.' : error.message;
         if (!res.headersSent) sendJson(res, 500, { error: message });
+        // Part of a file may already be on its way: end the connection rather than leave it hanging.
+        else res.destroy();
       }
     } finally {
       if (!config.production && url.pathname.startsWith('/api/')) {

@@ -53,6 +53,35 @@ tests, the web lint and the Playwright browser flows (`e2e/`, admin and runner);
 `npm run check:watch` reruns them whenever a source file changes; the GitHub
 workflow `.github/workflows/checks.yml` reruns them on every push and pull request.
 
+**2026-11-25 — Hosting: Render, Virginia, one container.** The API serves the built
+website from the same process (`Dockerfile`), described with its Postgres database
+in `render.yaml`. Smallest paid plans (about $13 a month at the listed prices that day).
+Chosen over Fly.io for less upkeep: deploys from GitHub after the checks pass, HTTPS
+and the database are managed. The environment starts empty; nothing is copied from a
+development database. Steps for the owner: `docs/launch-checklist.md`.
+
+**2026-11-25 — Uploads: disk by default, any S3-compatible bucket by configuration.**
+`server/src/storage.js` signs requests itself (AWS Signature V4, checked against AWS's
+published examples), so the server still has one dependency. The bucket stays private;
+files are read back through the API.
+
+**2026-11-25 — Error monitoring in our own database.** The phone app posts crashes to
+`POST /api/client-errors`; the API records its own unexpected errors; admins read
+them in Settings. A report is a message, a stack trace, the platform and the app
+version. No monitoring SDK, so the no-analytics rule holds.
+
+**2026-11-25 — The app is VantraRun, `com.vantrarun.app`.** Name and id given by the
+owner. The Expo slug and project id are unchanged (internal). The website and its
+emails were renamed to VantraRun the same day at the owner's request; code names, the
+database, storage keys and the `fitpro` run source are unchanged. Build numbers are
+managed by EAS.
+
+**2026-11-25 — Privacy policy: comprehensive, no fixed retention.** Owner's decision:
+data is held until the person deletes it or their account. The page lists the
+companies involved (Render, Resend, the routing and map providers), so it must be
+updated if any of those change. The consent version was raised to `2026-11-25`, so
+anyone who had accepted the earlier text is asked again.
+
 ## Not built yet (deliberately deferred)
 
 | Feature | State now | Notes |
