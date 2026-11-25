@@ -523,6 +523,104 @@ describe('ingestActivity (native contract)', () => {
   });
 });
 
+describe('runs recorded by FitPro', () => {
+  const liveRun = {
+    kind: 'run', source: 'fitpro', external_id: 'fp-run-0001',
+    distance_mi: 3.1, duration_sec: 1600, started_at: '2026-11-20T12:00:00Z',
+    target_zone_name: 'Zone 2', target_fast_sec: 495, target_slow_sec: 540,
+    in_zone_pct: 71.6, min_hr: 98.4, avg_hr: 141, max_hr: 163,
+    hr_target_min: 125, hr_target_max: 145, hr_in_zone_pct: 64,
+  };
+  const ingest = (who, body) => call('POST', '/api/functions/ingestActivity', { token: who.token, body });
+  const stored = async (who, id) => (await call('GET', `/api/entities/Run/${id}`, { token: who.token })).data;
+
+  test('a FitPro run stores its zone and heart-rate stats', async () => {
+    const route = await call('POST', '/api/entities/Route', { token: alice.token, body: { name: 'River loop' } });
+    const res = await ingest(alice, { ...liveRun, route_id: route.data.id });
+    assert.equal(res.data.action, 'created', JSON.stringify(res.data));
+    const run = await stored(alice, res.data.run_id);
+    assert.equal(run.route_id, route.data.id);
+    assert.equal(run.route_name, 'Free run');
+    assert.deepEqual(
+      [run.target_zone_name, run.target_fast_sec, run.target_slow_sec, run.in_zone_pct],
+      ['Zone 2', 495, 540, 72]
+    );
+    assert.deepEqual(
+      [run.min_hr, run.max_hr, run.hr_target_min, run.hr_target_max, run.hr_in_zone_pct],
+      [98, 163, 125, 145, 64]
+    );
+  });
+
+  test('a retried FitPro upload updates the same run', async () => {
+    const again = await ingest(alice, liveRun);
+    assert.equal(again.data.action, 'updated');
+  });
+
+  test('bad optional values are dropped, never rejected', async () => {
+    const bobRoute = await call('POST', '/api/entities/Route', { token: bob.token, body: { name: 'Not yours' } });
+    const res = await ingest(alice, {
+      ...liveRun, external_id: 'fp-run-0002', started_at: '2026-11-21T12:00:00Z',
+      route_id: bobRoute.data.id, target_fast_sec: 600, target_slow_sec: 500,
+      in_zone_pct: 140, min_hr: 5, hr_target_max: 999,
+    });
+    assert.equal(res.status, 200, JSON.stringify(res.data));
+    const run = await stored(alice, res.data.run_id);
+    for (const f of ['route_id', 'target_fast_sec', 'target_slow_sec', 'in_zone_pct', 'min_hr', 'hr_target_max']) {
+      assert.equal(run[f] ?? null, null, f);
+    }
+    assert.equal(run.hr_target_min, 125);
+  });
+
+  test('a route deleted before the upload arrives does not block it', async () => {
+    const res = await ingest(alice, {
+      ...liveRun, external_id: 'fp-run-0003', started_at: '2026-11-22T12:00:00Z',
+      route_id: '00000000-0000-4000-8000-000000000000',
+    });
+    assert.equal(res.data.action, 'created', JSON.stringify(res.data));
+    const junk = await ingest(alice, { ...liveRun, external_id: 'fp-run-0004', started_at: '2026-11-24T12:00:00Z', route_id: 'not-a-uuid' });
+    assert.equal(junk.data.action, 'created', JSON.stringify(junk.data));
+  });
+
+  test("the watch's copy of a FitPro run is skipped", async () => {
+    const res = await ingest(alice, {
+      kind: 'run', source: 'apple', external_id: 'HK-DUP-1',
+      distance_mi: 3.0, duration_sec: 1500, started_at: '2026-11-20T12:01:00Z',
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.data.action, 'skipped');
+    assert.equal(res.data.reason, 'overlaps_fitpro_run');
+    assert.equal(res.data.source, 'apple');
+    const original = await ingest(alice, liveRun);
+    assert.equal(res.data.run_id, original.data.run_id);
+    const [count] = await db.query(`select count(*)::int as n from runs where external_id = 'HK-DUP-1'`, []);
+    assert.equal(count.n, 0);
+  });
+
+  test('a run that only brushes a FitPro run is imported', async () => {
+    const res = await ingest(alice, {
+      kind: 'run', source: 'apple', external_id: 'HK-LATER-1',
+      distance_mi: 2, duration_sec: 1200, started_at: '2026-11-20T12:25:00Z',
+    });
+    assert.equal(res.data.action, 'created');
+  });
+
+  test("another person's FitPro run never causes a skip", async () => {
+    const res = await ingest(bob, {
+      kind: 'run', source: 'apple', external_id: 'HK-BOB-1',
+      distance_mi: 3, duration_sec: 1500, started_at: '2026-11-20T12:01:00Z',
+    });
+    assert.equal(res.data.action, 'created');
+  });
+
+  test('a run already imported keeps updating after a FitPro run overlaps it', async () => {
+    const imported = { kind: 'run', source: 'apple', external_id: 'HK-BOB-2', distance_mi: 3, duration_sec: 1500, started_at: '2026-11-23T12:00:00Z' };
+    assert.equal((await ingest(bob, imported)).data.action, 'created');
+    const live = await ingest(bob, { ...liveRun, external_id: 'fp-run-bob-1', started_at: '2026-11-23T12:00:30Z' });
+    assert.equal(live.data.action, 'created', 'a FitPro upload that arrives after the import still saves');
+    assert.equal((await ingest(bob, imported)).data.action, 'updated');
+  });
+});
+
 describe('social feed', () => {
   test('friends see non-private posts after accepting', async () => {
     const before = await call('POST', '/api/functions/socialFeed', { token: bob.token, body: {} });

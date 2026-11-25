@@ -1,4 +1,5 @@
 import { HttpError } from '../lib/http.js';
+import { isUuid } from '../lib/serialize.js';
 import { hasAccess } from './inviteAccess.js';
 
 // The single write path for synced health data (Apple Health, Health Connect,
@@ -117,6 +118,81 @@ async function upsert(db, table, user, payload) {
   return { id: result.id, action: result.inserted ? 'created' : 'updated' };
 }
 
+const FITPRO = 'fitpro';
+const MIN_BPM = 20;
+const MAX_BPM = 260;
+
+const inRange = (value, min, max) => {
+  const n = num(value);
+  return n !== null && n >= min && n <= max ? Math.round(n) : null;
+};
+
+// The optional fields a FitPro-recorded run carries: its route, the zone the
+// runner aimed for and the heart-rate stats. The phone queues runs while offline
+// and retries them, so nothing here may fail the upload: a value that doesn't
+// make sense is left out.
+async function readRunExtras(db, user, body) {
+  const extras = {};
+
+  if (isUuid(body.route_id)) {
+    const [route] = await db.query('select id from routes where id = $1 and created_by_id = $2', [
+      body.route_id,
+      user.id,
+    ]);
+    if (route) extras.route_id = route.id;
+  }
+
+  if (body.target_zone_name) extras.target_zone_name = String(body.target_zone_name).trim().slice(0, 80);
+  const fast = num(body.target_fast_sec);
+  const slow = num(body.target_slow_sec);
+  if (fast !== null && slow !== null && fast > 0 && slow > 0 && fast <= slow) {
+    extras.target_fast_sec = Math.round(fast);
+    extras.target_slow_sec = Math.round(slow);
+  }
+
+  const fields = [
+    ['in_zone_pct', 0, 100],
+    ['hr_in_zone_pct', 0, 100],
+    ['min_hr', MIN_BPM, MAX_BPM],
+    ['hr_target_min', MIN_BPM, MAX_BPM],
+    ['hr_target_max', MIN_BPM, MAX_BPM],
+  ];
+  for (const [field, min, max] of fields) {
+    const value = inRange(body[field], min, max);
+    if (value !== null) extras[field] = value;
+  }
+  return extras;
+}
+
+// Runs FitPro recorded itself: in the app (`fitpro`) or on the website (`live`).
+const RECORDED_BY_FITPRO = [FITPRO, 'live'];
+
+// A runner who also records on their watch would get the run twice: once from
+// FitPro, once imported from the health app. An incoming import is the same run
+// when the time the two share is at least half of the shorter one. A record
+// that was already imported keeps updating; only a new duplicate is skipped.
+async function overlappingFitproRun(db, user, source, externalId, run) {
+  const [match] = await db.query(
+    `select r.id
+       from runs r
+      where r.created_by_id = $1
+        and r.source = any($2::text[])
+        and r.started_at is not null
+        and not exists (
+          select 1 from runs e where e.created_by_id = $1 and e.source = $3 and e.external_id = $4
+        )
+        and extract(epoch from
+              least(r.started_at + make_interval(secs => r.duration_sec),
+                    $5::timestamptz + make_interval(secs => $6::float8))
+              - greatest(r.started_at, $5::timestamptz))
+            >= 0.5 * least(r.duration_sec, $6::float8)
+      order by r.started_at desc
+      limit 1`,
+    [user.id, RECORDED_BY_FITPRO, source, externalId, run.started_at, run.duration_sec]
+  );
+  return match?.id || null;
+}
+
 async function ingestRun(db, user, body) {
   const externalId = readExternalId(body, 'run');
   const distance = num(body.distance_mi);
@@ -140,7 +216,9 @@ async function ingestRun(db, user, body) {
   const avgPaceSec = Math.round(duration / distance);
 
   const payload = {
-    route_name: body.route_name ? String(body.route_name).trim().slice(0, 120) : 'Imported run',
+    route_name: body.route_name
+      ? String(body.route_name).trim().slice(0, 120)
+      : source === FITPRO ? 'Free run' : 'Imported run',
     distance_mi: round(distance, 2),
     duration_sec: Math.round(duration),
     avg_pace_sec: avgPaceSec,
@@ -154,6 +232,14 @@ async function ingestRun(db, user, body) {
   if (maxHr !== null) payload.max_hr = Math.round(maxHr);
   if (body.hr_device) payload.hr_device = String(body.hr_device).slice(0, 80);
   if (body.notes) payload.notes = String(body.notes).slice(0, 2000);
+  Object.assign(payload, await readRunExtras(db, user, body));
+
+  if (!RECORDED_BY_FITPRO.includes(source)) {
+    const original = await overlappingFitproRun(db, user, source, externalId, payload);
+    if (original) {
+      return { ok: true, kind: 'run', action: 'skipped', reason: 'overlaps_fitpro_run', run_id: original, source };
+    }
+  }
 
   const { id, action } = await upsert(db, 'runs', user, payload);
   return {
