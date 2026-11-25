@@ -28,8 +28,16 @@ assert.equal(result.reasons.length, 0);
 const wrongOrigin = [{ ...dist[0], metadata: { dataOrigin: 'com.other.tracker' } }];
 assert.equal(normalizeAndroidRun(run, wrongOrigin).run, null, 'Must not attribute distance from another writer');
 assert(normalizeAndroidRun(run, wrongOrigin).reasons.some((reason) => reason.includes('distance')));
-const overlap = [{ ...dist[0], startTime: '2026-11-12T11:59:59.000Z' }];
+// A single same-writer record whose edges are within 2 seconds of the session is
+// accepted (Health Connect can round the two records differently).
+const nearExact = [{ ...dist[0], startTime: '2026-11-12T11:59:59.000Z' }];
+assert.equal(normalizeAndroidRun(run, nearExact).run?.distanceMi, 1, 'A same-writer record within 2 seconds of the session is accepted');
+// Beyond that tolerance it is a partial overlap and must be refused.
+const overlap = [{ ...dist[0], startTime: '2026-11-12T11:59:57.000Z' }];
 assert.equal(normalizeAndroidRun(run, overlap).run, null, 'Cannot overcount distance from partially overlapping records');
+// Two near-exact records are ambiguous: never pick one or sum them.
+const twoNear = [nearExact[0], { ...dist[0], endTime: '2026-11-12T12:10:01.000Z' }];
+assert.equal(normalizeAndroidRun(run, twoNear).run, null, 'Two near-exact records from the same writer are ambiguous');
 const noId = { ...run, metadata: { dataOrigin: 'com.example.watch' } };
 assert(normalizeAndroidRun(noId, dist).reasons.some((reason) => reason.includes('ID')));
 assert.equal(normalizeAndroidRun({ ...run, exerciseType: 79 }, dist).run, null, 'Walking is not running');
