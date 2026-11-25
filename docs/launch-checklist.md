@@ -189,11 +189,10 @@ build carries a Google Maps key.
 
 ## Decisions still yours
 
-- **Who to name in the privacy policy.** The page at `/privacy` is now a full policy
-  (what is collected, why, who sees it, the companies involved, no fixed retention
-  period, how to delete). It names "the VantraRun team" and tells people to contact
-  whoever invited them, because no company name or contact address has been given.
-  Both stores also ask for a support contact. It has not been reviewed by a lawyer.
+- **Legal review of the privacy policy.** The page at `/privacy` is a full policy and
+  names Dynamic Technology Integration and info@dtisys.com (given by the owner; use the
+  same address as the support contact in both stores). It has not been reviewed by a
+  lawyer, and it names Render and Resend, so edit it if you pick other providers.
 
 ## After each step, what to check
 

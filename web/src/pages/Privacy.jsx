@@ -7,7 +7,7 @@ const SECTIONS = [
     title: 'Who this covers',
     body: [
       'This policy covers the VantraRun phone app and the VantraRun website. They are the same service: one account, one set of data.',
-      'VantraRun is in invite-only testing. It is run by the VantraRun team, the people who gave you your invite code. To ask a question or make a request about your data, contact the person who invited you.',
+      'VantraRun is run by Dynamic Technology Integration, and is in invite-only testing. To ask a question or make a request about your data, email info@dtisys.com.',
     ],
   },
   {
@@ -53,7 +53,7 @@ const SECTIONS = [
     body: [
       'You. Your runs, routes, profile and zones are readable only by your account: another signed-in person cannot open them.',
       'People you share with. A post is visible to whoever you chose when you made it: only you, your accepted friends, or everyone using VantraRun. Challenge results are visible to the members of that challenge.',
-      'The people who run VantraRun can access stored data when that is needed to operate, secure or fix the service, or to answer a request from you.',
+      'The people who run VantraRun at Dynamic Technology Integration can access stored data when that is needed to operate, secure or fix the service, or to answer a request from you.',
       'We will disclose data if the law requires it, and would tell you unless we are legally prevented from doing so.',
     ],
   },
@@ -78,7 +78,7 @@ const SECTIONS = [
   {
     title: 'Your choices',
     body: [
-      'See your data: your runs, routes, zones and posts are all visible in the app and on the website. To ask for a copy, contact the person who invited you.',
+      'See your data: your runs, routes, zones and posts are all visible in the app and on the website. To ask for a copy, email info@dtisys.com.',
       'Correct it: edit your profile and zones on the website; delete and re-record or re-import anything that is wrong.',
       'Delete training data: on the website, Settings → Your data wipes your runs, routes, profile and zones immediately. It cannot be undone.',
       'Delete your whole account: in the phone app, Settings → Delete account; on the website, Settings → Your data → Delete account. Both ask for your password, then remove your account and every record tied to it. It cannot be undone.',
