@@ -45,7 +45,8 @@
           }
         }
       ],
-      "expo-background-task"
+      "expo-background-task",
+      "react-native-ble-plx"
     ],
     "extra": {
       "scope": "Step 5: read-only Apple Health + Android Health Connect; no real uploads or background delivery.",
