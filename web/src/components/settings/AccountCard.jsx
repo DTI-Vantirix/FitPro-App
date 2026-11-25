@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Check, KeyRound, Mail } from 'lucide-react';
+import { Check, KeyRound, LogOut, Mail } from 'lucide-react';
 import { api } from '@/api/client';
 
 const field =
@@ -61,10 +61,17 @@ export default function AccountCard() {
 
       <div className="flex items-start gap-3 rounded-xl border border-border bg-secondary/40 px-3.5 py-3">
         <Mail className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="eyebrow">Login email</p>
           <p className="mt-0.5 truncate text-sm">{user?.email || '—'}</p>
         </div>
+        <button
+          type="button"
+          onClick={() => api.auth.logout('/login')}
+          className="flex shrink-0 items-center gap-1.5 self-center rounded-full border border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/60 hover:text-foreground"
+        >
+          <LogOut className="h-3.5 w-3.5" /> Sign out
+        </button>
       </div>
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         Your email is your login and can’t be edited here — a different address is a different account. To move to

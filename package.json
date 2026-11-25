@@ -17,9 +17,16 @@
     "dev:web": "npm run dev -w web",
     "build": "npm run build -w web",
     "test": "npm test -w server",
-    "lint": "npm run lint -w web"
+    "lint": "npm run lint -w web",
+    "e2e": "playwright test",
+    "e2e:report": "playwright show-report e2e/.results/html",
+    "check": "node scripts/check-all.mjs",
+    "check:watch": "node scripts/watch-checks.mjs"
   },
   "engines": {
     "node": ">=20.11"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1"
   }
 }
