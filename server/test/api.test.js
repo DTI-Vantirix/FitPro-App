@@ -428,6 +428,26 @@ describe('sign-up needs a code', () => {
     assert.equal(login.data.needs_verification, true);
   });
 
+  test('a password reset does not verify an account that still owes its code', async () => {
+    const code = await mintCode();
+    const email = 'pat@example.com';
+    await call('POST', '/api/auth/register', { body: { email, password: 'longenough1', invite_code: code } });
+    const ask = await call('POST', '/api/auth/reset-password-request', { body: { email } });
+    const reset = await call('POST', '/api/auth/reset-password', { body: { reset_token: ask.data.dev_token, new_password: 'another-pass-1' } });
+    assert.equal(reset.status, 200, JSON.stringify(reset.data));
+
+    const login = await call('POST', '/api/auth/login', { body: { email, password: 'another-pass-1' } });
+    assert.equal(login.status, 403, 'still has to verify, which is where the code is claimed');
+    assert.equal(login.data.needs_verification, true);
+    const [row] = await db.query('select status from invite_codes where code = $1', [code]);
+    assert.equal(row.status, 'available');
+
+    const ver = await call('POST', '/api/auth/verify-otp', { body: { email, otp_code: login.data.dev_code } });
+    assert.equal(ver.status, 200);
+    const [after] = await db.query('select status, used_by_email from invite_codes where code = $1', [code]);
+    assert.deepEqual({ ...after }, { status: 'used', used_by_email: email });
+  });
+
   test('an older account with no code can still sign in and redeem one', async () => {
     const kim = await legacyUser('kim@example.com');
     assert.equal((await call('POST', '/api/auth/login', { body: { email: 'kim@example.com', password: 'correct-horse-1' } })).status, 200);
@@ -602,6 +622,16 @@ describe('runs recorded by FitPro', () => {
       distance_mi: 2, duration_sec: 1200, started_at: '2026-11-20T12:25:00Z',
     });
     assert.equal(res.data.action, 'created');
+  });
+
+  test('a FitPro run that stopped early does not swallow the full run from the watch', async () => {
+    const stub = await ingest(alice, { ...liveRun, external_id: 'fp-run-stub', distance_mi: 0.2, duration_sec: 120, started_at: '2026-11-19T12:00:00Z' });
+    assert.equal(stub.data.action, 'created');
+    const full = await ingest(alice, {
+      kind: 'run', source: 'apple', external_id: 'HK-FULL-1',
+      distance_mi: 6.2, duration_sec: 3600, started_at: '2026-11-19T12:00:00Z',
+    });
+    assert.equal(full.data.action, 'created', 'two minutes of overlap is not the same run as an hour');
   });
 
   test("another person's FitPro run never causes a skip", async () => {

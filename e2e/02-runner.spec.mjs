@@ -53,6 +53,29 @@ test('the same code cannot be used by a second person', async ({ browser }) => {
   await visitor.close();
 });
 
+test('when someone else verifies with the code first, the form comes back for a new code', async ({ browser, request }) => {
+  const contested = await mintCode(request, 'contested');
+  const slow = await browser.newPage();
+  const answer = await submitSignUp(slow, { inviteCode: contested, email: 'slow@e2e.test', password: 'e2e-slow-pass-1' });
+  expect(answer.status).toBe(200);
+
+  // A second person registers and verifies with the same code while the first
+  // is still looking for their email.
+  const quick = { email: 'quick@e2e.test', password: 'e2e-quick-pass-1', invite_code: contested };
+  const reg = await request.post('/api/auth/register', { data: quick });
+  const ver = await request.post('/api/auth/verify-otp', { data: { email: quick.email, otp_code: (await reg.json()).dev_code } });
+  expect(ver.ok()).toBeTruthy();
+
+  await slow.locator('input[autocomplete="one-time-code"]').fill(answer.body.dev_code);
+  await slow.getByRole('button', { name: 'Verify' }).click();
+  await expect(slow.getByText('That invite code was just used by someone else. Ask for a new one.')).toBeVisible();
+
+  await slow.getByRole('button', { name: 'Use a different invite code' }).click();
+  await expect(slow.getByLabel('Invite code')).toBeVisible();
+  await expect(slow.getByLabel('Email')).toHaveValue('slow@e2e.test');
+  await slow.close();
+});
+
 test('gym is hidden: no menu entry, and the old address goes home', async () => {
   await page.goto('/');
   await expectSignedIn(page);

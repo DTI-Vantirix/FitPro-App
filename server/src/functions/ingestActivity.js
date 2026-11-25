@@ -169,8 +169,10 @@ const RECORDED_BY_FITPRO = [FITPRO, 'live'];
 
 // A runner who also records on their watch would get the run twice: once from
 // FitPro, once imported from the health app. An incoming import is the same run
-// when the time the two share is at least half of the shorter one. A record
-// that was already imported keeps updating; only a new duplicate is skipped.
+// when the time the two share is at least half of the longer one, so a FitPro
+// run that was stopped after two minutes never hides the hour the watch
+// recorded. A record that was already imported keeps updating; only a new
+// duplicate is skipped.
 async function overlappingFitproRun(db, user, source, externalId, run) {
   const [match] = await db.query(
     `select r.id
@@ -185,7 +187,7 @@ async function overlappingFitproRun(db, user, source, externalId, run) {
               least(r.started_at + make_interval(secs => r.duration_sec),
                     $5::timestamptz + make_interval(secs => $6::float8))
               - greatest(r.started_at, $5::timestamptz))
-            >= 0.5 * least(r.duration_sec, $6::float8)
+            >= 0.5 * greatest(r.duration_sec, $6::float8)
       order by r.started_at desc
       limit 1`,
     [user.id, RECORDED_BY_FITPRO, source, externalId, run.started_at, run.duration_sec]

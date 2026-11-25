@@ -135,6 +135,20 @@ export default function Register() {
             Resend
           </button>
         </p>
+        <p className="text-center text-sm text-muted-foreground mt-2">
+          <button
+            type="button"
+            onClick={() => {
+              setError("");
+              setOtpCode("");
+              setInviteCode("");
+              setShowOtp(false);
+            }}
+            className="text-primary font-medium hover:underline"
+          >
+            Use a different invite code
+          </button>
+        </p>
       </AuthLayout>
     );
   }

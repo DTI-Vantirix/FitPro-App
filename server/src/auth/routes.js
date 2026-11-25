@@ -222,9 +222,15 @@ export function registerAuthRoutes(router) {
     const next = readNewPassword(ctx.body.newPassword ?? ctx.body.new_password);
     const userId = await consumeLinkToken(ctx.db, 'reset_password', ctx.body.resetToken ?? ctx.body.reset_token);
     if (!userId) throw new HttpError(400, 'This reset link is invalid or has expired. Request a new one.');
+    // Opening the reset link proves the email, so it verifies the account, except
+    // for a sign-up that hasn't claimed its invite code yet: that one still has
+    // to go through verify-otp, which is where the code is claimed.
     await ctx.db.query(
       `update users set password_hash = $2, token_version = token_version + 1,
-              email_verified_at = coalesce(email_verified_at, now()), updated_date = now()
+              email_verified_at = case when pending_invite_code is null
+                                       then coalesce(email_verified_at, now())
+                                       else email_verified_at end,
+              updated_date = now()
         where id = $1 returning id`,
       [userId, await hashPassword(next)]
     );

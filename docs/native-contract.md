@@ -135,7 +135,8 @@ the proof the upsert works.
 A runner who also records on their watch would get the run twice. When an incoming run's
 `source` is not `fitpro`, the caller has no record yet for that `(source, external_id)`,
 and they already have a run recorded by FitPro (`fitpro`, or `live` from the website)
-that shares at least half of the shorter run's time span with it, nothing is written:
+that shares at least half of the longer run's time span with it, nothing is written
+(so a FitPro run stopped after two minutes never hides the hour a watch recorded):
 
 ```json
 { "ok": true, "kind": "run", "action": "skipped", "reason": "overlaps_fitpro_run",
