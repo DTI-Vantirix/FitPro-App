@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import ZoneTable from '@/components/zones/ZoneTable';
 import DataControls from '@/components/privacy/DataControls';
+import ErrorReportsCard from '@/components/admin/ErrorReportsCard';
 import InviteCodesCard from '@/components/admin/InviteCodesCard';
 import SocialProfileCard from '@/components/social/SocialProfileCard';
 import AccountCard from '@/components/settings/AccountCard';
@@ -235,6 +236,8 @@ export default function Settings() {
           <SocialProfileCard />
 
           <InviteCodesCard />
+
+          <ErrorReportsCard />
 
           <DataControls />
         </>

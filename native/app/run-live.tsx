@@ -57,7 +57,7 @@ function RunLive() {
   }
 
   function confirmFinish() {
-    Alert.alert('Finish this run?', 'It is saved to your phone and sent to FitPro.', [
+    Alert.alert('Finish this run?', 'It is saved to your phone and sent to VantraRun.', [
       { text: 'Keep running', style: 'cancel' },
       { text: 'Discard run', style: 'destructive', onPress: confirmDiscard },
       { text: 'Finish and save', onPress: () => { void save(); } },

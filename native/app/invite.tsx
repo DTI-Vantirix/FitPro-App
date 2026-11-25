@@ -56,32 +56,32 @@ export default function InviteScreen() {
 
   return <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-      <Text style={styles.brand}>FITPRO / NATIVE</Text>
+      <Text style={styles.brand}>VANTRARUN</Text>
       <SectionHeading kicker="STEP 02 · INVITE ACCESS" title="Verify your invite."
-        subtitle="FitPro is invite-only. We'll check your existing account access before accepting a new code." />
+        subtitle="VantraRun is invite-only. We'll check your existing account access before accepting a new code." />
       {status === 'checking' ? (
         <View style={styles.loadingPanel}>
           <ActivityIndicator color={colors.accent} />
-          <Text style={styles.muted}>Checking FitPro invite access…</Text>
+          <Text style={styles.muted}>Checking VantraRun invite access…</Text>
         </View>
       ) : <>
         <ErrorNotice message={error ?? accessError ?? sessionError} />
         {status === 'error' ? (
           <>
-            <Text style={styles.muted}>FitPro could not verify access. You are not authorized to continue while this request is failing.</Text>
+            <Text style={styles.muted}>VantraRun could not verify access. You are not authorized to continue while this request is failing.</Text>
             <Action label="Retry access check" onPress={retry} busy={busy} />
           </>
         ) : (
           <>
-            <Text style={styles.muted}>Enter the single-use invite code provided by the FitPro administrator. An existing approved account should pass this step automatically.</Text>
-            <Field label="FITPRO INVITE CODE" value={code} onChangeText={setCode} />
+            <Text style={styles.muted}>Enter the single-use invite code provided by the VantraRun administrator. An existing approved account should pass this step automatically.</Text>
+            <Field label="VANTRARUN INVITE CODE" value={code} onChangeText={setCode} />
             <Action label="Redeem invite and continue" onPress={redeemCode} busy={busy} disabled={!code.trim()} />
             <Action label="Check access again" onPress={retry} busy={busy} secondary />
           </>
         )}
       </>}
       <Action label="Sign out" onPress={signOut} busy={busy} secondary />
-      <Text style={styles.note}>Codes are verified directly by the FitPro API's inviteAccess function. This native client never creates access grants itself.</Text>
+      <Text style={styles.note}>Codes are verified directly by the VantraRun API's inviteAccess function. This native client never creates access grants itself.</Text>
     </ScrollView>
   </KeyboardAvoidingView>;
 }

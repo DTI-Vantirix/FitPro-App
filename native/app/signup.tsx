@@ -65,7 +65,7 @@ export default function SignUp() {
     <Brand />
     {step === 'details' ? <>
       <SectionHeading kicker="NEW HERE" title="Create your account."
-        subtitle="FitPro is invite-only for now. You need the code you were given." />
+        subtitle="VantraRun is invite-only for now. You need the code you were given." />
       <ErrorNotice message={error} />
       <Field label="NAME" value={fullName} onChangeText={setFullName} autoCapitalize="sentences" />
       <Field label="EMAIL" value={email} onChangeText={setEmail} keyboardType="email-address" />

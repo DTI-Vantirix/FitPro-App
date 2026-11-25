@@ -113,7 +113,7 @@ function RunStart() {
     try {
       const permissions = await requestRunPermissions();
       if (!permissions.foreground) {
-        throw new Error('FitPro needs your location to measure distance and pace. Allow location access for FitPro in your phone settings, then try again.');
+        throw new Error('VantraRun needs your location to measure distance and pace. Allow location access for VantraRun in your phone settings, then try again.');
       }
       await prepareAlerts();
       stopScan.current?.();
@@ -152,7 +152,7 @@ function RunStart() {
       {routes === null && <ActivityIndicator color={colors.accent} />}
       {!!routesNote && <Text style={shared.body}>{routesNote}</Text>}
       {routes !== null && routes.length === 0 && !routesNote &&
-        <Text style={shared.body}>You have no saved routes yet. Create one on the FitPro website, or choose a free run.</Text>}
+        <Text style={shared.body}>You have no saved routes yet. Create one on the website, or choose a free run.</Text>}
       {(routes ?? []).map((item) => <Pressable key={item.id} accessibilityRole="radio" accessibilityState={{ selected: route?.id === item.id }}
         onPress={() => chooseRoute(item)} style={[shared.panel, route?.id === item.id && local.selected]}>
         <Text style={shared.title}>{item.name}</Text>
@@ -214,7 +214,7 @@ function RunStart() {
     <ErrorNotice message={error} />
     <Action label="Start" onPress={() => { void start(); }} busy={starting} disabled={!canStart} />
     <Action label="Back" onPress={() => router.back()} secondary />
-    <Note>FitPro asks for your location when you press Start, and keeps recording with the screen locked.</Note>
+    <Note>VantraRun asks for your location when you press Start, and keeps recording with the screen locked.</Note>
   </Screen>;
 }
 

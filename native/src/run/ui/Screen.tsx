@@ -23,7 +23,7 @@ export function Screen({ children, scroll = true }: { children: React.ReactNode;
 }
 
 export function Brand() {
-  return <Text style={styles.brand}>FITPRO</Text>;
+  return <Text style={styles.brand}>VANTRARUN</Text>;
 }
 
 export function Panel({ children }: { children: React.ReactNode }) {
@@ -50,8 +50,8 @@ export function Gated({ children, setup = true }: { children: React.ReactNode; s
   if (status === 'error' && !account.offlineAccess) {
     return <Screen>
       <Brand />
-      <ErrorNotice message={error ?? 'FitPro could not confirm your access.'} />
-      <Note>Your access could not be checked, so nothing is shown. Check your connection and try again. (Once you have opened FitPro with a connection on this phone, you can start a run without one.)</Note>
+      <ErrorNotice message={error ?? 'VantraRun could not confirm your access.'} />
+      <Note>Your access could not be checked, so nothing is shown. Check your connection and try again. (Once you have opened VantraRun with a connection on this phone, you can start a run without one.)</Note>
       <Action label="Try again" onPress={() => { void refresh(); }} />
     </Screen>;
   }
@@ -60,7 +60,7 @@ export function Gated({ children, setup = true }: { children: React.ReactNode; s
     return <Screen>
       <Brand />
       <ErrorNotice message={account.error} />
-      <Note>FitPro needs a connection the first time you open it on this phone. After that you can start a run without one.</Note>
+      <Note>VantraRun needs a connection the first time you open it on this phone. After that you can start a run without one.</Note>
       <Action label="Try again" onPress={() => { void account.reload(); }} />
     </Screen>;
   }

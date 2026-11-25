@@ -78,7 +78,7 @@ function Settings() {
 
     <Panel>
       <Text style={styles.label}>DELETE ACCOUNT</Text>
-      <Text style={styles.body}>Permanently deletes your FitPro account and every run, route, zone and post it owns, on the server and on this phone. This cannot be undone.</Text>
+      <Text style={styles.body}>Permanently deletes your VantraRun account and every run, route, zone and post it owns, on the server and on this phone. This cannot be undone.</Text>
       {!deleting
         ? <Action label="Delete my account…" onPress={() => { setDeleting(true); setError(null); }} disabled={Boolean(run)} secondary />
         : <>
@@ -101,7 +101,7 @@ function Settings() {
       <Action label="Connection test" onPress={() => router.push('/spike')} secondary />
     </Panel>
     <Action label="Back" onPress={() => router.back()} secondary />
-    <Note>FitPro uses no advertising or analytics software. Zones and routes are edited on the FitPro website for now.</Note>
+    <Note>VantraRun uses no advertising or analytics software. Zones and routes are edited on the website for now.</Note>
   </Screen>;
 }
 

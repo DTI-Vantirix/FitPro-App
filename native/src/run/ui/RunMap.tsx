@@ -22,7 +22,7 @@ const toCoord = (p: LatLng) => ({ latitude: p.lat, longitude: p.lng });
 
 /** Apple Maps needs no key. Google Maps on Android does, and must not be created without
  * one, so until the build carries a key the map is replaced by a plain notice. */
-export const MAP_AVAILABLE = Platform.OS !== 'android' || Boolean(Constants.expoConfig?.android?.config?.googleMaps?.apiKey);
+export const MAP_AVAILABLE = Platform.OS !== 'android' || Constants.expoConfig?.extra?.androidMapsKeyPresent === true;
 
 export function RunMap({ route = [], track = [], live, nextTurn }: Props) {
   const map = useRef<MapView>(null);

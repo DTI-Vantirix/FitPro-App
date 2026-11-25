@@ -1,4 +1,4 @@
-/** Everything the run experience asks of the FitPro API, over HTTP only.
+/** Everything the run experience asks of the VantraRun API, over HTTP only.
  * Runs are written through ingestActivity and nowhere else (docs/native-contract.md).
  * Profile, zones and routes use the same entity routes the website uses.
  */
@@ -26,7 +26,7 @@ export type SavedRoute = {
 };
 export type Directions = { available: boolean; maneuvers: Maneuver[] };
 
-const OFFLINE = "Can't reach FitPro. Check your connection and try again.";
+const OFFLINE = "Can't reach VantraRun. Check your connection and try again.";
 
 type Reply = { status: number; data: unknown };
 

@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { toManeuvers } from '../src/functions/routeDirections.js';
+import { routerRequestUrl } from '../src/functions/snapRoute.js';
 
 const leg1Points = [[40.7, -74.0], [40.702, -74.0], [40.702, -74.004]];
 const leg2Points = [[40.702, -74.004], [40.703, -74.004]];
@@ -49,4 +50,15 @@ test('an empty or malformed trip gives no maneuvers', () => {
   assert.deepEqual(toManeuvers(null), []);
   assert.deepEqual(toManeuvers({ legs: [{}] }), []);
   assert.deepEqual(toManeuvers({ legs: [{ shape: leg2Points, maneuvers: [{ type: 15, instruction: 'x', begin_shape_index: 99 }] }] }), []);
+});
+
+test('the router URL is unchanged without a key, and carries the key when there is one', () => {
+  const payload = { locations: [{ lat: 40.7, lon: -74 }], costing: 'pedestrian' };
+  const json = encodeURIComponent(JSON.stringify(payload));
+  assert.equal(routerRequestUrl({ routerUrl: 'https://valhalla1.openstreetmap.de/route', routerApiKey: '' }, payload),
+    `https://valhalla1.openstreetmap.de/route?json=${json}`);
+  assert.equal(routerRequestUrl({ routerUrl: 'https://api.stadiamaps.com/route/v1', routerApiKey: 'k/ey+1' }, payload),
+    `https://api.stadiamaps.com/route/v1?json=${json}&api_key=k%2Fey%2B1`);
+  assert.equal(routerRequestUrl({ routerUrl: 'https://router.example/route?profile=x', routerApiKey: 'abc' }, payload),
+    `https://router.example/route?profile=x&json=${json}&api_key=abc`);
 });

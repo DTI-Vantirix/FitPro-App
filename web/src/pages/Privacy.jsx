@@ -24,13 +24,15 @@ const SECTIONS = [
     body: [
       'The signed-in app runs no third-party analytics, advertising pixels or session recording. There is nothing on a run screen quietly reporting what you do.',
       'Standard hosting logs may exist at the platform level to keep the service running and secure; those are not used to profile your training.',
+      'If the phone app crashes, it sends an error report to this app’s own server: the error message, where in the code it happened, the app version and the kind of phone. It contains no location, heart rate or run data, it is not shared with any outside service, and it is deleted with your account.',
     ],
   },
   {
     title: 'Location and heart rate, specifically',
     body: [
       'Location is read only while you have a run tracking, and the resulting track is saved as part of that run. You can run a route without saving a track by not starting tracking.',
-      'Heart rate comes from a monitor you pair yourself. The browser connects to it directly; the readings are written to the run record and nowhere else.',
+      'In the phone app, location is used only while a run is being recorded, including while the screen is locked, and stops when you finish or discard the run. The app never asks for your location at any other time.',
+      'Heart rate comes from a monitor you pair yourself. The browser or phone connects to it directly; the readings are written to the run record and nowhere else.',
       'Watch and platform syncs, when you turn them on, pull the activities you authorise and nothing more.',
     ],
   },

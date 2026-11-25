@@ -73,6 +73,7 @@ routes the website uses; nothing here is new on the server. All need the bearer 
 | Pace zones | `POST /api/entities/PaceZone/query`; first-time setup writes the five zones with `PUT` or `POST /api/entities/PaceZone/bulk` (and `DELETE /api/entities/PaceZone/:id` to clear a non-standard set), exactly as the website's onboarding does |
 | Saved routes (read only) | `POST /api/entities/Route/query` |
 | Turn directions for a route | `POST /api/functions/routeDirections { route_id }` -> `{ available, maneuvers: [{ index, instruction, verbal, type, lat, lng, at_mi }] }`; `404` for a route the caller does not own. `available: false` means the route is still drawn but turns are not spoken |
+| Report a crash | `POST /api/client-errors { message, stack?, context?, platform?, app_version? }` -> `201 { ok: true }`. Signed-in users only, 20 an hour each; long fields are cut. Never send a token, location or health data in it |
 
 Every query the app sends carries `q: { "created_by_id": "<the user's id>" }`. An admin's
 token can read other people's records, and the app must only ever show and change the

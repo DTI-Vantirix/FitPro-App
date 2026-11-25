@@ -9,6 +9,7 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
+import { bootstrapAdmin } from '../src/auth/bootstrap.js';
 import { loadRegistry } from '../src/entities/registry.js';
 import { migrate } from '../src/migrate.js';
 import { createPsqlDb } from './psql-db.js';
@@ -708,6 +709,108 @@ describe('uploads', () => {
     const anon = await call('POST', '/api/uploads', { raw: 'x', headers: { 'Content-Type': 'image/png' } });
     assert.equal(anon.status, 401);
     assert.equal((await fetch(`${base}/uploads/..%2f..%2fetc%2fpasswd`)).status, 404);
+  });
+});
+
+describe('first admin on a new host', () => {
+  const login = (email, password) => call('POST', '/api/auth/login', { body: { email, password } });
+
+  test('nothing happens unless both settings are present and the password is long enough', async () => {
+    assert.equal(await bootstrapAdmin(db, {}), 'skipped');
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'owner@example.com' }), 'skipped');
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'owner@example.com', ADMIN_PASSWORD: 'short-pw' }), 'skipped');
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'not-an-email', ADMIN_PASSWORD: 'a-long-enough-password' }), 'skipped');
+    assert.equal((await db.query(`select id from users where email = 'owner@example.com'`, [])).length, 0);
+  });
+
+  test('creates a verified admin who can sign in and needs no invite code', async () => {
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: ' Owner@Example.com ', ADMIN_PASSWORD: 'a-long-enough-password' }), 'created');
+    const signedIn = await login('owner@example.com', 'a-long-enough-password');
+    assert.equal(signedIn.status, 200, JSON.stringify(signedIn.data));
+    assert.equal(signedIn.data.user.role, 'admin');
+    const access = await call('POST', '/api/functions/inviteAccess', { token: signedIn.data.access_token, body: { action: 'status' } });
+    assert.equal(access.data.allowed, true);
+  });
+
+  test('a second start changes nothing, even with a different password', async () => {
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'owner@example.com', ADMIN_PASSWORD: 'a-different-password' }), 'exists');
+    assert.equal((await login('owner@example.com', 'a-long-enough-password')).status, 200);
+    assert.equal((await login('owner@example.com', 'a-different-password')).status, 401);
+  });
+
+  test('an existing ordinary account with that email is never promoted or reset', async () => {
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'bob@example.com', ADMIN_PASSWORD: 'a-long-enough-password' }), 'exists');
+    const stillBob = await login('bob@example.com', 'correct-horse-1');
+    assert.equal(stillBob.status, 200);
+    assert.equal(stillBob.data.user.role, 'user');
+    assert.equal((await login('bob@example.com', 'a-long-enough-password')).status, 401);
+  });
+});
+
+describe('error reports', () => {
+  const report = (token, body) => call('POST', '/api/client-errors', { token, body });
+  let owner;
+
+  test('only a signed-in person can send one', async () => {
+    assert.equal((await report(undefined, { message: 'boom' })).status, 401);
+    assert.equal((await report(bob.token, {})).status, 400);
+    assert.equal((await report(bob.token, { message: '   ' })).status, 400);
+  });
+
+  test('a report is stored against the sender, with long fields cut down', async () => {
+    const sent = await report(bob.token, {
+      message: 'm'.repeat(900), stack: 's'.repeat(9000), context: 'c'.repeat(900), platform: 'ios', app_version: '1.0.0 (12)',
+      user_id: alice.user.id, extra: { anything: true },
+    });
+    assert.equal(sent.status, 201, JSON.stringify(sent.data));
+    assert.deepEqual(sent.data, { ok: true });
+    const [row] = await db.query('select * from client_errors where user_id = $1', [bob.user.id]);
+    assert.deepEqual([row.message.length, row.stack.length, row.context.length, row.platform, row.app_version], [500, 4000, 200, 'ios', '1.0.0 (12)']);
+  });
+
+  test('admins read them newest first; nobody else can', async () => {
+    owner = (await call('POST', '/api/auth/login', { body: { email: 'owner@example.com', password: 'a-long-enough-password' } })).data;
+    await report(bob.token, { message: 'second report', platform: 'android' });
+    assert.equal((await call('POST', '/api/functions/adminClientErrors', { token: bob.token, body: { action: 'list' } })).status, 403);
+    const list = await call('POST', '/api/functions/adminClientErrors', { token: owner.access_token, body: { action: 'list' } });
+    assert.equal(list.status, 200);
+    assert.equal(list.data.errors[0].message, 'second report');
+    assert.equal(list.data.errors[0].user_email, 'bob@example.com');
+    assert.equal(list.data.errors.length, 2);
+    assert.equal(list.data.errors[0].password_hash, undefined);
+  });
+
+  test('an unexpected server error is recorded too, without the request body', async () => {
+    const before = (await db.query(`select count(*)::int as n from client_errors where platform = 'server'`, []))[0].n;
+    const crash = await call('POST', '/api/functions/adminClientErrors', { token: owner.access_token, body: { action: 'test-crash', secret: 'do-not-store-me' } });
+    assert.equal(crash.status, 500);
+    // the record is written just after the reply goes out
+    let rows = [];
+    for (let i = 0; i < 40 && rows.length <= before; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      rows = await db.query(`select * from client_errors where platform = 'server' order by created_date desc`, []);
+    }
+    assert.equal(rows.length, before + 1);
+    assert.equal(rows[0].context, 'POST /api/functions/adminClientErrors');
+    assert.ok(!JSON.stringify(rows[0]).includes('do-not-store-me'));
+  });
+
+  test('one person cannot flood the table', async () => {
+    let last;
+    for (let i = 0; i < 20; i++) last = await report(bob.token, { message: `flood ${i}` });
+    assert.equal(last.status, 429);
+    const [{ n }] = await db.query('select count(*)::int as n from client_errors where user_id = $1', [bob.user.id]);
+    assert.equal(n, 20);
+  });
+
+  test('admins can clear the list; deleting an account deletes its reports', async () => {
+    const carol = await signUp('errors-carol@example.com');
+    await report(carol.token, { message: 'from carol' });
+    await call('DELETE', '/api/auth/me', { token: carol.token, body: { password: 'correct-horse-1' } });
+    assert.equal((await db.query('select id from client_errors where user_id = $1', [carol.user.id])).length, 0);
+    const cleared = await call('POST', '/api/functions/adminClientErrors', { token: owner.access_token, body: { action: 'clear' } });
+    assert.equal(cleared.status, 200);
+    assert.equal((await db.query('select id from client_errors', [])).length, 0);
   });
 });
 

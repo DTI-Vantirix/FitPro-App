@@ -3,10 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { requireUser } from './auth/users.js';
 import { HttpError, readBody, reply } from './lib/http.js';
+import { createStorage } from './storage.js';
 
 // Public media uploads (post backgrounds, avatars). Replaces Base44's
-// UploadPublicFile. Files go to UPLOAD_DIR on local disk; before production,
-// point this at object storage (S3, R2, GCS) — the API shape stays the same.
+// UploadPublicFile. Where the bytes live is decided by storage.js (local disk, or
+// an S3-compatible bucket when one is configured); the API shape is the same.
 //
 //   POST /api/uploads   raw file bytes, Content-Type set to the file's type
 //                       -> { file_url }
@@ -33,20 +34,26 @@ export function registerUploadRoutes(router) {
     if (!ext) throw new HttpError(415, 'Upload a photo (JPEG, PNG, WebP, GIF, HEIC) or a video (MP4, MOV, WebM).');
     const data = await readBody(ctx.req, ctx.config.maxUploadBytes);
     if (!data.length) throw new HttpError(400, 'The file is empty.');
-    await fs.promises.mkdir(ctx.config.uploadDir, { recursive: true });
     const name = `${randomUUID()}${ext}`;
-    await fs.promises.writeFile(path.join(ctx.config.uploadDir, name), data);
+    await createStorage(ctx.config).put(name, data, type);
     return reply(201, { file_url: `${ctx.config.publicUrl}/uploads/${name}` });
   });
 
   router.add('GET', '/uploads/:name', async (ctx) => {
     const name = ctx.params.name;
     if (!NAME_RE.test(name)) throw new HttpError(404, 'Not found');
-    return serveFile(ctx.res, path.join(ctx.config.uploadDir, name), {
+    const found = await createStorage(ctx.config).open(name);
+    if (!found) throw new HttpError(404, 'Not found');
+    ctx.res.writeHead(200, {
+      ...(found.size != null ? { 'Content-Length': found.size } : {}),
       'Content-Type': CONTENT_TYPE_BY_EXT[path.extname(name)] || 'application/octet-stream',
       'Cache-Control': 'public, max-age=31536000, immutable',
       'X-Content-Type-Options': 'nosniff',
     });
+    await new Promise((resolve, reject) => {
+      found.stream.on('error', reject).on('end', resolve).pipe(ctx.res);
+    });
+    return HANDLED;
   });
 }
 

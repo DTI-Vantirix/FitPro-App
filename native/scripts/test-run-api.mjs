@@ -41,7 +41,7 @@ await test('the emailed code signs the runner in', async () => {
 });
 await test('offline is said plainly', async () => {
   reset(() => 'offline');
-  await assert.rejects(api.fetchMe('tok'), (e) => e.status === 0 && /Can't reach FitPro/.test(e.message));
+  await assert.rejects(api.fetchMe('tok'), (e) => e.status === 0 && /Can't reach VantraRun/.test(e.message));
 });
 await test('account deletion is DELETE /api/auth/me with the password', async () => {
   reset(() => ({ status: 200, data: { ok: true, deleted: true } }));

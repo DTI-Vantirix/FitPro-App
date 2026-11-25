@@ -1,7 +1,8 @@
 name: Checks
 
 # Every push reruns the API tests, the web lint and the browser flows (admin
-# and runner) against a fresh Postgres, and the phone app's own checks. A pull request shows the result of the
+# and runner) against a fresh Postgres, the phone app's own checks, and a build and
+# smoke test of the production image. A pull request shows the result of the
 # push to its branch, so there is no separate pull_request trigger.
 on:
   push:
@@ -83,3 +84,44 @@ jobs:
         run: npm test
       - name: Native config resolves
         run: npx expo config --type introspect --json > /dev/null
+
+  # Builds the production image exactly as the host will, starts it against a fresh
+  # Postgres and checks it end to end: health, the website, first admin, an upload,
+  # an invite code and error recording.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: fitpro
+          POSTGRES_PASSWORD: fitpro
+          POSTGRES_DB: fitpro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fitpro"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build the image
+        run: docker build -t vantrarun .
+      - name: Start it
+        run: >-
+          docker run -d --name vantrarun --network host
+          -e DATABASE_URL=postgres://fitpro:fitpro@localhost:5432/fitpro
+          -e JWT_SECRET=ci-only-secret-ci-only-secret-0123456789
+          -e ADMIN_EMAIL=owner@example.com
+          -e ADMIN_PASSWORD=ci-only-admin-password
+          vantrarun
+      - name: Smoke test
+        run: node scripts/smoke-image.mjs http://127.0.0.1:10000 owner@example.com ci-only-admin-password
+      - name: Server log
+        if: ${{ !cancelled() }}
+        run: docker logs vantrarun

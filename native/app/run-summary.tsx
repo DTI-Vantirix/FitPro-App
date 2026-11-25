@@ -108,7 +108,7 @@ function RunSummary() {
 
     <Panel>
       <Text style={shared.label}>SAVING</Text>
-      {run.status === 'uploaded' && <Text style={shared.body}>Saved to FitPro. It is on the website too.</Text>}
+      {run.status === 'uploaded' && <Text style={shared.body}>Saved to VantraRun. It is on the website too.</Text>}
       {run.status === 'pending' && <>
         <Text style={shared.body}>Waiting for a connection. The run is safe on this phone and is sent automatically.</Text>
         {!!run.lastError && <Text style={shared.note}>Last try: {run.lastError}</Text>}
@@ -119,11 +119,11 @@ function RunSummary() {
         <ErrorNotice message={run.lastError} />
         <Action label="Try again" onPress={() => { void sendNow(); }} busy={busy} secondary />
       </>}
-      {run.status === 'local_only' && <Text style={shared.body}>Too short to save to FitPro (under 0.01 mi). It is kept on this phone only.</Text>}
+      {run.status === 'local_only' && <Text style={shared.body}>Too short to save to VantraRun (under 0.01 mi). It is kept on this phone only.</Text>}
     </Panel>
 
     <Action label="Done" onPress={() => router.replace('/home')} />
-    <Note>Sharing a run to the feed comes in a later version. Until then you can share it from the FitPro website.</Note>
+    <Note>Sharing a run to the feed comes in a later version. Until then you can share it from the website.</Note>
   </Screen>;
 }
 

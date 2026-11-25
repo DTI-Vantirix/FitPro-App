@@ -38,7 +38,7 @@ function Home() {
     if (!ownerId) return;
     runController.recover(ownerId)
       .then((outcome) => {
-        if (outcome === 'paused') setRecovered('FitPro closed during your last run. It is paused where it stopped: resume it, or finish it to save what was recorded.');
+        if (outcome === 'paused') setRecovered('VantraRun closed during your last run. It is paused where it stopped: resume it, or finish it to save what was recorded.');
         if (outcome === 'saved') { setRecovered('Your last run was recovered and saved.'); void refresh(); }
       })
       .catch((cause: unknown) => setError(`A run in progress could not be recovered: ${cause instanceof Error ? cause.message : String(cause)}`));
@@ -57,7 +57,7 @@ function Home() {
   return <Screen>
     <Brand />
     <SectionHeading kicker="READY" title="Go for a run."
-      subtitle="Pick how you want to run and which zone to aim for. FitPro tells you when pace or heart rate leaves it." />
+      subtitle="Pick how you want to run and which zone to aim for. VantraRun tells you when pace or heart rate leaves it." />
     <ErrorNotice message={error} />
     {!!recovered && <Panel><Text style={styles.body}>{recovered}</Text></Panel>}
     {run
@@ -90,7 +90,7 @@ function Home() {
 
     <Action label="Import a run from Apple Health or Health Connect" onPress={() => router.push('/activities')} secondary />
     <Action label="Settings" onPress={() => router.push('/settings')} secondary />
-    <Note>Routes are created on the FitPro website and appear here when you choose a pre-mapped run.</Note>
+    <Note>Routes are created on the website and appear here when you choose a pre-mapped run.</Note>
   </Screen>;
 }
 

@@ -77,9 +77,19 @@ on every push and pull request (`.github/workflows/checks.yml`).
 
 ## Deploying
 
-Not chosen yet. Because this is plain Node + Postgres, it runs on most hosts
-(Fly.io, Railway, Render, a VPS, AWS). The short version: provision Postgres, set
-the variables in `.env.example` (a real `JWT_SECRET` and `RESEND_API_KEY` at
-minimum), run `npm run migrate`, `npm run build`, and start the API with
-`WEB_DIST=web/dist` to serve the web app from the same process. See the deployment
-checklist in [docs/decisions.md](docs/decisions.md).
+One container runs the API and serves the built website; `render.yaml` describes it
+and its Postgres database for [Render](https://render.com) (Virginia). The steps that
+need the owner's accounts — hosting, email, the store builds — are in
+[docs/launch-checklist.md](docs/launch-checklist.md).
+
+```bash
+docker build -t vantrarun .
+docker run -p 10000:10000 -e DATABASE_URL=postgres://... -e JWT_SECRET=<32+ random characters> vantrarun
+node scripts/smoke-image.mjs http://127.0.0.1:10000 <admin email> <admin password>   # against a throwaway database
+```
+
+The image runs migrations at start-up. On a host with no shell, `ADMIN_EMAIL` and
+`ADMIN_PASSWORD` create the first admin once. Uploads stay on disk (`UPLOAD_DIR`)
+unless the `S3_*` variables point at a bucket. Every setting is in `.env.example`.
+It still runs anywhere Node and Postgres do: `npm run build`, then start the API with
+`WEB_DIST=web/dist`.

@@ -32,6 +32,13 @@ export function decodePolyline(encoded, precision = 6) {
   return coords;
 }
 
+// The request to a Valhalla router. A hosted provider's key rides along as api_key.
+export function routerRequestUrl(config, payload) {
+  const joiner = config.routerUrl.includes('?') ? '&' : '?';
+  const key = config.routerApiKey ? `&api_key=${encodeURIComponent(config.routerApiKey)}` : '';
+  return `${config.routerUrl}${joiner}json=${encodeURIComponent(JSON.stringify(payload))}${key}`;
+}
+
 export function haversineMiles(a, b) {
   const toRad = (deg) => (deg * Math.PI) / 180;
   const dLat = toRad(b.lat - a.lat);
@@ -61,7 +68,7 @@ export default async function snapRoute({ body, config }) {
   if (!config.routerUrl || config.routerUrl === 'off') return straightPath(points);
 
   const payload = { locations: points, costing: 'pedestrian', units: 'miles', directions_type: 'none' };
-  const url = `${config.routerUrl}?json=${encodeURIComponent(JSON.stringify(payload))}`;
+  const url = routerRequestUrl(config, payload);
 
   try {
     const res = await fetch(url, {
