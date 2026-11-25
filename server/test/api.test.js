@@ -621,6 +621,23 @@ describe('runs recorded by FitPro', () => {
   });
 });
 
+describe('route directions', () => {
+  test('router off -> not available; not your route -> 404', async () => {
+    const route = await call('POST', '/api/entities/Route', {
+      token: alice.token,
+      body: { name: 'Two points', points: [{ lat: 40.7, lng: -74.0 }, { lat: 40.71, lng: -74.0 }] },
+    });
+    const mine = await call('POST', '/api/functions/routeDirections', { token: alice.token, body: { route_id: route.data.id } });
+    assert.deepEqual(mine, { status: 200, data: { available: false, maneuvers: [] } });
+    const theirs = await call('POST', '/api/functions/routeDirections', { token: bob.token, body: { route_id: route.data.id } });
+    assert.deepEqual(theirs, { status: 404, data: { error: 'Route not found.' } });
+    const junk = await call('POST', '/api/functions/routeDirections', { token: alice.token, body: { route_id: 'nope' } });
+    assert.equal(junk.status, 404);
+    const none = await call('POST', '/api/functions/routeDirections', { token: alice.token, body: {} });
+    assert.equal(none.status, 404);
+  });
+});
+
 describe('social feed', () => {
   test('friends see non-private posts after accepting', async () => {
     const before = await call('POST', '/api/functions/socialFeed', { token: bob.token, body: {} });

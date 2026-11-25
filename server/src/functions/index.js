@@ -4,12 +4,13 @@ import adminInviteCodes from './adminInviteCodes.js';
 import challengeBoard from './challengeBoard.js';
 import ingestActivity from './ingestActivity.js';
 import inviteAccess from './inviteAccess.js';
+import routeDirections from './routeDirections.js';
 import snapRoute from './snapRoute.js';
 import socialFeed from './socialFeed.js';
 
 // POST /api/functions/:name — same names and bodies the app sent to Base44
 // (base44.functions.invoke). Every function needs a signed-in user.
-const FUNCTIONS = { adminInviteCodes, challengeBoard, ingestActivity, inviteAccess, snapRoute, socialFeed };
+const FUNCTIONS = { adminInviteCodes, challengeBoard, ingestActivity, inviteAccess, routeDirections, snapRoute, socialFeed };
 
 export function registerFunctionRoutes(router) {
   router.add('POST', '/api/functions/:name', async (ctx) => {

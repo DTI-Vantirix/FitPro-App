@@ -50,8 +50,9 @@ little to learn or upgrade.
   entity JSON (rules, required fields, defaults, enums) and the column types from
   the live database. `query.js` turns the app's Mongo-style filters (`$in`, `$gte`,
   `$or`, ...) into SQL. `service.js` applies the access rules.
-- `src/functions/`: the six backend functions, ported from
-  `docs/reference/base44-functions/`. Behaviour is the same; they now use SQL
+- `src/functions/`: the six backend functions ported from
+  `docs/reference/base44-functions/`, plus `routeDirections` (turn-by-turn
+  directions for a saved route, from the same Valhalla router). Behaviour is the same; they now use SQL
   directly, and the invite claim and the health-data upsert are atomic.
 - `migrations/`: numbered SQL files, applied in order by `npm run migrate` (and on
   API start unless `MIGRATE_ON_START=false`).
