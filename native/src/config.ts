@@ -7,3 +7,5 @@ export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? '').trim().replace(/\
 
 export const APP_AUTH_URL = `${API_URL}/api/auth`;
 export const INGEST_URL = `${API_URL}/api/functions/ingestActivity`;
+export const ENTITIES_URL = `${API_URL}/api/entities`;
+export const FUNCTIONS_URL = `${API_URL}/api/functions`;
