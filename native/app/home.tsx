@@ -45,7 +45,7 @@ function Home() {
   }, [ownerId, refresh]);
 
   useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
-  useEffect(() => { void refresh(); }, [waiting.pending, waiting.needsAttention, refresh]);
+  useEffect(() => { void refresh(); }, [waiting, refresh]);
 
   async function retry() {
     setRetrying(true);

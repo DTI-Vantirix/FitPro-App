@@ -37,6 +37,33 @@ await test('poor accuracy and impossible jumps are dropped', () => {
   t = tr.addFix(t, { lat: 95, lng: 0, t: 31000, accuracy: 5 }, 23);
   assert.equal(t.points.length, 3);
 });
+await test('standing still with a noisy GPS adds (almost) nothing', () => {
+  // deterministic pseudo-noise of up to +/-5 m around one spot, accuracy 8 m, for 3 minutes
+  let seed = 7;
+  const noise = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return (seed / 2147483648 - 0.5) * 10; };
+  let t = tr.addFix(tr.emptyTrack(), fix(0, 0, 0, 8), 0);
+  for (let s = 1; s <= 180; s++) t = tr.addFix(t, fix(noise(), noise(), s, 8), s);
+  assert.ok(t.meters < 15, `stationary phone ran up ${t.meters.toFixed(1)} m`);
+  assert.equal(tr.rollingPaceSec(t.points, 180000), null);
+});
+await test('the phone saying it is not moving is believed', () => {
+  let t = tr.addFix(tr.emptyTrack(), fix(0, 0, 0), 0);
+  t = tr.addFix(t, { ...fix(6, 0, 2), speed: 0 }, 2);
+  t = tr.addFix(t, { ...fix(0, 6, 4), speed: 0.1 }, 4);
+  assert.equal(t.meters, 0);
+  // moving again: counted from the anchor, so nothing is lost
+  t = tr.addFix(t, { ...fix(12, 0, 8), speed: 3 }, 8);
+  near(t.meters, 12, 0.5);
+  // a phone that reports no speed (null or negative) is judged on position alone
+  t = tr.addFix(t, { ...fix(24, 0, 12), speed: -1 }, 12);
+  near(t.meters, 24, 0.5);
+});
+await test('a real run with ordinary accuracy still measures true', () => {
+  let t = tr.emptyTrack();
+  for (let s = 0; s <= 600; s++) t = tr.addFix(t, { ...fix(s * 3, 0, s, 12), speed: 3 }, s);
+  near(t.meters, 1800, 8);
+  near(tr.rollingPaceSec(t.points, 600000), 536, 6);
+});
 await test('a first fix that is inaccurate does not anchor the track', () => {
   const t = tr.addFix(tr.emptyTrack(), fix(0, 0, 0, 80), 0);
   assert.equal(t.points.length, 0);

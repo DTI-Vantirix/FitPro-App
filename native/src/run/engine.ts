@@ -110,7 +110,9 @@ const hrSide = (s: HrStatus): Side | 'unknown' => (s === 'above' ? 'high' : s ==
 export function onClock(state: RunState, nowMs: number): { state: RunState; cues: Cue[] } {
   const bpm = currentBpm(state.hrSamples, nowMs);
   if (state.status !== 'running') {
-    return { state: state.status === 'paused' ? { ...state, bpm, lastClock: nowMs } : state, cues: [] };
+    if (state.status !== 'paused') return { state, cues: [] };
+    const shown = judgeHr(hrBounds(state.config.zone, state.config.hrMax), bpm);
+    return { state: { ...state, bpm, hrStatus: shown, lastClock: nowMs }, cues: [] };
   }
   const elapsed = Math.max(0, nowMs - state.lastClock);
   const zoneStep = Math.min(elapsed, MAX_ZONE_STEP_MS) / 1000;

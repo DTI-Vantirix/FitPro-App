@@ -132,7 +132,7 @@ export async function loadProfile(token: string, ownerId: string): Promise<Profi
   return id ? { id, hr_max: num(row.hr_max), threshold_sec: num(row.threshold_sec) } : null;
 }
 
-export async function saveProfile(token: string, ownerId: string, values: { hr_max: number; threshold_sec: number }): Promise<void> {
+export async function saveProfile(token: string, ownerId: string, values: { hr_max: number; threshold_sec?: number }): Promise<void> {
   const existing = await loadProfile(token, ownerId);
   if (existing) await request('PUT', entityUrl('Profile', `/${encodeURIComponent(existing.id)}`), { token, body: values });
   else await request('POST', entityUrl('Profile'), { token, body: values });

@@ -128,7 +128,7 @@ function RunStart() {
         route: plan,
         ownerId,
       }, mute);
-      router.replace('/run-live');
+      // The live screen opens through the redirect above as soon as the run exists.
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       setStarting(false);

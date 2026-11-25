@@ -28,7 +28,7 @@
 | Decision | Value |
 | --- | --- |
 | GPS fix accepted when | horizontal accuracy ≤ 35 m, and implied speed from the previous accepted fix ≤ 12 m/s |
-| Distance added when | the accepted fix is ≥ 3 m from the previous accepted fix (jitter guard) |
+| Distance added when | the fix is at least 3 m, and at least its own reported accuracy (capped at 20 m), from the previous accepted fix, and the phone does not report a speed under 0.3 m/s (jitter guard; changed after review) |
 | Live pace | distance over the last 30 s of unpaused fixes; unknown until the window holds ≥ 10 s and ≥ 15 m |
 | Live heart rate | median of samples from the last 10 s; unknown ("no sensor") when there are none |
 | Cue when status changes | only after the new status has held 10 s |
@@ -38,7 +38,9 @@
 | Turn announcement | once per maneuver, when ≤ 60 m of route remains before it |
 | Time in zone | seconds in range ÷ seconds with a reading, per metric; omitted when there was no reading |
 | Points uploaded | evenly thinned to at most 5000 |
-| Active-run checkpoint | written every 15 s and on pause/finish; offered for recovery on next launch |
+| Active-run checkpoint | one per account, written every 15 s and on pause/finish; offered for recovery on next launch |
+| Location permission | "while using the app" only; "always" is never requested (changed after review) |
+| No signal at launch | a sign-in that has passed the invite check on this phone before can still record a run; the server re-checks the invite on upload (added after review) |
 | Upload retry | network error, 401, 403, 429, 5xx → stays pending; 400 → kept on the device and marked "needs attention"; a run file is never deleted unless the server accepted it or the owner deletes their account |
 | Map | `react-native-maps` (Apple Maps on iOS without a key; Android needs a Google Maps key at build time — Stage 1C) |
 
@@ -211,7 +213,7 @@ export async function prepareAlerts(): Promise<void>; export function playCue(cu
 // device/run-files.ts
 export const runStore: RunStore; export function saveCheckpoint(state: RunState): void; export function loadCheckpoint(): RunState | null; export function clearCheckpoint(): void;
 ```
-`app.json`: `expo-location` plugin with `isIosBackgroundLocationEnabled`, `isAndroidBackgroundLocationEnabled`, `isAndroidForegroundServiceEnabled` and the three location strings; `react-native-ble-plx` with `isBackgroundEnabled: true`, `modes: ['central']`, `neverForLocation: true` and a Bluetooth string; `expo-notifications`; `ios.infoPlist.UIBackgroundModes` is `location`, `audio` (spoken cues with the screen locked) and `bluetooth-central`; vibration uses React Native's `Vibration`, so `expo-haptics` is not needed. The Android health permission list in `app.json` is untouched (the boundary check pins it).
+`app.json`: `expo-location` plugin with `isIosBackgroundLocationEnabled`, `isAndroidForegroundServiceEnabled` and the when-in-use location string (no "always" permission on either platform); `react-native-ble-plx` with `isBackgroundEnabled: true`, `modes: ['central']`, `neverForLocation: true` and a Bluetooth string; `expo-notifications`; `ios.infoPlist.UIBackgroundModes` is `location`, `audio` (spoken cues with the screen locked) and `bluetooth-central`; vibration uses React Native's `Vibration`, so `expo-haptics` is not needed. The Android health permission list in `app.json` is untouched (the boundary check pins it).
 
 - [ ] Parser tests: `[0x00, 72]` → 72; `[0x01, 0x2C, 0x01]` → 300 → null (out of 30..240); `[0x01, 0xA0, 0x00]` → 160; empty → null.
 - [ ] Implement adapters; `npm run typecheck`; `npx expo config --type prebuild` succeeds and shows the background modes and permissions; commit.

@@ -41,9 +41,10 @@ await test('a steady in-zone run: distance, time, pace, split, time in zone', ()
   const s = p.summarize(state);
   near(s.distanceMi, 780 / 720, 0.01);
   assert.equal(s.durationSec, 780);
-  near(s.avgPaceSec, 720, 3);
+  // a split closes at the first accepted fix past the mile mark, so it can read a few seconds long
+  near(s.avgPaceSec, 720, 6);
   assert.equal(s.splits.length, 1);
-  near(s.splits[0].pace_sec, 720, 3);
+  near(s.splits[0].pace_sec, 720, 6);
   assert.equal(s.paceInZonePct, 100);
   assert.equal(s.hrInZonePct, 100);
   assert.deepEqual(s.hr, { min: 125, max: 125, avg: 125 });
@@ -87,6 +88,20 @@ await test('time paused is not run time and the distance covered while paused is
   assert.equal(s.durationSec, 600);
   near(s.distanceMi, 600 / 720, 0.01);
   assert.equal(r.cues.length, 0);
+});
+
+await test('while paused the heart-rate status follows the live reading', () => {
+  let r = go(e.startRun(config(), T0), 0, 100, IN_ZONE, { bpm: 160 });
+  assert.equal(r.state.hrStatus, 'above');
+  let state = e.pauseRun(r.state, T0 + 100000);
+  for (let s = 101; s <= 130; s++) {
+    state = e.onHeartRate(state, 120, T0 + s * 1000);
+    state = e.onClock(state, T0 + s * 1000).state;
+  }
+  assert.deepEqual([state.bpm, state.hrStatus], [120, 'in']);
+  // nothing from the pause reaches the run's heart-rate stats or zone time
+  assert.equal(state.hr.min, 160);
+  assert.equal(state.zoneSec.hrKnown, r.state.zoneSec.hrKnown);
 });
 
 await test('pause and resume are idempotent, and nothing changes after finish', () => {
@@ -177,7 +192,7 @@ await test('the payload is exactly the contract', () => {
 
 await test('a long run is thinned to 5000 points', () => {
   let state = e.startRun(config(), T0);
-  for (let s = 1; s <= 7000; s++) state = e.onFix(state, { ...at(s * 3.2, 0), t: T0 + s * 1000, accuracy: 5 }).state;
+  for (let s = 1; s <= 7000; s++) state = e.onFix(state, { ...at(s * 3.2, 0), t: T0 + s * 1000, accuracy: 3 }).state;
   const s = p.summarize(e.finishRun(e.onClock(state, T0 + 7000000).state, T0 + 7000000));
   assert.equal(s.points.length, 5000);
 });

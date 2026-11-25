@@ -4,7 +4,8 @@
  */
 import { METERS_PER_MILE, metersBetween, validLatLng } from './geo';
 
-export type Fix = { lat: number; lng: number; t: number; accuracy: number | null };
+/** `speed` is the phone's own estimate in metres per second, when it gives one. */
+export type Fix = { lat: number; lng: number; t: number; accuracy: number | null; speed?: number | null };
 /** An accepted fix. `m` is metres run up to it; `seg` marks the first point after a pause. */
 export type TrackPoint = { lat: number; lng: number; t: number; m: number; seg?: true };
 export type Split = { mile: number; pace_sec: number };
@@ -20,6 +21,11 @@ export type Track = {
 export const MAX_ACCURACY_M = 35;
 export const MAX_SPEED_MPS = 12;
 export const MIN_STEP_M = 3;
+/** A step must also be at least as long as the fix's reported accuracy (up to this cap):
+ * inside that radius a new position is as likely to be noise as movement. */
+export const MAX_STEP_GATE_M = 20;
+/** Below this the phone itself is saying it is not moving. */
+export const STATIONARY_MPS = 0.3;
 export const PACE_WINDOW_MS = 30000;
 const PACE_MIN_SPAN_MS = 10000;
 const PACE_MIN_METERS = 15;
@@ -47,7 +53,9 @@ export function addFix(track: Track, fix: Fix, movingSec: number): Track {
   if (dt <= 0) return track;
   const step = metersBetween(track.last, here);
   if (step / dt > MAX_SPEED_MPS) return track;
-  if (step < MIN_STEP_M) return track;
+  if (fix.speed != null && Number.isFinite(fix.speed) && fix.speed >= 0 && fix.speed < STATIONARY_MPS) return track;
+  // Distance is measured from the last accepted fix, so nothing is lost by waiting for a clear step.
+  if (step < Math.max(MIN_STEP_M, Math.min(MAX_STEP_GATE_M, fix.accuracy ?? 0))) return track;
 
   const meters = track.meters + step;
   const splits = [...track.splits];

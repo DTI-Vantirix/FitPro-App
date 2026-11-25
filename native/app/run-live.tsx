@@ -1,14 +1,15 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Redirect, useRouter } from 'expo-router';
 import { Alert, StyleSheet, Switch, Text, View } from 'react-native';
 import { useKeepAwake } from 'expo-keep-awake';
 import { Action, ErrorNotice } from '../src/components/Ui';
+import { prepareAlerts } from '../src/run/device/alerts';
 import { saveMute } from '../src/run/device/prefs';
 import { formatDistanceAway, formatDuration, formatMiles, hrLabel, paceLabel, zoneLine } from '../src/run/format';
 import { METERS_PER_MILE } from '../src/run/geo';
 import { runController } from '../src/run/runtime';
 import { RunMap } from '../src/run/ui/RunMap';
-import { Gated, Screen } from '../src/run/ui/Screen';
+import { Gated, Loading, Screen } from '../src/run/ui/Screen';
 import { useHeartRateSensor, useRun } from '../src/run/use-run';
 import { formatPace, hrBounds } from '../src/run/zones';
 import { colors } from '../src/theme';
@@ -28,10 +29,14 @@ function RunLive() {
   const sensor = useHeartRateSensor();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A run brought back after the app was closed arrives here without passing the start screen.
+  useEffect(() => { void prepareAlerts(); }, []);
   const trackPoints = run?.track.points;
   const track = useMemo(() => (trackPoints ?? []).map((p) => ({ lat: p.lat, lng: p.lng })), [trackPoints]);
 
-  if (!run) return <Redirect href="/home" />;
+  // While the run is being saved the controller has already let go of it; wait for the
+  // summary to open instead of bouncing through the home screen.
+  if (!run) return busy ? <Loading label="Saving your run…" /> : <Redirect href="/home" />;
 
   const { config } = run;
   const showMap = config.mode !== 'free';
@@ -62,7 +67,7 @@ function RunLive() {
   function confirmDiscard() {
     Alert.alert('Discard this run?', 'Nothing from this run will be kept. This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Discard', style: 'destructive', onPress: () => { void runController.discard().then(() => router.replace('/home')); } },
+      { text: 'Discard', style: 'destructive', onPress: () => { void runController.discard(); } },
     ]);
   }
 

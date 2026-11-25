@@ -12,7 +12,7 @@ const FAST = 1609.344 / 600;
 function world() {
   const w = {
     now: T0, onFix: null, tickFn: null, tracking: 0, stops: 0, clockStops: 0, cues: [], files: new Map(), uploads: [],
-    checkpointFile: null, checkpointSaves: 0, events: [], failStoreWrite: false, denyLocation: false,
+    checkpoints: new Map(), checkpointSaves: 0, events: [], failStoreWrite: false, denyLocation: false,
   };
   w.deps = {
     now: () => w.now,
@@ -27,9 +27,10 @@ function world() {
       remove: async (id) => { w.files.delete(id); },
     },
     checkpoint: {
-      save: async (state) => { w.checkpointFile = JSON.stringify(state); w.checkpointSaves += 1; },
-      load: async () => (w.checkpointFile ? JSON.parse(w.checkpointFile) : null),
-      clear: async () => { w.checkpointFile = null; w.events.push('checkpointClear'); },
+      // one checkpoint per account, as on the phone
+      save: async (state) => { w.checkpoints.set(state.config.ownerId, JSON.stringify(state)); w.checkpointSaves += 1; },
+      load: async (ownerId) => (w.checkpoints.has(ownerId) ? JSON.parse(w.checkpoints.get(ownerId)) : null),
+      clear: async (ownerId) => { w.checkpoints.delete(ownerId); w.events.push('checkpointClear'); },
     },
     requestUpload: (ownerId) => { w.uploads.push(ownerId); w.events.push('upload'); },
   };
@@ -44,6 +45,10 @@ function world() {
       w.tickFn?.();
     }
   };
+  Object.defineProperty(w, 'checkpointFile', {
+    get: () => w.checkpoints.get('user-1') ?? null,
+    set: (value) => { if (value == null) w.checkpoints.delete('user-1'); else w.checkpoints.set('user-1', value); },
+  });
   w.controller = createRunController(w.deps);
   return w;
 }
@@ -163,6 +168,38 @@ await test('app closed mid-run: the run comes back paused at the last known mome
   const stored = JSON.parse(next.files.get(id));
   assert.equal(stored.summary.durationSec, 120);
   near(stored.summary.distanceMi, 0.2, 0.01);
+});
+
+await test('a recovered run that is finished or discarded without resuming still switches GPS off', async () => {
+  for (const end of ['finish', 'discard']) {
+    const w = world();
+    await w.controller.begin(config(), { pace: false, hr: false });
+    w.run(60, FAST);
+    await settle();
+    // new process: the operating system may still be running the old location task
+    const next = world();
+    next.checkpointFile = w.checkpointFile;
+    assert.equal(await next.controller.recover('user-1'), 'paused');
+    assert.ok(next.stops >= 1, 'the stale location task is stopped on recovery');
+    const before = next.stops;
+    await next.controller[end]();
+    assert.ok(next.stops > before, `${end} stops location even though this process never started it`);
+  }
+});
+
+await test("someone else's unfinished run on the same phone is left untouched", async () => {
+  const w = world();
+  await w.controller.begin(config({ ownerId: 'user-2', externalId: 'theirs' }), { pace: false, hr: false });
+  w.run(60, FAST);
+  await settle();
+  const next = world();
+  next.checkpoints = w.checkpoints;
+  assert.equal(await next.controller.recover('user-1'), 'none');
+  await next.controller.begin(config(), { pace: false, hr: false });
+  next.run(30, FAST);
+  await next.controller.finish();
+  assert.equal(JSON.parse(next.checkpoints.get('user-2')).config.externalId, 'theirs');
+  assert.equal(next.checkpoints.has('user-1'), false);
 });
 
 await test('discard removes the run and its checkpoint', async () => {

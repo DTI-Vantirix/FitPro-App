@@ -113,7 +113,35 @@ await test('two flushes at once send each run once', async () => {
   const slow = async () => { calls += 1; await new Promise((r) => setTimeout(r, 5)); return { kind: 'ok', runId: null }; };
   const [one, two] = await Promise.all([q.flushQueue(store, 'user-1', slow), q.flushQueue(store, 'user-1', slow)]);
   assert.equal(calls, 2);
-  assert.deepEqual(one, two);
+  // the second caller gets a follow-up pass, which finds nothing left to send
+  assert.deepEqual([one.uploaded, two.uploaded, two.pending], [2, 0, 0]);
+});
+
+await test('a run saved while a flush is under way is sent as soon as that flush ends', async () => {
+  const store = memoryStore({ a: run('a', { startedAt: '2026-11-24T12:00:00.000Z' }) });
+  const sent = [];
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const send = async (payload) => { sent.push(payload.external_id); if (payload.external_id === 'a') await gate; return { kind: 'ok', runId: null }; };
+  const first = q.flushQueue(store, 'user-1', send);
+  await new Promise((r) => setTimeout(r, 5));
+  await q.enqueueRun(store, run('b'));
+  const second = q.flushQueue(store, 'user-1', send);
+  release();
+  const result = await second;
+  await first;
+  assert.deepEqual(sent, ['a', 'b']);
+  assert.deepEqual(result, { uploaded: 1, pending: 0, needsAttention: 0 });
+  assert.equal((await store.read('b')).status, 'uploaded');
+});
+
+await test('a flush for one account never answers for another', async () => {
+  const store = memoryStore({ a: run('a'), z: { ...run('z'), ownerId: 'user-2' } });
+  const sent = [];
+  const send = (who) => async (payload) => { sent.push(`${who}:${payload.external_id}`); await new Promise((r) => setTimeout(r, 5)); return { kind: 'ok', runId: null }; };
+  const [one, two] = await Promise.all([q.flushQueue(store, 'user-1', send('u1')), q.flushQueue(store, 'user-2', send('u2'))]);
+  assert.deepEqual(sent.sort(), ['u1:a', 'u2:z']);
+  assert.deepEqual([one.uploaded, two.uploaded], [1, 1]);
 });
 
 await test('runs too short to send and unreadable files are left alone', async () => {

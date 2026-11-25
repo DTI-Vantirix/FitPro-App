@@ -47,11 +47,11 @@ export function Gated({ children, setup = true }: { children: React.ReactNode; s
   if (!consentAccepted) return <Redirect href="/consent" />;
   if (status === 'needs_invite' || status === 'blocked') return <Redirect href="/invite" />;
   if (status === 'checking') return <Loading label="Checking your access…" />;
-  if (status === 'error') {
+  if (status === 'error' && !account.offlineAccess) {
     return <Screen>
       <Brand />
       <ErrorNotice message={error ?? 'FitPro could not confirm your access.'} />
-      <Note>Your access could not be checked, so nothing is shown. Check your connection and try again.</Note>
+      <Note>Your access could not be checked, so nothing is shown. Check your connection and try again. (Once you have opened FitPro with a connection on this phone, you can start a run without one.)</Note>
       <Action label="Try again" onPress={() => { void refresh(); }} />
     </Screen>;
   }

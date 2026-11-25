@@ -1,5 +1,5 @@
 /** React side of the run experience: who is signed in, their zones, and the live run. */
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { useSession } from '../auth/session';
@@ -23,6 +23,8 @@ type Account = {
   /** True, false, or null when the server could not be asked. */
   setupNeeded: boolean | null;
   error: string | null;
+  /** The invite check could not be reached, but this sign-in passed it before on this phone. */
+  offlineAccess: boolean;
   reload: () => Promise<void>;
 };
 
@@ -43,18 +45,34 @@ async function cachedOwner(token: string): Promise<string | null> {
 export function RunAccountProvider({ children }: { children: React.ReactNode }) {
   const { accessToken, forgetSession } = useSession();
   const { status: gate } = useAccessGate();
-  const allowed = Boolean(accessToken) && gate === 'allowed';
-  const [state, setState] = useState<Omit<Account, 'reload'>>({ status: 'blocked', ownerId: null, profile: null, zones: [], setupNeeded: null, error: null });
+  // With no signal the invite check cannot be made. A sign-in that already passed it on this
+  // phone (its owner id is only ever cached after a pass) may still record a run: the server
+  // checks the invite again on every upload. Health import keeps its own strict gate.
+  const [knownToken, setKnownToken] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (!accessToken || gate !== 'error') { setKnownToken(null); return; }
+    void cachedOwner(accessToken).then((id) => { if (live) setKnownToken(id ? accessToken : null); });
+    return () => { live = false; };
+  }, [accessToken, gate]);
+  const offlineAccess = Boolean(accessToken) && gate === 'error' && knownToken === accessToken;
+  const allowed = Boolean(accessToken) && (gate === 'allowed' || offlineAccess);
+  const sequence = useRef(0);
+  const [state, setState] = useState<Omit<Account, 'reload' | 'offlineAccess'>>({ status: 'blocked', ownerId: null, profile: null, zones: [], setupNeeded: null, error: null });
 
   const reload = useCallback(async () => {
     if (!accessToken || !allowed) return;
     const token = accessToken;
+    // A reload still in flight when the runner signs out (or another reload starts) changes nothing.
+    const turn = ++sequence.current;
+    const stale = () => sequence.current !== turn;
     let ownerId = await cachedOwner(token);
     try {
       const me = await fetchMe(token);
       ownerId = me.id;
       await SecureStore.setItemAsync(OWNER_KEY, JSON.stringify({ tail: token.slice(-24), id: me.id })).catch(() => {});
     } catch (cause) {
+      if (stale()) return;
       if (cause instanceof ApiError && cause.status === 401) {
         // The contract: any 401 means the sign-in is no longer valid.
         setRunAuth(null);
@@ -66,16 +84,19 @@ export function RunAccountProvider({ children }: { children: React.ReactNode }) 
         return;
       }
     }
+    if (stale()) return;
     setRunAuth({ token, ownerId });
     void refreshWaiting();
     try {
       const [profile, zones] = await Promise.all([loadProfile(token, ownerId), listZones(token, ownerId)]);
+      if (stale()) return;
       setState({ status: 'ready', ownerId, profile, zones, setupNeeded: needsSetup(profile, zones), error: null });
       void deviceCache.write(`account-${ownerId}`, { profile, zones });
     } catch (cause) {
       // No connection: what was loaded last time is enough to start a run.
       const cached = await deviceCache.read<{ profile: Profile | null; zones: Zone[] }>(`account-${ownerId}`);
       const usable = cached && Array.isArray(cached.zones) && !needsSetup(cached.profile, cached.zones) ? cached : null;
+      if (stale()) return;
       setState({
         status: 'ready', ownerId,
         profile: usable?.profile ?? null,
@@ -89,6 +110,7 @@ export function RunAccountProvider({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     if (!allowed) {
+      sequence.current += 1;
       setRunAuth(null);
       setState({ status: 'blocked', ownerId: null, profile: null, zones: [], setupNeeded: null, error: null });
       return;
@@ -104,7 +126,7 @@ export function RunAccountProvider({ children }: { children: React.ReactNode }) 
     return () => { subscription.remove(); clearInterval(timer); };
   }, [allowed]);
 
-  const value = useMemo(() => ({ ...state, reload }), [state, reload]);
+  const value = useMemo(() => ({ ...state, offlineAccess, reload }), [state, offlineAccess, reload]);
   return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>;
 }
 

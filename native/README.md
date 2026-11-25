@@ -64,4 +64,5 @@ Cue timing and GPS thresholds are constants at the top of `cues.ts`, `tracker.ts
 
 Not built yet: Apple Watch heart rate (Stage 2), sharing to the feed (Stage 3), editing
 zones and building routes in the app (Stage 4), store identity and signing (Stage 1C).
-On Android the map needs a Google Maps key at build time (Stage 1C).
+On Android the map needs a Google Maps key at build time (Stage 1C); until
+`android.config.googleMaps.apiKey` is set the map is replaced by a notice and never created.

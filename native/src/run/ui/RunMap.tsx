@@ -2,7 +2,8 @@
  * the runner. The only file that knows which map library is in use.
  */
 import React, { useEffect, useMemo, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
+import Constants from 'expo-constants';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import type { LatLng } from '../geo';
 import { colors } from '../../theme';
@@ -18,6 +19,10 @@ type Props = {
 };
 
 const toCoord = (p: LatLng) => ({ latitude: p.lat, longitude: p.lng });
+
+/** Apple Maps needs no key. Google Maps on Android does, and must not be created without
+ * one, so until the build carries a key the map is replaced by a plain notice. */
+export const MAP_AVAILABLE = Platform.OS !== 'android' || Boolean(Constants.expoConfig?.android?.config?.googleMaps?.apiKey);
 
 export function RunMap({ route = [], track = [], live, nextTurn }: Props) {
   const map = useRef<MapView>(null);
@@ -37,6 +42,11 @@ export function RunMap({ route = [], track = [], live, nextTurn }: Props) {
     if (all.length >= 2) map.current?.fitToCoordinates(all, { edgePadding: { top: 40, right: 40, bottom: 40, left: 40 }, animated: false });
   };
 
+  if (!MAP_AVAILABLE) {
+    return <View style={[styles.map, styles.empty, styles.notice]}>
+      <Text style={styles.noticeText}>The map is not available in this Android build yet. Your run is still being recorded{route.length >= 2 ? ', and turns and "off route" still work' : ''}.</Text>
+    </View>;
+  }
   if (!anchor) return <View style={[styles.map, styles.empty]} />;
   return <MapView
     ref={map}
@@ -57,4 +67,6 @@ export function RunMap({ route = [], track = [], live, nextTurn }: Props) {
 const styles = StyleSheet.create({
   map: { flex: 1, minHeight: 180, borderRadius: 14, overflow: 'hidden' },
   empty: { backgroundColor: colors.panel, borderColor: colors.panelBorder, borderWidth: 1 },
+  notice: { alignItems: 'center', justifyContent: 'center', padding: 20 },
+  noticeText: { color: colors.muted, fontSize: 14, lineHeight: 21, textAlign: 'center' },
 });

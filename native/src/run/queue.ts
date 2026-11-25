@@ -100,19 +100,33 @@ export async function countWaiting(store: RunStore, ownerId: string): Promise<{ 
   };
 }
 
-const flushing = new WeakMap<RunStore, Promise<FlushResult>>();
+type Flight = { pass: Promise<FlushResult>; again: Promise<FlushResult> | null };
+const flushing = new WeakMap<RunStore, Map<string, Flight>>();
 
-/** Sends this account's pending runs, oldest first. Never throws. Concurrent calls share one pass. */
+/** Sends this account's pending runs, oldest first. Never throws.
+ * One pass at a time per account. A call that arrives during a pass gets a second pass
+ * that starts when the first ends, so a run saved meanwhile is not left waiting; any
+ * further callers share that second pass. */
 export function flushQueue(
   store: RunStore,
   ownerId: string,
   send: (payload: Record<string, unknown>) => Promise<SendResult>,
 ): Promise<FlushResult> {
-  const running = flushing.get(store);
-  if (running) return running;
-  const pass = flushOnce(store, ownerId, send).finally(() => flushing.delete(store));
-  flushing.set(store, pass);
-  return pass;
+  let flights = flushing.get(store);
+  if (!flights) {
+    flights = new Map();
+    flushing.set(store, flights);
+  }
+  const owners = flights;
+  const current = owners.get(ownerId);
+  if (current) {
+    if (!current.again) current.again = current.pass.then(() => flushQueue(store, ownerId, send));
+    return current.again;
+  }
+  const flight: Flight = { pass: Promise.resolve({ uploaded: 0, pending: 0, needsAttention: 0 }), again: null };
+  flight.pass = flushOnce(store, ownerId, send).finally(() => { if (owners.get(ownerId) === flight) owners.delete(ownerId); });
+  owners.set(ownerId, flight);
+  return flight.pass;
 }
 
 async function flushOnce(

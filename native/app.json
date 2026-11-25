@@ -58,11 +58,11 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "FitPro uses your location during a run to measure distance and pace and to follow your route.",
-          "locationAlwaysAndWhenInUsePermission": "FitPro keeps recording your run when the screen is locked or you switch apps. Location is only used while a run is in progress.",
-          "locationAlwaysPermission": "FitPro keeps recording your run when the screen is locked or you switch apps. Location is only used while a run is in progress.",
+          "locationWhenInUsePermission": "FitPro uses your location during a run to measure distance and pace and to follow your route, including while the screen is locked. Location is only used while a run is in progress.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
           "isIosBackgroundLocationEnabled": true,
-          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": false,
           "isAndroidForegroundServiceEnabled": true,
           "motionUsagePermission": false
         }

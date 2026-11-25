@@ -28,6 +28,8 @@ function Setup() {
   const hr = Number(hrMax);
   const threshold = parsePace(`${minutes.trim() || '0'}:${seconds.trim().padStart(2, '0') || '00'}`);
   const hrOk = hrMax.trim() !== '' && validHrMax(hr);
+  // Zones made on the website are the runner's own: only the missing max heart rate is asked for.
+  const hasZones = account.zones.length > 0;
   const preview = threshold ? zoneTemplate(threshold) : null;
 
   function estimate() {
@@ -37,12 +39,16 @@ function Setup() {
   }
 
   async function save() {
-    if (!accessToken || !account.ownerId || !hrOk || !threshold) return;
+    if (!accessToken || !account.ownerId || !hrOk || (!hasZones && !threshold)) return;
     setBusy(true);
     setError(null);
     try {
-      await saveProfile(accessToken, account.ownerId, { hr_max: hr, threshold_sec: threshold });
-      await applyZones(accessToken, account.ownerId, threshold);
+      if (hasZones || !threshold) {
+        await saveProfile(accessToken, account.ownerId, { hr_max: hr });
+      } else {
+        await saveProfile(accessToken, account.ownerId, { hr_max: hr, threshold_sec: threshold });
+        await applyZones(accessToken, account.ownerId, threshold);
+      }
       await account.reload();
       router.replace('/home');
     } catch (cause) {
@@ -53,8 +59,10 @@ function Setup() {
 
   return <Screen>
     <Brand />
-    <SectionHeading kicker="ONE-TIME SETUP" title="Set your zones."
-      subtitle="Two numbers. FitPro builds five training zones from them, each with its own pace range and heart-rate range." />
+    <SectionHeading kicker="ONE-TIME SETUP" title={hasZones ? 'Your max heart rate.' : 'Set your zones.'}
+      subtitle={hasZones
+        ? 'You already have zones. FitPro needs your max heart rate to turn each zone into a heart-rate range. Your zones are not changed.'
+        : 'Two numbers. FitPro builds five training zones from them, each with its own pace range and heart-rate range.'} />
     <ErrorNotice message={error ?? account.error} />
     <Field label="MAX HEART RATE (BPM)" value={hrMax} onChangeText={setHrMax} keyboardType="number-pad" />
     {hrMax.trim() !== '' && !hrOk && <Text style={styles.body}>Enter a whole number between 100 and 230.</Text>}
@@ -64,6 +72,7 @@ function Setup() {
       <Field label="AGE" value={age} onChangeText={setAge} keyboardType="number-pad" />
       <Action label="Estimate from age" onPress={estimate} secondary disabled={!age.trim()} />
     </Panel>
+    {!hasZones && <>
     <Text style={styles.label}>THRESHOLD PACE, PER MILE</Text>
     <Text style={styles.body}>The pace you could hold for about an hour of hard running.</Text>
     <View style={styles.row}>
@@ -72,14 +81,15 @@ function Setup() {
     </View>
     {(minutes.trim() !== '' || seconds.trim() !== '') && !threshold &&
       <Text style={styles.body}>Enter a pace between 3:00 and 20:00 per mile.</Text>}
-    {preview && hrOk && <Panel>
+    </>}
+    {!hasZones && preview && hrOk && <Panel>
       <Text style={styles.label}>YOUR ZONES</Text>
       {preview.map((zone) => <Text key={zone.zone_number} style={styles.body}>
         {zone.name} · {formatPace(zone.fast_sec)}–{formatPace(zone.slow_sec)} /mi · {Math.round((hr * zone.hr_min_pct!) / 100)}–{Math.round((hr * zone.hr_max_pct!) / 100)} bpm
       </Text>)}
     </Panel>}
-    <Action label="Save and continue" onPress={() => { void save(); }} busy={busy} disabled={!hrOk || !threshold} />
-    <Note>You can change zones later on the FitPro website. Saving here replaces any zones you already have.</Note>
+    <Action label="Save and continue" onPress={() => { void save(); }} busy={busy} disabled={!hrOk || (!hasZones && !threshold)} />
+    <Note>You can change zones later on the FitPro website.</Note>
   </Screen>;
 }
 

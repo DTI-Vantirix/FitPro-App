@@ -33,7 +33,8 @@ async function poweredOn(): Promise<boolean> {
   const adapter = ble();
   if ((await adapter.state()) === State.PoweredOn) return true;
   return new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => { subscription.remove(); resolve(false); }, 4000);
+    // The first time, the system's Bluetooth permission prompt is on screen while this waits.
+    const timer = setTimeout(() => { subscription.remove(); resolve(false); }, 30000);
     const subscription = adapter.onStateChange((state) => {
       if (state === State.PoweredOn) { clearTimeout(timer); subscription.remove(); resolve(true); }
     }, true);
@@ -111,12 +112,21 @@ export function createHeartRateMonitor(onSample: (bpm: number, device: string) =
 
     async connect(id: string): Promise<void> {
       void ble().stopDeviceScan();
+      const previous = device;
+      if (previous && previous.id !== id) {
+        wantedId = null;
+        monitor?.remove();
+        disconnect?.remove();
+        device = null;
+        await ble().cancelDeviceConnection(previous.id).catch(() => {});
+      }
       wantedId = id;
       try {
         await attach(id);
       } catch (cause) {
         wantedId = null;
         set('idle');
+        void ble().cancelDeviceConnection(id).catch(() => {});
         throw new Error(`Could not connect to the sensor: ${cause instanceof Error ? cause.message : String(cause)}`);
       }
     },

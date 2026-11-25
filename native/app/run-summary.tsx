@@ -40,7 +40,7 @@ function RunSummary() {
     }
   }, [id, account.ownerId]);
 
-  useEffect(() => { void load(); }, [load, waiting.pending, waiting.needsAttention]);
+  useEffect(() => { void load(); }, [load, waiting]);
 
   async function sendNow() {
     if (typeof id !== 'string') return;

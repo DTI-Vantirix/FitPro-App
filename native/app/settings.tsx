@@ -50,7 +50,7 @@ function Settings() {
     }
     try {
       await removeOwnerRuns(runStore, account.ownerId);
-      await runCheckpoint.clear();
+      await runCheckpoint.clear(account.ownerId);
       await deviceCache.remove(`account-${account.ownerId}`);
       await deviceCache.remove(`routes-${account.ownerId}`);
       await heartRateMonitor.disconnect();

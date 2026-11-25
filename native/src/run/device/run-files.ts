@@ -20,19 +20,36 @@ function runFile(id: string): File {
   return new File(runsDir(), `${id}.json`);
 }
 
-/** Writes to a temporary file and moves it into place, so a write cut short by the
- * app being killed can never leave half a run where a whole one used to be. */
+const TMP = '.tmp';
+
+/** Writes to a temporary file and moves it over the old one in a single step, so a write
+ * cut short by the app being killed leaves either the old file or the new one, never
+ * neither and never half. */
 function writeAtomic(target: File, text: string): void {
-  const temp = new File(target.parentDirectory, `${target.name}.tmp`);
+  const temp = new File(target.parentDirectory, `${target.name}${TMP}`);
   if (temp.exists) temp.delete();
   temp.create();
   temp.write(text);
-  if (target.exists) target.delete();
-  temp.move(target);
+  temp.move(target, { overwrite: true });
+}
+
+/** If a move was ever interrupted on a system where it is not a single step, the complete
+ * new copy is still sitting beside where it belongs. Put it back rather than lose it. */
+function adoptOrphans(dir: Directory): void {
+  for (const entry of dir.list()) {
+    if (!(entry instanceof File) || !entry.name.endsWith(TMP)) continue;
+    try {
+      const target = new File(dir, entry.name.slice(0, -TMP.length));
+      if (target.exists) continue;
+      JSON.parse(entry.textSync());
+      entry.move(target);
+    } catch { /* an unreadable temp file is an unfinished write: the real file, if any, is intact */ }
+  }
 }
 
 export const runStore: RunStore = {
   async list(): Promise<string[]> {
+    adoptOrphans(runsDir());
     return runsDir().list()
       .filter((entry): entry is File => entry instanceof File && entry.name.endsWith('.json'))
       .map((entry) => entry.name.slice(0, -'.json'.length))
@@ -52,16 +69,18 @@ export const runStore: RunStore = {
   },
 };
 
-function checkpointFile(): File {
-  return new File(runsDir(), 'active-run.checkpoint');
+function checkpointFile(ownerId: string): File {
+  if (!SAFE_ID.test(ownerId)) throw new Error('Unexpected account id.');
+  return new File(runsDir(), `active-run-${ownerId}.checkpoint`);
 }
 
 export const runCheckpoint = {
   async save(state: RunState): Promise<void> {
-    writeAtomic(checkpointFile(), JSON.stringify(state));
+    writeAtomic(checkpointFile(state.config.ownerId), JSON.stringify(state));
   },
-  async load(): Promise<RunState | null> {
-    const file = checkpointFile();
+  async load(ownerId: string): Promise<RunState | null> {
+    adoptOrphans(runsDir());
+    const file = checkpointFile(ownerId);
     if (!file.exists) return null;
     try {
       const state = JSON.parse(await file.text()) as RunState;
@@ -70,8 +89,8 @@ export const runCheckpoint = {
       return null;
     }
   },
-  async clear(): Promise<void> {
-    const file = checkpointFile();
+  async clear(ownerId: string): Promise<void> {
+    const file = checkpointFile(ownerId);
     if (file.exists) file.delete();
   },
 };

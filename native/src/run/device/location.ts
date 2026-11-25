@@ -20,25 +20,20 @@ TaskManager.defineTask(RUN_LOCATION_TASK, async (body: TaskBody) => {
       lng: location.coords.longitude,
       t: location.timestamp,
       accuracy: location.coords.accuracy ?? null,
+      speed: location.coords.speed ?? null,
     });
   }
 });
 
-export type RunPermissions = { foreground: boolean; background: boolean };
+export type RunPermissions = { foreground: boolean };
 
-/** Asks for location while using the app, then "always". Recording with the screen locked
- * works with the first on iOS (the app holds a background location session it started in
- * the foreground); Android needs the foreground service, which the first also covers. */
+/** Asks for location "while using the app" and nothing more. That is enough to keep
+ * recording with the screen locked: on iOS the app holds a background location session it
+ * started in the foreground, and on Android the foreground service does the same.
+ * "Always" access is never requested. */
 export async function requestRunPermissions(): Promise<RunPermissions> {
   const foreground = await Location.requestForegroundPermissionsAsync();
-  if (!foreground.granted) return { foreground: false, background: false };
-  let background = false;
-  try {
-    background = (await Location.requestBackgroundPermissionsAsync()).granted;
-  } catch {
-    background = false;
-  }
-  return { foreground: true, background };
+  return { foreground: foreground.granted };
 }
 
 export async function startTracking(onFix: (fix: Fix) => void): Promise<void> {

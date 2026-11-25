@@ -10,7 +10,8 @@ import type { Fix } from './tracker';
 
 export type RunDeps = {
   now(): number;
-  /** Starts background-capable location updates. Rejects when permission is missing. */
+  /** Starts background-capable location updates. Rejects when permission is missing.
+   * `stopTracking` must be safe to call when nothing is running. */
   startTracking(onFixReceived: (fix: Fix) => void): Promise<void>;
   stopTracking(): Promise<void>;
   /** Calls `tick` about once a second until the returned function is called. */
@@ -18,9 +19,10 @@ export type RunDeps = {
   playCue(cue: Cue): void;
   store: RunStore;
   checkpoint: {
+    /** One checkpoint per account (`state.config.ownerId`), so two people sharing a phone cannot overwrite each other. */
     save(state: RunState): Promise<void>;
-    load(): Promise<RunState | null>;
-    clear(): Promise<void>;
+    load(ownerId: string): Promise<RunState | null>;
+    clear(ownerId: string): Promise<void>;
   };
   /** Asks for the upload queue to be flushed. Must not throw. */
   requestUpload(ownerId: string): void;
@@ -77,10 +79,10 @@ export function createRunController(deps: RunDeps) {
   async function stopDevice() {
     stopClock?.();
     stopClock = null;
-    if (tracking) {
-      tracking = false;
-      try { await deps.stopTracking(); } catch { /* nothing more to do */ }
-    }
+    // Always asked, even if this process never started it: after the app was closed mid-run the
+    // operating system can still be running the location task from before.
+    tracking = false;
+    try { await deps.stopTracking(); } catch { /* nothing more to do */ }
   }
 
   /** Writes the finished run to the phone, then (and only then) drops the checkpoint. */
@@ -88,7 +90,7 @@ export function createRunController(deps: RunDeps) {
     const summary = summarize(finished);
     const stored = newStoredRun(summary, buildRunPayload(summary), finished.config.ownerId, new Date(deps.now()).toISOString());
     await enqueueRun(deps.store, stored);
-    await deps.checkpoint.clear().catch(() => { /* a stale checkpoint is offered again; the run file is already safe */ });
+    await deps.checkpoint.clear(finished.config.ownerId).catch(() => { /* a stale checkpoint is offered again; the run file is already safe */ });
     state = null;
     notify();
     deps.requestUpload(finished.config.ownerId);
@@ -154,9 +156,10 @@ export function createRunController(deps: RunDeps) {
     },
 
     async discard(): Promise<void> {
+      const ownerId = state?.config.ownerId ?? null;
       await stopDevice();
       state = null;
-      await deps.checkpoint.clear().catch(() => {});
+      if (ownerId) await deps.checkpoint.clear(ownerId).catch(() => {});
       notify();
     },
 
@@ -166,8 +169,11 @@ export function createRunController(deps: RunDeps) {
     async recover(ownerId: string): Promise<'none' | 'paused' | 'saved'> {
       if (state) return 'none';
       let saved: RunState | null = null;
-      try { saved = await deps.checkpoint.load(); } catch { return 'none'; }
+      try { saved = await deps.checkpoint.load(ownerId); } catch { return 'none'; }
       if (!saved || saved.config?.ownerId !== ownerId) return 'none';
+      // Whatever happens next, the location task left over from the closed app is not feeding
+      // anything: stop it. Resume starts a fresh one.
+      await stopDevice();
       if (saved.status === 'finished') {
         await store(saved);
         return 'saved';
