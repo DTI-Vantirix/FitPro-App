@@ -46,8 +46,8 @@ async function sendVerifyCode(ctx, user) {
   await storeCode(ctx.db, user.id, 'verify_email', code, VERIFY_TTL_MIN);
   await sendMail(ctx.config, {
     to: user.email,
-    subject: 'Your FitPro verification code',
-    text: `Your FitPro code is ${code}. It expires in ${VERIFY_TTL_MIN} minutes.\n\nIf you didn't sign up, ignore this email.`,
+    subject: 'Your VantraRun verification code',
+    text: `Your VantraRun code is ${code}. It expires in ${VERIFY_TTL_MIN} minutes.\n\nIf you didn't sign up, ignore this email.`,
   });
   return ctx.config.exposeDevCodes ? { dev_code: code } : {};
 }
@@ -63,7 +63,7 @@ export function registerAuthRoutes(router) {
     const fullName = ctx.body.full_name ? String(ctx.body.full_name).trim().slice(0, 120) : null;
     signupLimit(`signup:${clientIp(ctx.req)}`);
 
-    // FitPro is invite-only: no account without a code from the owner. The code
+    // VantraRun is invite-only: no account without a code from the owner. The code
     // is only held here; it is claimed when the email is verified.
     const inviteCode = normalizeCode(ctx.body.invite_code);
     if (!inviteCode) throw new HttpError(400, 'Enter your invite code.');
@@ -216,7 +216,7 @@ export function registerAuthRoutes(router) {
     const link = `${ctx.config.appUrl}/reset-password?token=${encodeURIComponent(token)}`;
     await sendMail(ctx.config, {
       to: user.email,
-      subject: 'Reset your FitPro password',
+      subject: 'Reset your VantraRun password',
       text: `Reset your password here (valid for ${RESET_TTL_MIN} minutes):\n${link}\n\nIf you didn't ask for this, ignore this email.`,
     });
     return { ok: true, ...(ctx.config.exposeDevCodes ? { dev_token: token } : {}) };
@@ -243,7 +243,7 @@ export function registerAuthRoutes(router) {
 
   // What the sign-in screens can offer. Social sign-in and MFA come later.
   router.add('GET', '/api/auth/options', async () => ({
-    name: 'FitPro',
+    name: 'VantraRun',
     auth_config: { mfa_policy: 'off', providers: [] },
   }));
 }

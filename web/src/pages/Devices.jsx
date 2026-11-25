@@ -70,7 +70,7 @@ export default function Devices() {
         <ul className="space-y-2 text-[11px] leading-relaxed text-muted-foreground">
           <li className="rounded-xl border border-border bg-secondary/40 px-3.5 py-2.5">
             <span className="font-medium text-foreground">Garmin</span> — a Garmin Connect connection, so recent
-            activities land in FitPro without you doing anything.
+            activities land in VantraRun without you doing anything.
           </li>
           <li className="rounded-xl border border-border bg-secondary/40 px-3.5 py-2.5">
             <span className="font-medium text-foreground">Apple Watch</span> — Apple Health (HealthKit), read by the

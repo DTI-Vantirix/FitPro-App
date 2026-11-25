@@ -189,12 +189,11 @@ build carries a Google Maps key.
 
 ## Decisions still yours
 
-- **Privacy policy wording and how long data is kept.** The page at `/privacy`
-  describes what the app does today, including the phone app's location use and crash
-  reports. Both stores link to it. It has not been reviewed by a lawyer, and it names no
-  retention period: data is kept until the person deletes it or their account.
-- **The website's name.** The phone app is VantraRun; the website and its emails still
-  say FitPro.
+- **Who to name in the privacy policy.** The page at `/privacy` is now a full policy
+  (what is collected, why, who sees it, the companies involved, no fixed retention
+  period, how to delete). It names "the VantraRun team" and tells people to contact
+  whoever invited them, because no company name or contact address has been given.
+  Both stores also ask for a support contact. It has not been reviewed by a lawyer.
 
 ## After each step, what to check
 

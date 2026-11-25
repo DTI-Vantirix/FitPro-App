@@ -1,7 +1,7 @@
 import { api, apiUrl } from '@/api/client';
 
 // MFA: sign-in challenge, enrollment and factor management against /api/auth/mfa/*.
-// Not built on the FitPro API yet (those routes answer 501); kept so the MFA
+// Not built on the VantraRun API yet (those routes answer 501); kept so the MFA
 // screens can be wired up once the server supports TOTP. Credentials stay in
 // memory, never in the URL or storage.
 
@@ -97,7 +97,7 @@ export async function loadSignInOptions() {
   return api.auth.options();
 }
 
-// provider: 'google' | 'apple' | ... Social sign-in isn't enabled on the FitPro API
+// provider: 'google' | 'apple' | ... Social sign-in isn't enabled on the VantraRun API
 // yet, so this reports that clearly instead of sending the user somewhere broken.
 export async function signInWithProvider(provider, returnTo) {
   return api.auth.loginWithProvider(provider, returnTo);

@@ -1,6 +1,6 @@
 import { HttpError, rateLimiter } from '../lib/http.js';
 
-// FitPro is invite-only: a single-use code has to be redeemed once per athlete
+// VantraRun is invite-only: a single-use code has to be redeemed once per athlete
 // before the app opens for them. Admins always get in.
 const redeemLimit = rateLimiter({
   windowMs: 15 * 60 * 1000,

@@ -71,8 +71,16 @@ them in Settings. A report is a message, a stack trace, the platform and the app
 version. No monitoring SDK, so the no-analytics rule holds.
 
 **2026-11-25 — The app is VantraRun, `com.vantrarun.app`.** Name and id given by the
-owner. The Expo slug and project id are unchanged (internal). The website and emails
-still say FitPro. Build numbers are managed by EAS.
+owner. The Expo slug and project id are unchanged (internal). The website and its
+emails were renamed to VantraRun the same day at the owner's request; code names, the
+database, storage keys and the `fitpro` run source are unchanged. Build numbers are
+managed by EAS.
+
+**2026-11-25 — Privacy policy: comprehensive, no fixed retention.** Owner's decision:
+data is held until the person deletes it or their account. The page lists the
+companies involved (Render, Resend, the routing and map providers), so it must be
+updated if any of those change. The consent version was raised to `2026-11-25`, so
+anyone who had accepted the earlier text is asked again.
 
 ## Not built yet (deliberately deferred)
 

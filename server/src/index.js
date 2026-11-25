@@ -29,7 +29,7 @@ const server = http.createServer((req, res) => {
 });
 process.on('unhandledRejection', (reason) => console.error('[error] unhandled rejection', reason));
 server.listen(config.port, () => {
-  console.log(`FitPro API listening on http://localhost:${config.port} (${config.production ? 'production' : 'development'})`);
+  console.log(`VantraRun API listening on http://localhost:${config.port} (${config.production ? 'production' : 'development'})`);
   console.log(`[uploads] stored ${config.storage.s3 ? `in the bucket "${config.storage.s3.bucket}"` : `on disk at ${config.uploadDir}`}`);
 });
 

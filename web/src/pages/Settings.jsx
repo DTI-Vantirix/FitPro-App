@@ -111,7 +111,7 @@ export default function Settings() {
             <div>
               <h2 className="font-heading text-base font-bold">Your numbers</h2>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                Age, height and weight give FitPro your max heart rate and threshold pace, which set the five zones.
+                Age, height and weight give VantraRun your max heart rate and threshold pace, which set the five zones.
               </p>
             </div>
 

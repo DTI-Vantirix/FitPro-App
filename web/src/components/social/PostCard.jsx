@@ -10,7 +10,7 @@ import { formatDuration, formatPace } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 const VISIBILITY = {
-  public: { icon: Globe, label: 'Anyone on FitPro' },
+  public: { icon: Globe, label: 'Anyone on VantraRun' },
   friends: { icon: Users, label: 'Friends' },
   private: { icon: Lock, label: 'Only me' },
 };
@@ -44,7 +44,7 @@ export default function PostCard({ post, mine, onDeleted }) {
     const action = pending;
     setPending(null);
     if (action === 'share') await shareCanvas(canvas, text, link);
-    else await saveCanvas(canvas, `fitpro-${post.id}.png`);
+    else await saveCanvas(canvas, `vantrarun-${post.id}.png`);
     setExporting(false);
   };
 

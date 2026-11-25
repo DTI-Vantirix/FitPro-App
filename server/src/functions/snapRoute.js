@@ -73,7 +73,7 @@ export default async function snapRoute({ body, config }) {
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(9000),
-      headers: { 'User-Agent': 'FitPro route builder' },
+      headers: { 'User-Agent': 'VantraRun route builder' },
     });
     if (!res.ok) throw new Error(`router responded ${res.status}`);
     const data = await res.json();

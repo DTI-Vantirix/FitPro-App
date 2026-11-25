@@ -53,7 +53,7 @@ export function loadConfig(env = process.env) {
     // Built web app to serve from this process (optional; handy for single-box deploys).
     webDist: env.WEB_DIST ? path.resolve(env.WEB_DIST) : '',
     mail: {
-      from: env.MAIL_FROM || 'FitPro <no-reply@fitpro.local>',
+      from: env.MAIL_FROM || 'VantraRun <no-reply@vantrarun.local>',
       resendApiKey: env.RESEND_API_KEY || '',
     },
     routerUrl: env.ROUTER_URL || 'https://valhalla1.openstreetmap.de/route',

@@ -269,7 +269,7 @@ export default function ShareComposer({ open, onOpenChange, profile, initialId, 
               disabled={!selected || posting}
               className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
             >
-              <Upload className="h-4 w-4" /> {posting ? 'Posting…' : 'Post to FitPro'}
+              <Upload className="h-4 w-4" /> {posting ? 'Posting…' : 'Post to VantraRun'}
             </button>
           ) : (
             <div className="space-y-2.5 rounded-xl border border-primary/30 bg-primary/5 p-3.5">

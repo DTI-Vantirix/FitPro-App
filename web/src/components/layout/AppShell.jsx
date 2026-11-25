@@ -34,7 +34,7 @@ function Mark({ compact }) {
       </span>
       {!compact && (
         <span className="leading-none">
-          <span className="block font-heading text-[17px] font-extrabold tracking-tight">FitPro</span>
+          <span className="block font-heading text-[17px] font-extrabold tracking-tight">VantraRun</span>
           <span className="mt-1 block font-mono text-[9px] uppercase tracking-[0.22em] text-muted-foreground">
             run · recover · repeat
           </span>

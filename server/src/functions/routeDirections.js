@@ -71,7 +71,7 @@ export default async function routeDirections({ db, user, body, config }) {
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(9000),
-      headers: { 'User-Agent': 'FitPro route directions' },
+      headers: { 'User-Agent': 'VantraRun route directions' },
     });
     if (!res.ok) throw new Error(`router responded ${res.status}`);
     const maneuvers = toManeuvers((await res.json())?.trip);
