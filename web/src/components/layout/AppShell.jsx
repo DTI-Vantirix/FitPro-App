@@ -2,7 +2,6 @@ import { NavLink, Link, Outlet } from 'react-router-dom';
 import {
   Home as HomeIcon,
   Route as RouteIcon,
-  Dumbbell,
   BarChart3,
   Gauge,
   Play,
@@ -20,7 +19,6 @@ const NAV = [
   { to: '/friends', label: 'Friends', icon: UsersRound },
   { to: '/challenges', label: 'Challenges', icon: Trophy },
   { to: '/routes', label: 'Routes', icon: RouteIcon },
-  { to: '/workouts', label: 'Gym log', icon: Dumbbell },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/zones', label: 'Pace zones', icon: Gauge },
   { to: '/settings', label: 'Settings', icon: Settings },
@@ -38,7 +36,7 @@ function Mark({ compact }) {
         <span className="leading-none">
           <span className="block font-heading text-[17px] font-extrabold tracking-tight">FitPro</span>
           <span className="mt-1 block font-mono text-[9px] uppercase tracking-[0.22em] text-muted-foreground">
-            run · lift · repeat
+            run · recover · repeat
           </span>
         </span>
       )}

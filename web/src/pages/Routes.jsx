@@ -72,7 +72,7 @@ export default function Routes() {
           </span>
           <h2 className="font-heading text-lg font-bold">No routes yet</h2>
           <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-            Tap your start point and trace the way — to the gym and back home, along the river, wherever you run. The
+            Tap your start point and trace the way — around the park, along the river, wherever you run. The
             line follows the roads for you.
           </p>
           <Link

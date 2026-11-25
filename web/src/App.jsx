@@ -21,7 +21,6 @@ import Home from '@/pages/Home';
 import RoutesPage from '@/pages/Routes';
 import RouteBuilder from '@/pages/RouteBuilder';
 import LiveRun from '@/pages/LiveRun';
-import Workouts from '@/pages/Workouts';
 import Analytics from '@/pages/Analytics';
 import Zones from '@/pages/Zones';
 import Settings from '@/pages/Settings';
@@ -72,7 +71,7 @@ const AuthenticatedApp = () => {
             <Route path="/routes" element={<RoutesPage />} />
             <Route path="/routes/new" element={<RouteBuilder />} />
             <Route path="/run" element={<LiveRun />} />
-            <Route path="/workouts" element={<Workouts />} />
+            <Route path="/workouts" element={<Navigate to="/" replace />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/zones" element={<Zones />} />
             <Route path="/settings" element={<Settings />} />

@@ -41,6 +41,18 @@ abandoned sign-up doesn't use it up. Accounts that already existed keep working 
 can still redeem a code after signing in. Release is invite-only testing: TestFlight
 internal (testers added to the owner's team) and Play internal testing.
 
+**2026-11-25 — Gym hidden for now.** The owner wants the first release to be a
+run coach, with gym logging built back up later. The website no longer shows the
+gym log, gym stops on routes and runs, workout posts or the `workouts` challenge
+metric. Nothing was deleted: the `workouts` table, the `workout` ingest kind, old
+data and the gym source files (`web/src/pages/Workouts.jsx`,
+`web/src/components/workout/`, `web/src/lib/exercises.js`) are all still there.
+
+**2026-11-25 — Checks rerun on every change.** `npm run check` runs the API
+tests, the web lint and the Playwright browser flows (`e2e/`, admin and runner);
+`npm run check:watch` reruns them whenever a source file changes; the GitHub
+workflow `.github/workflows/checks.yml` reruns them on every push and pull request.
+
 ## Not built yet (deliberately deferred)
 
 | Feature | State now | Notes |

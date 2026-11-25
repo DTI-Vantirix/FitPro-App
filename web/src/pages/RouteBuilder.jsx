@@ -1,23 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Crosshair, Dumbbell, RotateCcw, Save, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Crosshair, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { api } from '@/api/client';
 import MapView from '@/components/MapView';
 import ZonePicker from '@/components/run/ZonePicker';
 import { pathMiles } from '@/lib/geo';
 import { sortZones } from '@/lib/zones';
-import { cn } from '@/lib/utils';
 
 export default function RouteBuilder() {
   const navigate = useNavigate();
   const [points, setPoints] = useState([]);
   const [path, setPath] = useState([]);
-  const [gymPoint, setGymPoint] = useState(null);
-  const [mode, setMode] = useState('route');
   const [snapping, setSnapping] = useState(false);
   const [snapFailed, setSnapFailed] = useState(false);
   const [name, setName] = useState('');
-  const [gymStop, setGymStop] = useState('');
   const [zones, setZones] = useState([]);
   const [zoneId, setZoneId] = useState('');
   const [center, setCenter] = useState([40.7128, -74.006]);
@@ -73,11 +69,6 @@ export default function RouteBuilder() {
   };
 
   const addPoint = (p) => {
-    if (mode === 'gym') {
-      setGymPoint(p);
-      setMode('route');
-      return;
-    }
     const next = [...points, p];
     setPoints(next);
     snap(next);
@@ -108,8 +99,6 @@ export default function RouteBuilder() {
         distance_mi: Number(distance.toFixed(2)),
         points,
         path: path.length > 1 ? path : points,
-        gym_stop: gymStop.trim(),
-        ...(gymPoint ? { gym_point: gymPoint } : {}),
         target_zone_id: zone?.id || '',
         target_zone_name: zone?.name || '',
       });
@@ -131,9 +120,7 @@ export default function RouteBuilder() {
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <div>
-          <p className="eyebrow">
-            {mode === 'gym' ? 'Tap the gym on the map' : 'Tap the map — the line follows the roads'}
-          </p>
+          <p className="eyebrow">Tap the map — the line follows the roads</p>
           <h1 className="font-heading text-lg font-bold leading-tight">Draw a route</h1>
         </div>
       </div>
@@ -142,7 +129,6 @@ export default function RouteBuilder() {
         <MapView
           points={points}
           path={path}
-          gymPoint={gymPoint}
           editable
           onAddPoint={addPoint}
           initialCenter={center}
@@ -153,22 +139,13 @@ export default function RouteBuilder() {
       </div>
 
       <div className="panel space-y-4 p-5">
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3">
           <label className="block">
             <span className="eyebrow">Route name</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Ironworks loop"
-              className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary/60"
-            />
-          </label>
-          <label className="block">
-            <span className="eyebrow">Gym stop (optional)</span>
-            <input
-              value={gymStop}
-              onChange={(e) => setGymStop(e.target.value)}
-              placeholder="Ironworks Barbell"
               className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary/60"
             />
           </label>
@@ -198,28 +175,6 @@ export default function RouteBuilder() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => setMode(mode === 'gym' ? 'route' : 'gym')}
-            className={cn(
-              'flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-medium transition-colors',
-              mode === 'gym'
-                ? 'border-primary bg-primary/10 text-primary'
-                : 'border-border text-muted-foreground hover:text-foreground'
-            )}
-          >
-            <Dumbbell className="h-3.5 w-3.5" />
-            {mode === 'gym' ? 'Tap the map to pin the gym' : 'Mark gym'}
-          </button>
-          {gymPoint && (
-            <button
-              type="button"
-              onClick={() => setGymPoint(null)}
-              className="flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <X className="h-3.5 w-3.5" /> Clear gym pin
-            </button>
-          )}
-          <button
-            type="button"
             onClick={() => here && addPoint(here)}
             disabled={!here}
             className="flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
@@ -243,12 +198,6 @@ export default function RouteBuilder() {
             <Trash2 className="h-3.5 w-3.5" /> Clear
           </button>
         </div>
-
-        {gymPoint && (
-          <p className="text-[11px] leading-relaxed text-primary">
-            Gym pinned. Your run pauses automatically when you arrive, then picks up again when you resume.
-          </p>
-        )}
 
         {error && <p className="text-xs text-destructive">{error}</p>}
 
