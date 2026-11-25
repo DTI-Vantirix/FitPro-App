@@ -59,9 +59,8 @@ internal (testers added to the owner's team) and Play internal testing.
 2. iOS first, Android first, or both? Is Google Health Connect in the first release?
 3. Is real activity upload now approved? (The API is ready; the shell still runs
    on the fake adapter.) Deletion/"unsync" of synced activities?
-4. Should the **server** also require an accepted invite for `ingestActivity`?
-   Today only the app enforces the invite gate; enforcing it server-side is a
-   one-line check and fails closed.
+4. ~~Should the **server** also require an accepted invite for `ingestActivity`?~~
+   Decided 2026-11-25: yes. `ingestActivity` answers 403 without an accepted code.
 5. Background sync: in scope? Needs its own design and permission model.
 6. Health-data retention, export, and the privacy policy wording.
 7. Hosting: which provider and region.

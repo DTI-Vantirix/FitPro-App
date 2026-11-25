@@ -159,6 +159,7 @@ All errors are `{ "error": "<message>" }` with the message written for a human:
 | ------ | ---------------------------------------------------------------- |
 | 400    | missing `external_id`, bad `distance_mi`/`duration_sec`, invalid `started_at`/`performed_at`, no usable exercises, unknown `kind` |
 | 401    | no app-user session                                              |
+| 403    | signed in, but no accepted invite code (admins are exempt): `"Redeem your invite code before syncing activities."` |
 | 500    | unexpected — surface the message, do not retry in a loop          |
 
 The shell should surface 400s verbatim next to the affected activity. A 400 means the

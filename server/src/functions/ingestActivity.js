@@ -1,4 +1,5 @@
 import { HttpError } from '../lib/http.js';
+import { hasAccess } from './inviteAccess.js';
 
 // The single write path for synced health data (Apple Health, Health Connect,
 // Garmin, manual). Contract: docs/native-contract.md. Ported unchanged from the
@@ -212,6 +213,10 @@ async function ingestWorkout(db, user, body) {
 }
 
 export default async function ingestActivity({ db, user, body }) {
+  // Invite-only is enforced here too, not just in the app.
+  if (!(await hasAccess(db, user))) {
+    throw new HttpError(403, 'Redeem your invite code before syncing activities.');
+  }
   const kind = body.kind ? String(body.kind).trim().toLowerCase() : 'run';
   if (kind === 'run') return ingestRun(db, user, body);
   if (kind === 'workout') return ingestWorkout(db, user, body);

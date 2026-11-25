@@ -507,6 +507,20 @@ describe('ingestActivity (native contract)', () => {
     const unauth = await call('POST', '/api/functions/ingestActivity', { body: run });
     assert.deepEqual(unauth, { status: 401, data: { error: 'Unauthorized' } });
   });
+
+  test('no accepted invite code -> 403, nothing stored', async () => {
+    const lee = await legacyUser('lee@example.com');
+    const res = await call('POST', '/api/functions/ingestActivity', { token: lee.token, body: run });
+    assert.deepEqual(res, { status: 403, data: { error: 'Redeem your invite code before syncing activities.' } });
+    const mine = await call('POST', '/api/entities/Run/query', { token: lee.token, body: {} });
+    assert.equal(mine.data.items.length, 0);
+  });
+
+  test('admins upload without a code', async () => {
+    await db.query('delete from access_grants where user_id = $1 returning id', [admin.user.id]);
+    const res = await call('POST', '/api/functions/ingestActivity', { token: admin.token, body: { ...run, external_id: 'HK-ADMIN-1' } });
+    assert.equal(res.status, 200, JSON.stringify(res.data));
+  });
 });
 
 describe('social feed', () => {
