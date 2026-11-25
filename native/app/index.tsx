@@ -42,7 +42,14 @@ export default function SignIn() {
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      // The account exists but its email was never confirmed: the server has just sent a new code.
+      if (/HTTP 403: Verify your email/.test(message)) {
+        setPassword('');
+        router.push({ pathname: '/signup', params: { email: email.trim(), verify: '1' } });
+        return;
+      }
+      setError(message);
     } finally {
       setBusy(false);
     }
@@ -84,16 +91,17 @@ export default function SignIn() {
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
         <Text style={styles.brand}>FITPRO / NATIVE</Text>
         <View style={styles.topRule} />
-        <SectionHeading kicker="STEP 01 · AUTHENTICATION" title={challenge ? 'Verify your identity' : 'Welcome back.'}
+        <SectionHeading kicker="SIGN IN" title={challenge ? 'Verify your identity' : 'Welcome back.'}
           subtitle={challenge ? 'Complete the same multi-factor login used by the FitPro web app.'
-            : 'Sign into your existing FitPro account. This shell does not ask for health access.'} />
+            : 'Sign into your FitPro account.'} />
         <ErrorNotice message={error ?? sessionError} />
         {!challenge ? (
           <>
             <Field label="EMAIL" value={email} onChangeText={setEmail} keyboardType="email-address" />
             <Field label="PASSWORD" value={password} onChangeText={setPassword} secure />
             <Action label="Sign into FitPro" onPress={attemptLogin} busy={busy} disabled={!email.trim() || !password} />
-            <Text style={styles.note}>This spike supports FitPro email/password sign-in. Google OAuth is not implemented yet because its native redirect/session handoff has not been verified.</Text>
+            <Action label="Create an account with an invite code" onPress={() => router.push('/signup')} secondary />
+            <Text style={styles.note}>FitPro is invite-only for now. Sign in with your email and password, or create an account with the code you were given.</Text>
           </>
         ) : (
           <>

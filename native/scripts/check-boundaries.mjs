@@ -87,4 +87,46 @@ const buildProp = cfg.expo.plugins.find((plugin) => Array.isArray(plugin) && plu
 assert(buildProp?.[1]?.android?.minSdkVersion === 26 && buildProp?.[1]?.android?.targetSdkVersion === 36,
   'Android Health Connect requires min API 26 and compatible target SDK.');
 assert(!activities.includes('sendSyntheticWorkout') && !activities.includes('ingestActivity'), 'Real activities screen cannot upload data in Step 5.');
+// ---- Stage 1B: the run experience ----
+for (const f of ['app/signup.tsx', 'app/setup.tsx', 'app/home.tsx', 'app/settings.tsx', 'app/run-start.tsx', 'app/run-live.tsx', 'app/run-summary.tsx'])
+  assert(existsSync(join(native, f)), `Missing ${f}`);
+// Every screen past sign-up sits behind the same three checks: sign-in, consent, invite.
+for (const f of ['setup', 'home', 'settings', 'run-start', 'run-live', 'run-summary']) {
+  const screen = readFileSync(join(native, `app/${f}.tsx`), 'utf8');
+  assert(/export default function \w+\(\) \{\s*return <Gated/.test(screen), `app/${f}.tsx must render inside <Gated>.`);
+}
+const gateSource = readFileSync(join(native, 'src/run/ui/Screen.tsx'), 'utf8');
+assert(gateSource.includes('if (!accessToken) return <Redirect href="/" />') && gateSource.includes('if (!consentAccepted) return <Redirect href="/consent" />')
+  && gateSource.includes("status === 'needs_invite' || status === 'blocked'"), 'The run gate must check sign-in, consent and invite, in that order.');
+// Sign-up asks for nothing from the phone: no health, location, Bluetooth or notification permission.
+const signup = readFileSync(join(native, 'app/signup.tsx'), 'utf8');
+assert(!/expo-location|react-native-ble-plx|expo-notifications|health/i.test(signup.replace(/\/\*\*[\s\S]*?\*\//, '')), 'Sign-up must not touch device permissions.');
+// Runs are written through ingestActivity only; never the generic entity routes.
+const runFiles = sourceFiles(join(native, 'src/run'));
+for (const file of [...runFiles, ...sourceFiles(join(native, 'app'))]) {
+  const text = readFileSync(file, 'utf8');
+  assert(!/entities\/(Run|Workout)\b|entityUrl\('(Run|Workout)'/.test(text), `${file} writes runs outside ingestActivity.`);
+  assert(!/HealthKit|health-connect|react-native-healthkit/.test(text) || !file.includes(`${sep}run${sep}`), `${file}: the run code must not request health permissions.`);
+}
+// The run logic is plain TypeScript: no React, React Native or Expo, so it is unit-tested as is.
+const PURE = ['zones', 'geo', 'tracker', 'cues', 'directions', 'engine', 'payload', 'format', 'queue', 'hr-parse', 'controller'];
+for (const name of PURE) {
+  const text = readFileSync(join(native, `src/run/${name}.ts`), 'utf8');
+  for (const [, spec] of text.matchAll(importPattern)) assert(spec.startsWith('./'), `src/run/${name}.ts must stay pure but imports ${spec}.`);
+  assert(existsSync(join(native, 'scripts')), 'scripts folder missing');
+}
+const autoPolicy = readFileSync(join(native, 'src/ingestion/auto-import-policy.ts'), 'utf8');
+assert(/AUTO_HEALTH_IMPORT_ENABLED = false;/.test(autoPolicy), 'Automatic health import must stay off in Stage 1 (duplicate runs).');
+assert(readFileSync(join(native, 'src/ingestion/manual-import-panel.tsx'), 'utf8').includes('AUTO_HEALTH_IMPORT_ENABLED'), 'The import panel must honour the automatic-import switch.');
+const payloadSource = readFileSync(join(native, 'src/run/payload.ts'), 'utf8');
+assert(payloadSource.includes("source: 'fitpro'") && !/avg_pace_sec\s*:/.test(payloadSource), 'Run payload must be source "fitpro" and never send server-computed pace.');
+assert(readFileSync(join(native, 'app/run-start.tsx'), 'utf8').includes('Crypto.randomUUID()'), 'external_id must be generated when the run starts.');
+assert(readFileSync(join(native, 'app/settings.tsx'), 'utf8').includes('deleteAccount(accessToken, password)'), 'Native account deletion missing.');
+// Store identity is not decided yet (Stage 1C): the placeholder id must not change here.
+assert(cfg.expo.ios.bundleIdentifier === 'com.fitpro.spike' && cfg.expo.android.package === 'com.fitpro.spike', 'Bundle id must not change before Stage 1C.');
+assert(cfg.expo.ios.infoPlist.UIBackgroundModes.includes('location'), 'Background location mode missing: runs would stop when the screen locks.');
+const locationPlugin = cfg.expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-location');
+assert(locationPlugin?.[1]?.isIosBackgroundLocationEnabled && locationPlugin?.[1]?.isAndroidForegroundServiceEnabled, 'Background location is not configured.');
+assert(/^~58\./.test(pkg.dependencies['expo-location']) && /^~58\./.test(pkg.dependencies['expo-notifications']) && /^~58\./.test(pkg.dependencies['expo-speech']),
+  'Run libraries must match Expo SDK 58.');
 console.log('PASS: native-only, access gate, fake/Apple/Android adapters, read-only OS permissions, no health writes/background/uploads.');

@@ -4,7 +4,8 @@
 import { INGEST_URL } from '../config';
 import type { NormalizedActivity } from '../health/types';
 
-export type IngestOutcome = 'created' | 'updated';
+/** `skipped`: the server already has this run as one FitPro recorded itself; nothing was written. */
+export type IngestOutcome = 'created' | 'updated' | 'skipped';
 export type SyncSource = 'apple' | 'health_connect';
 export type SyncPayload = Readonly<Record<string, unknown>>;
 
@@ -123,6 +124,10 @@ export async function submitHealthActivity(
     if (!response.ok) {
       const message = typeof data.error === 'string' ? data.error : `HTTP ${response.status}: ${raw.slice(0, 200)}`;
       throw new ActivitySyncError(message, response.status);
+    }
+    if (data.ok === true && data.action === 'skipped' && data.kind === item.kind) {
+      // docs/native-contract.md: treat `skipped` as success; do not retry it or show it as an error.
+      return { action: 'skipped', recordId: typeof data.run_id === 'string' ? data.run_id : null };
     }
     if (data.ok !== true || (data.action !== 'created' && data.action !== 'updated') || data.kind !== item.kind) {
       throw new ActivitySyncError('Unexpected ingestion response; verify the record in FitPro before retrying.', response.status);

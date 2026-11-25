@@ -17,7 +17,7 @@ export default function InviteScreen() {
   if (loadingSession) return <View style={styles.loading}><ActivityIndicator color={colors.accent} /></View>;
   if (!accessToken) return <Redirect href="/" />;
   if (!consentAccepted) return <Redirect href="/consent" />;
-  if (status === 'allowed') return <Redirect href="/spike" />;
+  if (status === 'allowed') return <Redirect href="/home" />;
 
   async function redeemCode() {
     setBusy(true);
@@ -25,7 +25,7 @@ export default function InviteScreen() {
     try {
       await redeem(code);
       setCode('');
-      router.replace('/spike');
+      router.replace('/home');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {

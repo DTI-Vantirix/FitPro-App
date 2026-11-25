@@ -1,0 +1,234 @@
+/** Everything the run experience asks of the FitPro API, over HTTP only.
+ * Runs are written through ingestActivity and nowhere else (docs/native-contract.md).
+ * Profile, zones and routes use the same entity routes the website uses.
+ */
+import { API_URL, APP_AUTH_URL, ENTITIES_URL, FUNCTIONS_URL, INGEST_URL } from '../config';
+import type { Maneuver } from './directions';
+import { validLatLng, type LatLng } from './geo';
+import { classifyResponse, type SendResult } from './queue';
+import { sortZones, zoneTemplate, type Profile, type Zone } from './zones';
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly data: unknown = null) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+export type SavedRoute = {
+  id: string;
+  name: string;
+  distanceMi: number | null;
+  /** The line to draw and follow: the road-following geometry when the route has it, else its waypoints. */
+  path: LatLng[];
+  targetZoneId: string | null;
+  targetZoneName: string | null;
+};
+export type Directions = { available: boolean; maneuvers: Maneuver[] };
+
+const OFFLINE = "Can't reach FitPro. Check your connection and try again.";
+
+type Reply = { status: number; data: unknown };
+
+async function call(method: string, url: string, opts: { token?: string; body?: unknown; timeoutMs?: number } = {}): Promise<Reply> {
+  if (!API_URL) throw new ApiError('EXPO_PUBLIC_API_URL is not set. Add it to native/.env and restart Expo.', 0);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 20000);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method,
+      headers: {
+        Accept: 'application/json',
+        ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
+      },
+      ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
+      signal: controller.signal,
+    });
+  } catch {
+    throw new ApiError(OFFLINE, 0);
+  } finally {
+    clearTimeout(timer);
+  }
+  const text = await response.text();
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+  return { status: response.status, data };
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+async function request(method: string, url: string, opts: { token?: string; body?: unknown; timeoutMs?: number } = {}): Promise<unknown> {
+  const reply = await call(method, url, opts);
+  if (reply.status < 200 || reply.status >= 300) {
+    const error = record(reply.data).error;
+    throw new ApiError(typeof error === 'string' && error ? error : `Request failed (${reply.status}).`, reply.status, reply.data);
+  }
+  return reply.data;
+}
+
+function items(data: unknown): Record<string, unknown>[] {
+  const list = Array.isArray(data) ? data : record(data).items;
+  return Array.isArray(list) ? list.map(record) : [];
+}
+
+const num = (value: unknown): number | null => {
+  const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) ? n : null;
+};
+const str = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
+
+// ---- account -------------------------------------------------------------
+
+export async function register(input: { email: string; password: string; fullName: string; inviteCode: string }): Promise<void> {
+  await request('POST', `${APP_AUTH_URL}/register`, {
+    body: {
+      email: input.email.trim(),
+      password: input.password,
+      ...(input.fullName.trim() ? { full_name: input.fullName.trim() } : {}),
+      invite_code: input.inviteCode.trim().toUpperCase(),
+    },
+  });
+}
+
+/** Confirms the emailed 6-digit code and returns the access token. */
+export async function verifyEmailCode(email: string, code: string): Promise<string> {
+  const data = record(await request('POST', `${APP_AUTH_URL}/verify-otp`, { body: { email: email.trim(), otp_code: code.trim() } }));
+  if (typeof data.access_token !== 'string' || !data.access_token) throw new ApiError('The server did not sign you in. Try signing in.', 0);
+  return data.access_token;
+}
+
+export async function resendEmailCode(email: string): Promise<void> {
+  await request('POST', `${APP_AUTH_URL}/resend-otp`, { body: { email: email.trim() } });
+}
+
+export async function fetchMe(token: string): Promise<{ id: string; email: string }> {
+  const data = record(await request('GET', `${APP_AUTH_URL}/me`, { token }));
+  if (typeof data.id !== 'string' || !data.id) throw new ApiError('The server did not return your account.', 0);
+  return { id: data.id, email: typeof data.email === 'string' ? data.email : '' };
+}
+
+/** Permanently deletes the account and, on the server, every record it owns. */
+export async function deleteAccount(token: string, password: string): Promise<void> {
+  await request('DELETE', `${APP_AUTH_URL}/me`, { token, body: { password } });
+}
+
+// ---- profile and zones ---------------------------------------------------
+
+const entityUrl = (name: string, suffix = '') => `${ENTITIES_URL}/${name}${suffix}`;
+// An admin may read everyone's records, so every list asks for the caller's own.
+const mine = (ownerId: string) => ({ created_by_id: ownerId });
+
+export async function loadProfile(token: string, ownerId: string): Promise<Profile | null> {
+  const [row] = items(await request('POST', entityUrl('Profile', '/query'), { token, body: { q: mine(ownerId), sort: '-created_date', limit: 1 } }));
+  const id = str(row?.id);
+  return id ? { id, hr_max: num(row.hr_max), threshold_sec: num(row.threshold_sec) } : null;
+}
+
+export async function saveProfile(token: string, ownerId: string, values: { hr_max: number; threshold_sec?: number }): Promise<void> {
+  const existing = await loadProfile(token, ownerId);
+  if (existing) await request('PUT', entityUrl('Profile', `/${encodeURIComponent(existing.id)}`), { token, body: values });
+  else await request('POST', entityUrl('Profile'), { token, body: values });
+}
+
+function toZone(row: Record<string, unknown>): Zone | null {
+  const fast = num(row.fast_sec);
+  const slow = num(row.slow_sec);
+  const name = str(row.name);
+  if (!name || fast == null || slow == null || fast <= 0 || slow < fast) return null;
+  return {
+    ...(str(row.id) ? { id: str(row.id)! } : {}),
+    name,
+    zone_number: num(row.zone_number) ?? 0,
+    fast_sec: fast,
+    slow_sec: slow,
+    hr_min_pct: num(row.hr_min_pct),
+    hr_max_pct: num(row.hr_max_pct),
+    ...(str(row.color) ? { color: str(row.color)! } : {}),
+  };
+}
+
+export async function listZones(token: string, ownerId: string): Promise<Zone[]> {
+  const rows = items(await request('POST', entityUrl('PaceZone', '/query'), { token, body: { q: mine(ownerId), sort: 'fast_sec', limit: 40 } }));
+  return sortZones(rows.map(toZone).filter((z): z is Zone => z !== null));
+}
+
+/** Writes the five zones for a threshold pace, replacing any previous set — the same
+ * steps as the website's applyZones (web/src/lib/profile.js). */
+export async function applyZones(token: string, ownerId: string, thresholdSec: number): Promise<Zone[]> {
+  const spec = zoneTemplate(thresholdSec);
+  const existing = items(await request('POST', entityUrl('PaceZone', '/query'), { token, body: { q: mine(ownerId), sort: 'fast_sec', limit: 40 } }));
+  const byNumber = new Map(existing.map((zone) => [num(zone.zone_number) ?? 0, zone]));
+  if (existing.length === spec.length && spec.every((s) => str(byNumber.get(s.zone_number)?.id))) {
+    await request('PUT', entityUrl('PaceZone', '/bulk'), { token, body: spec.map((s) => ({ id: byNumber.get(s.zone_number)!.id, ...s })) });
+  } else {
+    for (const zone of existing) {
+      const id = str(zone.id);
+      if (id) await request('DELETE', entityUrl('PaceZone', `/${encodeURIComponent(id)}`), { token });
+    }
+    await request('POST', entityUrl('PaceZone', '/bulk'), { token, body: spec });
+  }
+  return listZones(token, ownerId);
+}
+
+// ---- routes and directions -----------------------------------------------
+
+function toPath(value: unknown): LatLng[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((p) => ({ lat: Number(record(p).lat), lng: Number(record(p).lng) })).filter(validLatLng);
+}
+
+export async function listRoutes(token: string, ownerId: string): Promise<SavedRoute[]> {
+  const rows = items(await request('POST', entityUrl('Route', '/query'), { token, body: { q: mine(ownerId), sort: '-created_date', limit: 100 } }));
+  return rows.flatMap((row) => {
+    const id = str(row.id);
+    const dense = toPath(row.path);
+    const path = dense.length >= 2 ? dense : toPath(row.points);
+    if (!id || path.length < 2) return [];
+    return [{ id, name: str(row.name) ?? 'Route', distanceMi: num(row.distance_mi), path, targetZoneId: str(row.target_zone_id), targetZoneName: str(row.target_zone_name) }];
+  });
+}
+
+function toManeuver(value: unknown, index: number): Maneuver | null {
+  const m = record(value);
+  const lat = num(m.lat);
+  const lng = num(m.lng);
+  const at = num(m.at_mi);
+  const instruction = str(m.instruction);
+  if (lat == null || lng == null || at == null || at < 0 || !instruction || !validLatLng({ lat, lng })) return null;
+  return { index, instruction, verbal: str(m.verbal) ?? instruction, type: num(m.type) ?? 0, lat, lng, at_mi: at };
+}
+
+/** Turn instructions for a saved route. Never throws: without them the route is still drawn. */
+export async function fetchDirections(token: string, routeId: string): Promise<Directions> {
+  try {
+    const data = record(await request('POST', `${FUNCTIONS_URL}/routeDirections`, { token, body: { route_id: routeId }, timeoutMs: 15000 }));
+    const maneuvers = (Array.isArray(data.maneuvers) ? data.maneuvers : [])
+      .map((m) => toManeuver(m, 0))
+      .filter((m): m is Maneuver => m !== null)
+      .sort((a, b) => a.at_mi - b.at_mi)
+      .map((m, index) => ({ ...m, index }));
+    return data.available === true && maneuvers.length ? { available: true, maneuvers } : { available: false, maneuvers: [] };
+  } catch {
+    return { available: false, maneuvers: [] };
+  }
+}
+
+// ---- saving a run --------------------------------------------------------
+
+/** One attempt to save a run. Never throws; the queue decides what to do with the result. */
+export async function sendRun(token: string, payload: Record<string, unknown>): Promise<SendResult> {
+  try {
+    const reply = await call('POST', INGEST_URL, { token, body: payload, timeoutMs: 30000 });
+    return classifyResponse(reply.status, reply.data);
+  } catch (cause) {
+    return classifyResponse(null, null, cause instanceof Error ? cause.message : String(cause));
+  }
+}
