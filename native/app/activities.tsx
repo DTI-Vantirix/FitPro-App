@@ -130,11 +130,11 @@ export default function ActivitiesScreen() {
   async function requestRealPermission() {
     if (!authorized || provider === 'fake' || permissionBusy) return;
     if (provider === 'apple' && !isAppleHealthBuildAvailable()) {
-      setLoadError('Apple Health requires a FitPro iOS development build. Expo Go cannot access HealthKit.');
+      setLoadError('Apple Health requires a VantraRun iOS development build. Expo Go cannot access HealthKit.');
       return;
     }
     if (provider === 'health_connect' && !isAndroidHealthBuildAvailable()) {
-      setLoadError('Android Health Connect requires a FitPro Android development build. Expo Go cannot access its native module.');
+      setLoadError('Android Health Connect requires a VantraRun Android development build. Expo Go cannot access its native module.');
       return;
     }
     setPermissionBusy(true);
@@ -157,10 +157,10 @@ export default function ActivitiesScreen() {
   if (accessStatus === 'needs_invite' || accessStatus === 'blocked') return <Redirect href="/invite" />;
 
   return <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-    <Text style={styles.brand}>FITPRO / NATIVE</Text>
+    <Text style={styles.brand}>VANTRARUN</Text>
     {accessStatus !== 'allowed' ? <>
       <SectionHeading kicker="STEP 02 · ACCESS REQUIRED" title="Access not verified."
-        subtitle="Health reads remain disabled until the FitPro API confirms your invite authorization." />
+        subtitle="Health reads remain disabled until the VantraRun API confirms your invite authorization." />
       <ErrorNotice message={accessError ?? sessionError} />
       {accessStatus === 'checking'
         ? <ActivityIndicator color={colors.accent} />
@@ -174,7 +174,7 @@ export default function ActivitiesScreen() {
       <View style={styles.banner}>
         <Text style={styles.bannerTitle}>{fake ? 'OFFLINE SIMULATION' : provider === 'apple' ? 'APPLE HEALTH · READ ONLY' : 'HEALTH CONNECT · READ ONLY'}</Text>
         <Text style={styles.bannerBody}>Adapter: {adapter.displayName}</Text>
-        <Text style={styles.bannerBody}>Consent: accepted · FitPro invite: verified</Text>
+        <Text style={styles.bannerBody}>Consent: accepted · VantraRun invite: verified</Text>
         <Text style={styles.bannerBody}>{fake ? 'OS health permissions: NOT REQUESTED' : realPermissionRequestComplete
           ? provider === 'apple' ? 'Health permission request completed (Apple does not disclose which read types were granted).' : 'Health Connect: required read permissions verified.'
           : 'OS health permission: NOT REQUESTED in this screen'}</Text>
@@ -186,7 +186,7 @@ export default function ActivitiesScreen() {
         </Text>
       </View>
       {!fake && <>
-        <Text style={styles.note}>Only running workouts are displayed. Neither Apple Health nor Health Connect normally provides the per-exercise sets, reps, and weights required by FitPro's strength-ingestion contract.</Text>
+        <Text style={styles.note}>Only running workouts are displayed. Neither Apple Health nor Health Connect normally provides the per-exercise sets, reps, and weights required by VantraRun's strength-ingestion contract.</Text>
         {provider === 'apple'
           ? <Text style={styles.note}>Workouts, running distance, routes and heart rate are read only with your approval. Routes and heart rate are optional; Apple may return no data for denied read types.</Text>
           : <Text style={styles.note}>Health Connect reads running and treadmill sessions from the last 30 days. Exercise and distance access are required; heart rate is optional. Another app's GPS routes need separate permission, which this screen does not request.</Text>}

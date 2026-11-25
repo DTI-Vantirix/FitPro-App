@@ -145,3 +145,18 @@ test('bucket: a failure is reported without leaking the keys', async () => {
     });
   }
 });
+
+test('error-report bookkeeping: repeats are skipped and the rate is capped', async () => {
+  const { createErrorGate } = await import('../src/errors.js');
+  let now = 1_000_000;
+  const gate = createErrorGate({ perMinute: 3, repeatMs: 600000, now: () => now });
+  assert.equal(gate('boom', 'GET /a'), true);
+  assert.equal(gate('boom', 'GET /a'), false, 'same error, same place');
+  assert.equal(gate('boom', 'GET /b'), true);
+  assert.equal(gate('other', 'GET /a'), true);
+  assert.equal(gate('fourth', 'GET /a'), false, 'over the per-minute cap');
+  now += 61_000;
+  assert.equal(gate('fourth', 'GET /a'), true);
+  now += 600_000;
+  assert.equal(gate('boom', 'GET /a'), true, 'worth recording again after ten minutes');
+});

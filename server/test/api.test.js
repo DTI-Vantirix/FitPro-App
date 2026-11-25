@@ -717,7 +717,11 @@ describe('first admin on a new host', () => {
 
   test('nothing happens unless both settings are present and the password is long enough', async () => {
     assert.equal(await bootstrapAdmin(db, {}), 'skipped');
-    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'owner@example.com' }), 'skipped');
+    const said = [];
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'owner@example.com' }, (line) => said.push(line)), 'skipped');
+    assert.deepEqual(said, [], 'the password setting removed after set-up is not worth a warning');
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'owner@example.com', ADMIN_PASSWORD: 'short-pw' }, (line) => said.push(line)), 'skipped');
+    assert.match(said[0], /at least 12 characters/);
     assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'owner@example.com', ADMIN_PASSWORD: 'short-pw' }), 'skipped');
     assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'not-an-email', ADMIN_PASSWORD: 'a-long-enough-password' }), 'skipped');
     assert.equal((await db.query(`select id from users where email = 'owner@example.com'`, [])).length, 0);
@@ -747,6 +751,63 @@ describe('first admin on a new host', () => {
   });
 });
 
+describe('requests nobody should be able to hurt the server with', () => {
+  const raw = (path) => fetch(base + path);
+  const serverErrors = async () => (await db.query(`select count(*)::int as n from client_errors where platform = 'server'`, []))[0].n;
+
+  test('a path that is not a valid address is a 400, and the server keeps running', async () => {
+    const res = await raw('//');
+    assert.equal(res.status, 400);
+    assert.equal((await call('GET', '/api/health')).status, 200);
+  });
+
+  test('a badly encoded path is a 400 and is not recorded as a server error', async () => {
+    const before = await serverErrors();
+    for (const path of ['/uploads/%E0%A4%A', '/api/entities/Run/%E0%A4%A', '/api/functions/%E0%A4%A']) {
+      const res = await raw(path);
+      assert.equal(res.status, 400, path);
+    }
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(await serverErrors(), before);
+  });
+
+  test('sign-in guesses against one email are limited even from many addresses', async () => {
+    process.env.TRUST_PROXY = 'true';
+    try {
+      let last;
+      for (let i = 0; i < 40 && last !== 429; i++) {
+        last = (await call('POST', '/api/auth/login', {
+          body: { email: 'guess-target@example.com', password: `wrong-${i}` },
+          headers: { 'X-Forwarded-For': `203.0.113.${i}` },
+        })).status;
+      }
+      assert.equal(last, 429);
+    } finally {
+      delete process.env.TRUST_PROXY;
+    }
+  });
+
+  test('a download the reader abandons does not hold the file open', async () => {
+    const big = Buffer.alloc(8 * 1024 * 1024, 7);
+    big.set([0x89, 0x50, 0x4e, 0x47]);
+    const up = await call('POST', '/api/uploads', { token: bob.token, raw: big, headers: { 'Content-Type': 'image/png' } });
+    assert.equal(up.status, 201);
+    const name = up.data.file_url.split('/').pop();
+    for (let i = 0; i < 3; i++) {
+      const controller = new AbortController();
+      const res = await fetch(base + up.data.file_url, { signal: controller.signal });
+      await res.body.getReader().read();
+      controller.abort();
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    // On every platform a file that is still open cannot be renamed away and replaced cleanly;
+    // the portable check is that removing it works and a later request is a clean 404.
+    fs.rmSync(path.join(uploadDir, name));
+    assert.equal((await fetch(base + up.data.file_url)).status, 404);
+    assert.equal((await call('GET', '/api/health')).status, 200);
+  });
+});
+
 describe('error reports', () => {
   const report = (token, body) => call('POST', '/api/client-errors', { token, body });
   let owner;
@@ -766,6 +827,11 @@ describe('error reports', () => {
     assert.deepEqual(sent.data, { ok: true });
     const [row] = await db.query('select * from client_errors where user_id = $1', [bob.user.id]);
     assert.deepEqual([row.message.length, row.stack.length, row.context.length, row.platform, row.app_version], [500, 4000, 200, 'ios', '1.0.0 (12)']);
+    // only the API itself may label a report as coming from the server
+    await report(bob.token, { message: 'pretending', platform: 'server' });
+    const [fake] = await db.query(`select platform from client_errors where message = 'pretending'`, []);
+    assert.equal(fake.platform, 'app');
+    await db.query(`delete from client_errors where message = 'pretending' returning id`, []);
   });
 
   test('admins read them newest first; nobody else can', async () => {
@@ -792,6 +858,10 @@ describe('error reports', () => {
     }
     assert.equal(rows.length, before + 1);
     assert.equal(rows[0].context, 'POST /api/functions/adminClientErrors');
+    // the same failure again and again is recorded once, not once per request
+    for (let i = 0; i < 3; i++) await call('POST', '/api/functions/adminClientErrors', { token: owner.access_token, body: { action: 'test-crash' } });
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal((await db.query(`select id from client_errors where platform = 'server'`, [])).length, before + 1);
     assert.ok(!JSON.stringify(rows[0]).includes('do-not-store-me'));
   });
 
@@ -800,7 +870,7 @@ describe('error reports', () => {
     for (let i = 0; i < 20; i++) last = await report(bob.token, { message: `flood ${i}` });
     assert.equal(last.status, 429);
     const [{ n }] = await db.query('select count(*)::int as n from client_errors where user_id = $1', [bob.user.id]);
-    assert.equal(n, 20);
+    assert.equal(n, 19, 'twenty accepted in the hour, one of which was removed above');
   });
 
   test('admins can clear the list; deleting an account deletes its reports', async () => {

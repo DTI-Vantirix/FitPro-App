@@ -16,6 +16,9 @@ const VERIFY_TTL_MIN = 15;
 const RESET_TTL_MIN = 60;
 
 const loginLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
+// The address a request claims to come from can be forged behind some proxies, so wrong
+// passwords are also counted per account, whatever address they arrive from.
+const loginEmailLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 25 });
 const codeLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
 // Per email address: stops one inbox being flooded. Per IP: stops mass sign-ups,
 // but loose enough for many people on one network (a gym's Wi-Fi).
@@ -127,6 +130,7 @@ export function registerAuthRoutes(router) {
   router.add('POST', '/api/auth/login', async (ctx) => {
     const email = readEmail(ctx.body.email);
     loginLimit(`login:${clientIp(ctx.req)}:${email}`);
+    loginEmailLimit(`login-email:${email}`);
     const user = await findByEmail(ctx.db, email);
     const ok = user?.password_hash
       ? await verifyPassword(String(ctx.body.password || ''), user.password_hash)

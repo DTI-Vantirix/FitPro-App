@@ -233,10 +233,10 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
             const response = await submitHealthActivity(item, accessToken, running.signal);
             outcome = response.action;
             text = response.action === 'created'
-              ? 'Imported successfully (created in FitPro).'
+              ? 'Imported successfully (created in VantraRun).'
               : response.action === 'skipped'
-                ? 'Already in FitPro: this is the same run FitPro recorded, so nothing was added.'
-                : 'Imported successfully (updated existing FitPro record).';
+                ? 'Already in VantraRun: this is the same run VantraRun recorded, so nothing was added.'
+                : 'Imported successfully (updated existing VantraRun record).';
           } catch (cause: unknown) {
             if (running.signal.aborted) break;
             outcome = 'failed';
@@ -280,7 +280,7 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
     {AUTO_HEALTH_IMPORT_ENABLED && <>
     <Text style={styles.kicker}>STEP 07A · FOREGROUND AUTO SYNC (OPT-IN)</Text>
     <Text style={styles.title}>Automatically import new workouts</Text>
-    <Text style={styles.description}>Off by default. Once enabled, newly completed workouts can be uploaded after an authorized Activities read or when you return to this screen. An upload may include distance, duration, heart rate, and GPS route if provided. Nothing runs while FitPro is closed.</Text>
+    <Text style={styles.description}>Off by default. Once enabled, newly completed workouts can be uploaded after an authorized Activities read or when you return to this screen. An upload may include distance, duration, heart rate, and GPS route if provided. Nothing runs while VantraRun is closed.</Text>
     {autoPrefs !== null && <Action
       label={autoPrefs.enabled ? 'Disable foreground auto-import' : 'Enable foreground auto-import'}
       secondary busy={autoSaving} disabled={!active || !!storageError || autoSaving}
@@ -291,7 +291,7 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
     <Text style={styles.kicker}>STEP 06 · MANUAL IMPORT (ALWAYS AVAILABLE)</Text>
     <Text style={styles.title}>Import selected activities</Text>
     <Text style={styles.description}>Manual imports always remain available. The existing ingestActivity endpoint receives selected records; fake records are never eligible.</Text>
-    {!active ? <Text style={styles.error}>Import is disabled until consent, sign-in, and FitPro invite authorization are confirmed.</Text> : <>
+    {!active ? <Text style={styles.error}>Import is disabled until consent, sign-in, and VantraRun invite authorization are confirmed.</Text> : <>
       <Text style={styles.count}>{selectedActivities.length} selected of {available.length} readable activities</Text>
       {available.length === 0 && <Text style={styles.description}>No importable activities loaded. Refresh your health adapter above.</Text>}
       {available.map((item) => {
@@ -326,7 +326,7 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
           {record.httpStatus !== undefined ? ` · HTTP ${record.httpStatus}` : ''}
           {'\n'}ID: {record.activityKey.slice(0, 84)}
         </Text>)}
-      <Text style={styles.footnote}>Local receipts clear on sign-out or consent withdrawal. Existing FitPro records are not deleted. Nothing is imported automatically.</Text>
+      <Text style={styles.footnote}>Local receipts clear on sign-out or consent withdrawal. Existing VantraRun records are not deleted. Nothing is imported automatically.</Text>
     </>}
   </View>;
 }

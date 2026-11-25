@@ -44,7 +44,7 @@ export default function ErrorReportsCard() {
           </h2>
           <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
             Crashes from the phone app and unexpected errors on the server. Stored here only; nothing is sent to an
-            outside service.
+            outside service. The newest 2,000 are kept.
           </p>
         </div>
         <button
@@ -91,6 +91,7 @@ export default function ErrorReportsCard() {
             type="button"
             disabled={busy}
             onClick={() =>
+              window.confirm('Delete every error report? This cannot be undone.') &&
               run(async () => {
                 await api.functions.invoke('adminClientErrors', { action: 'clear' });
                 await load();

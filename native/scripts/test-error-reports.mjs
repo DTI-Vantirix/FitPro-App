@@ -83,4 +83,54 @@ await test('a broken reporter never swallows the crash', async () => {
   assert.deepEqual(handled, ['still handled']);
   r.installErrorReporting({ errorUtils: undefined, getToken: async () => null, meta: () => ({ platform: 'ios' }) });
 });
+await test('a fatal crash is written down first and sent the next time the app opens', async () => {
+  const disk = { saved: null };
+  const sent = [];
+  const pending = {
+    save: (report) => { disk.saved = JSON.stringify(report); },
+    take: () => { const raw = disk.saved; return raw ? JSON.parse(raw) : null; },
+    clear: () => { disk.saved = null; },
+  };
+  let killed = false;
+  let handler = () => { killed = true; };
+  const install = (fetcher) => r.installErrorReporting({
+    errorUtils: { getGlobalHandler: () => handler, setGlobalHandler: (next) => { handler = next; } },
+    getToken: async () => 'tok',
+    meta: () => ({ platform: 'ios', appVersion: '1.0.0' }),
+    pending,
+    // the app dies before any request can finish
+    fetcher,
+  });
+  await install(async () => new Promise(() => {}));
+  handler(new Error('fatal one'), true);
+  assert.equal(killed, true);
+  assert.equal(JSON.parse(disk.saved).message, 'fatal one', 'saved before the original handler ran');
+
+  // next launch, still offline: the report is kept
+  handler = () => {};
+  await install(async () => { throw new Error('offline'); });
+  await settle();
+  assert.equal(JSON.parse(disk.saved).message, 'fatal one');
+
+  // next launch with a connection: sent once and forgotten
+  handler = () => {};
+  await install(async (url, options) => { sent.push(JSON.parse(options.body)); return { ok: true }; });
+  await settle();
+  assert.deepEqual(sent.map((s) => [s.message, s.context]), [['fatal one', 'fatal']]);
+  assert.equal(disk.saved, null);
+});
+
+await test('a storage failure while saving a crash never hides the crash', async () => {
+  const handled = [];
+  let handler = (error) => { handled.push(error.message); };
+  await r.installErrorReporting({
+    errorUtils: { getGlobalHandler: () => handler, setGlobalHandler: (next) => { handler = next; } },
+    getToken: async () => 'tok',
+    meta: () => ({ platform: 'ios' }),
+    pending: { save: () => { throw new Error('disk full'); }, take: () => { throw new Error('unreadable'); }, clear: () => {} },
+    fetcher: async () => ({ ok: true }),
+  });
+  handler(new Error('still fatal'), true);
+  assert.deepEqual(handled, ['still fatal']);
+});
 done('error reports');

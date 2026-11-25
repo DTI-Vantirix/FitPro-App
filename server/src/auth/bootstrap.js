@@ -15,7 +15,8 @@ export const MIN_ADMIN_PASSWORD = 12;
 export async function bootstrapAdmin(db, env = process.env, log = () => {}) {
   const email = String(env.ADMIN_EMAIL || '').trim().toLowerCase();
   const password = typeof env.ADMIN_PASSWORD === 'string' ? env.ADMIN_PASSWORD : '';
-  if (!email && !password) return 'skipped';
+  // No password is the normal state once the admin exists (the checklist says to remove it).
+  if (!password) return 'skipped';
   if (!EMAIL_RE.test(email) || email.length > 254) {
     log('[admin] ADMIN_EMAIL is not an email address; no admin was created.');
     return 'skipped';

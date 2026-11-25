@@ -22,8 +22,12 @@ Nothing in this list has been done yet.
 
 ## 1. Put the code on `main`
 
-The work is on the branch `native-shell-wiring`. Merge pull request
-[#2](https://github.com/DTI-Vantirix/FitPro-App/pull/2) into `main` (or tell Claude to).
+Two merges, in this order (or tell Claude to do both):
+
+1. Pull request [#5](https://github.com/DTI-Vantirix/FitPro-App/pull/5) into `native-shell-wiring`. It holds
+   the hosting files (`render.yaml`, `Dockerfile`); without it Render finds nothing to set up.
+2. Pull request [#2](https://github.com/DTI-Vantirix/FitPro-App/pull/2) into `main`.
+
 Render deploys whatever is on the branch you point it at, each time GitHub's checks pass.
 
 ## 2. Email sending
@@ -56,7 +60,7 @@ also serves the website) and one Postgres database, both in Virginia.
    | `RESEND_API_KEY` | the key from step 2 |
    | `MAIL_FROM` | the from address from step 2 |
    | `ADMIN_EMAIL` | your own email address |
-   | `ADMIN_PASSWORD` | a new password of 12 or more characters; you will remove it in step 4 |
+   | `ADMIN_PASSWORD` | a new password of **12 or more characters** (shorter ones are ignored); you will remove it in step 4 |
 
 4. Review the cost Render shows and apply. The plans in the file are the smallest paid
    ones: about **$13 a month** at the prices listed on 2026-11-25 (web $7, database $6,
@@ -76,6 +80,9 @@ after it is created; if there is none, say so and a nightly export can be added.
 ## 4. First sign-in and invite codes
 
 1. Open the site and sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
+   If it says the email or password is wrong, open Render → the service → Logs and look
+   for a line starting `[admin]`: it says why no account was made (usually a password
+   under 12 characters). Fix the value in Environment and the service restarts.
 2. In Render → the service → Environment, **delete `ADMIN_PASSWORD`** and save. The
    account stays; the variable was only needed once. (Leaving it does no harm to your
    account, since it can never change an existing one, but a password should not sit in
@@ -109,8 +116,11 @@ For Play internal testing (later, when you want testers to install from the stor
    them the opt-in link. The first upload sets the package name to
    **`com.vantrarun.app`** permanently.
 4. Play asks for a privacy policy address: `https://<your site>/privacy`. It also asks
-   what data is collected: email, name, precise location (during runs), heart rate
-   (if a sensor is paired), crash reports. None is shared with other companies or used
+   what data is collected: email, name, precise location (during runs), health and
+   fitness data (runs, heart rate if a sensor is paired, and any workouts you choose
+   to import from Health Connect), crash reports. Play may also ask you to declare why
+   the app reads Health Connect and why it uses location while a run is recorded;
+   whether it asks at the internal-testing stage was not confirmed. None is shared with other companies or used
    for advertising.
 
 ## 6. iPhone build
@@ -144,13 +154,18 @@ build carries a Google Maps key.
 
 1. In [Google Cloud Console](https://console.cloud.google.com), create a project, enable
    **Maps SDK for Android**, and create an API key.
-2. Restrict the key to Android apps: package `com.vantrarun.app` and the SHA-1
-   fingerprint shown by `npx eas-cli credentials` for the Android keystore.
+2. Restrict the key to Android apps with the package `com.vantrarun.app` and **two**
+   SHA-1 fingerprints, or the map stays blank for one kind of install:
+   - the one shown by `npx eas-cli credentials` for the Android keystore (covers the
+     APK installed straight from the build link);
+   - once the app is in Play Console, the "App signing key certificate" SHA-1 under
+     Test and release → App integrity (covers installs from the Play Store, which
+     Google re-signs with its own key).
 3. Give the key to the build (or tell Claude the key is ready):
 
    ```
    cd native
-   npx eas-cli env:create --name GOOGLE_MAPS_ANDROID_KEY --value <the key> --environment production --environment preview --visibility sensitive
+   npx eas-cli env:set --name GOOGLE_MAPS_ANDROID_KEY --value PASTE_THE_KEY_HERE --environment production --environment preview --visibility sensitive
    ```
 
 4. Build Android again. The key is never written into the repository.
@@ -163,8 +178,12 @@ build carries a Google Maps key.
   changes. Not verified from here: that provider's exact address and free allowance.
 - **Media bucket.** Photos attached to posts are kept on the service's disk, which is
   fine for testing. To move them to object storage (Cloudflare R2, Backblaze B2, AWS S3),
-  set `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` in
-  Render → Environment. Files already on the disk are not copied across.
+  set `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` and
+  `S3_REGION` in Render → Environment. `S3_REGION` is `auto` for Cloudflare R2; for AWS
+  and Backblaze it must be the bucket's own region (for example `us-east-1`), or every
+  upload is refused. Afterwards attach a photo to a post to confirm it works: nothing
+  checks the bucket at start-up. Files already on the disk are not copied across, so
+  do this before testers have uploaded anything.
 
 ---
 

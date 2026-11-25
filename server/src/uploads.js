@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { requireUser } from './auth/users.js';
 import { HttpError, readBody, reply } from './lib/http.js';
 import { createStorage } from './storage.js';
@@ -50,9 +51,7 @@ export function registerUploadRoutes(router) {
       'Cache-Control': 'public, max-age=31536000, immutable',
       'X-Content-Type-Options': 'nosniff',
     });
-    await new Promise((resolve, reject) => {
-      found.stream.on('error', reject).on('end', resolve).pipe(ctx.res);
-    });
+    await sendStream(found.stream, ctx.res);
     return HANDLED;
   });
 }
@@ -66,10 +65,24 @@ export async function serveFile(res, file, headers) {
   }
   if (!stat.isFile()) throw new HttpError(404, 'Not found');
   res.writeHead(200, { 'Content-Length': stat.size, ...headers });
-  await new Promise((resolve, reject) => {
-    fs.createReadStream(file).on('error', reject).on('end', resolve).pipe(res);
-  });
+  await sendStream(fs.createReadStream(file), res);
   return HANDLED;
+}
+
+// Streams a body to the client and always closes the source, including when the
+// reader goes away half way (a phone scrubbing through a video does this constantly).
+async function sendStream(source, res) {
+  try {
+    await pipeline(source, res);
+  } catch (error) {
+    source.destroy();
+    // The reader left: nothing to report. Anything else ends the connection, since
+    // the status line has already gone out.
+    if (error?.code !== 'ERR_STREAM_PREMATURE_CLOSE' && error?.code !== 'ECONNRESET') {
+      console.error('[uploads] sending a file failed:', error?.message || error);
+    }
+    if (!res.destroyed) res.destroy();
+  }
 }
 
 // Returned by handlers that already wrote the response.

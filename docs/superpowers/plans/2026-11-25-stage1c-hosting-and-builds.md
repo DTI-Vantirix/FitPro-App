@@ -49,7 +49,7 @@
 
 ### Task 1: Container, blueprint, first admin
 
-**Files:** Create `Dockerfile`, `.dockerignore`, `render.yaml`, `server/src/auth/bootstrap.js`, `scripts/smoke-image.mjs`. Modify `server/src/config.js` (`RENDER_EXTERNAL_URL` as the default for `APP_URL` and `PUBLIC_URL`; `trustProxy`), `server/src/index.js`, `.env.example`, `.github/workflows/checks.yml` (job `image`), `server/test/api.test.js`.
+**Files:** Create `Dockerfile`, `.dockerignore`, `render.yaml`, `server/src/auth/bootstrap.js`, `scripts/smoke-image.mjs`. Modify `server/src/config.js` (`RENDER_EXTERNAL_URL` as the default for `APP_URL`; upload links stay relative, so `PUBLIC_URL` is unchanged), `server/src/index.js`, `.env.example`, `.github/workflows/checks.yml` (job `image`), `server/test/api.test.js`.
 
 **Produces:** `export async function bootstrapAdmin(db, env): Promise<'created' | 'exists' | 'skipped'>` — `skipped` unless both variables are set and the password is at least 12 characters.
 
@@ -103,6 +103,16 @@ export function createStorage(config): { kind: 'disk' | 's3', put(name, buffer, 
 
 - [ ] `docs/launch-checklist.md`: in order, each account action with what to click and what to paste where: merge to `main`; Render blueprint; Resend (email) key and sender domain; first admin sign-in and removing `ADMIN_PASSWORD`; invite codes; Apple (App Store Connect app, `eas build` and `eas submit`, TestFlight internal testers); Google (Play Console app, internal testing, Maps key); optional routing key and bucket; what to check after each.
 - [ ] `npm run check`; push; pull request into `native-shell-wiring`; GitHub checks green; independent review; fixes; dashboard tasks, checks and flags.
+
+## Changed after the independent review
+
+- A malformed address (`//`, a bad `%` escape) is answered 400 and can no longer stop the process or be recorded as a server error; a last-resort handler and rejection logging were added.
+- The API records the same error in the same place once per ten minutes, at most 20 rows a minute, and keeps the newest 2,000 reports. `platform: "server"` is reserved for the API.
+- Wrong passwords are also limited per email (25 per 15 minutes), because the caller's address may be forgeable behind the host's proxy. How Render treats `X-Forwarded-For` is still unverified.
+- Downloads use `stream.pipeline`, so an abandoned download releases its file; the bucket timeout covers the wait for an answer, not the whole transfer.
+- A fatal phone crash is written to a small file first and sent on the next launch.
+- The checklist: merge order, both map-key fingerprints, `S3_REGION`, `eas env:set`, a troubleshooting line for the first sign-in.
+- Not done: byte-range requests for video (pre-existing), reporting unhandled promise rejections from the phone, a start-up probe of the bucket.
 
 ## Not doable from here (flags)
 

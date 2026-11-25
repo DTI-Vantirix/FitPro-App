@@ -93,12 +93,19 @@ function s3Storage({ endpoint, bucket, region, accessKeyId, secretAccessKey }) {
   // headers or anything else that could carry a credential into a log.
   const failure = (what, detail) => new Error(`Upload storage ${what} failed (${detail}).`);
 
+  // The timer runs until the bucket answers (plus a second per megabyte sent), then
+  // stops: a large file may take as long as the reader's connection needs.
   async function request(what, method, name, headers, body, payloadHash) {
     const url = urlFor(name);
+    const controller = new AbortController();
+    const allowed = 30000 + Math.ceil((body?.length || 0) / (1024 * 1024)) * 1000;
+    const timer = setTimeout(() => controller.abort(), allowed);
     try {
-      return await fetch(url, { method, headers: sign(method, url, headers, payloadHash), body, signal: AbortSignal.timeout(30000) });
-    } catch (error) {
-      throw failure(what, error?.name === 'TimeoutError' ? 'timed out' : 'could not reach the bucket');
+      return await fetch(url, { method, headers: sign(method, url, headers, payloadHash), body, signal: controller.signal });
+    } catch {
+      throw failure(what, controller.signal.aborted ? 'timed out' : 'could not reach the bucket');
+    } finally {
+      clearTimeout(timer);
     }
   }
 

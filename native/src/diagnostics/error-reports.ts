@@ -49,16 +49,22 @@ export async function sendErrorReport(token: string | null, report: ErrorReport,
 /** At most this many reports per app launch, so a crash loop cannot flood the server. */
 export const MAX_REPORTS_PER_LAUNCH = 5;
 
+/** Somewhere to keep one report across a crash. `save` must be synchronous: after a fatal
+ * error the app is about to be closed and nothing asynchronous will finish. */
+export type PendingStore = { save(report: ErrorReport): void; take(): ErrorReport | null; clear(): void };
+
 type GlobalHandler = (error: unknown, isFatal?: boolean) => void;
 type ErrorUtilsLike = { getGlobalHandler(): GlobalHandler; setGlobalHandler(handler: GlobalHandler): void };
 
-/** Wraps the app's global error handler. The original handler always still runs. */
-export function installErrorReporting(deps: {
+/** Wraps the app's global error handler. The original handler always still runs.
+ * A report left over from a crash in the previous launch is sent first. */
+export async function installErrorReporting(deps: {
   errorUtils: ErrorUtilsLike | undefined;
   getToken: () => Promise<string | null>;
   meta: () => { platform: string; appVersion?: string | null };
   fetcher?: typeof fetch;
-}): void {
+  pending?: PendingStore;
+}): Promise<void> {
   const utils = deps.errorUtils;
   if (!utils) return;
   const previous = utils.getGlobalHandler();
@@ -68,11 +74,29 @@ export function installErrorReporting(deps: {
       if (sent < MAX_REPORTS_PER_LAUNCH) {
         sent += 1;
         const report = buildErrorReport(error, { ...deps.meta(), fatal: Boolean(isFatal) });
-        void deps.getToken().then((token) => sendErrorReport(token, report, deps.fetcher)).catch(() => false);
+        // A fatal error closes the app before a request can finish: write it down first.
+        if (isFatal && deps.pending) {
+          try { deps.pending.save(report); } catch { /* storage unavailable: try the network anyway */ }
+        }
+        void deps.getToken()
+          .then((token) => sendErrorReport(token, report, deps.fetcher))
+          .then((ok) => { if (ok && isFatal) deps.pending?.clear(); })
+          .catch(() => false);
       }
     } catch {
       // Reporting must never make a crash worse.
     }
     previous(error, isFatal);
   });
+
+  try {
+    const left = deps.pending?.take() ?? null;
+    if (left && typeof left.message === 'string') {
+      const token = await deps.getToken();
+      // Kept until the server has it; a signed-out or offline launch tries again next time.
+      if (await sendErrorReport(token, left, deps.fetcher)) deps.pending?.clear();
+    }
+  } catch {
+    // An unreadable leftover is not worth failing start-up for.
+  }
 }
