@@ -107,6 +107,11 @@ one reported. Admins need no row.
 `access_grants` (one row per redeemed invite code) is still written, because the
 invite-code screen reads it, but it no longer decides anything. Migration 005 copied
 every existing row into `entitlements`, so testers kept access through the change.
+Because a previous build writes `access_grants` only, the API repeats that copy every
+time it starts (`syncInviteEntitlements`): a grant with no `invite` entitlement gets one,
+and a row that exists is never changed. That covers a rollback or the old instance
+serving during a deploy; people who redeem a code in that window have access again
+at the new build's next start, not before.
 Removing someone's invite pass revokes the entitlement and leaves the `access_grants`
 row and the used code as history.
 

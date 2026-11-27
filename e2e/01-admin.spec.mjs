@@ -1,6 +1,6 @@
 // The owner's flow: sign in, hand out invite codes, take one back.
 import { expect, test } from '@playwright/test';
-import { ADMIN } from './fixtures.mjs';
+import { ADMIN, CARRIED } from './fixtures.mjs';
 import { CODE_RE, acceptConsent, expectSignedIn, signIn, watchForTrouble } from './helpers.mjs';
 
 test.describe.configure({ mode: 'serial' });
@@ -106,6 +106,14 @@ test('the admin sees who has access, and can give and take back a free pass', as
   await card.getByLabel('Email to give free access').fill('nobody@e2e.test');
   await card.getByRole('button', { name: 'Grant free access' }).click();
   await expect(card.getByText('No account with that email yet. Send them an invite code instead.')).toBeVisible();
+});
+
+test('someone who redeemed a code under the previous build was given access when the API started', async ({ request }) => {
+  const login = await request.post('/api/auth/login', { data: CARRIED });
+  expect(login.ok()).toBeTruthy();
+  const { access_token: token } = await login.json();
+  const res = await request.post('/api/entities/Run/query', { headers: { Authorization: `Bearer ${token}` }, data: {} });
+  expect(res.status()).toBe(200);
 });
 
 test('the admin screens raised no errors', async () => {

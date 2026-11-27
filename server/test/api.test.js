@@ -7,7 +7,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { GRACE_DAYS, accessOf, grantFree, hasAccess } from '../src/access.js';
+import { GRACE_DAYS, accessOf, grantFree, hasAccess, syncInviteEntitlements } from '../src/access.js';
 import { createApp } from '../src/app.js';
 import { SERVER_ROOT, loadConfig } from '../src/config.js';
 import { bootstrapAdmin } from '../src/auth/bootstrap.js';
@@ -588,6 +588,56 @@ describe('access', () => {
     const rows = await entitlementsOf(old.user.id);
     assert.deepEqual(rows.map((r) => [r.source, r.status, r.granted_by]), [['invite', 'active', 'FP-OLD0-CODE']]);
     assert.equal((await accessOf(db, await userRow(old.user.id))).reason, 'invite');
+  });
+});
+
+describe('invite grants written by an older build are picked up at start-up', () => {
+  // What the previous build does when someone redeems a code: a row in access_grants and nothing else.
+  const oldBuildGrant = (who, code) =>
+    db.query(
+      `insert into access_grants (user_id, email, code, granted_at) values ($1, $2, $3, '2026-11-26T09:00:00Z') returning id`,
+      [who.user.id, who.user.email, code]
+    );
+  const runs = (who) => call('POST', '/api/entities/Run/query', { token: who.token, body: {} });
+
+  test('a grant with no entitlement gets one, once', async () => {
+    const rolf = await legacyUser('rolf.rollback@example.com');
+    await oldBuildGrant(rolf, 'FP-ROLL-BACK');
+    assert.equal((await runs(rolf)).status, 403, 'locked out until the sync runs');
+
+    assert.equal(await syncInviteEntitlements(db), 1);
+    assert.equal((await runs(rolf)).status, 200);
+    const rows = await entitlementsOf(rolf.user.id);
+    assert.deepEqual(rows.map((r) => [r.source, r.status, r.granted_by]), [['invite', 'active', 'FP-ROLL-BACK']]);
+    assert.equal(new Date(rows[0].created_date).toISOString(), '2026-11-26T09:00:00.000Z');
+
+    assert.equal(await syncInviteEntitlements(db), 0, 'a second run finds nothing to do');
+    assert.equal((await entitlementsOf(rolf.user.id)).length, 1);
+  });
+
+  test('it never touches a row that is already there: a revoked pass stays revoked', async () => {
+    const rita = await invitedUser('rita.revoked@example.com');
+    const [before] = await db.query(
+      `update entitlements set status = 'revoked', note = 'asked to leave' where user_id = $1 and source = 'invite' returning *`,
+      [rita.user.id]
+    );
+    assert.equal((await db.query('select id from access_grants where user_id = $1', [rita.user.id])).length, 1);
+
+    assert.equal(await syncInviteEntitlements(db), 0);
+    const [after] = await entitlementsOf(rita.user.id);
+    assert.deepEqual(
+      [after.id, after.status, after.granted_by, after.note, String(after.updated_date)],
+      [before.id, 'revoked', before.granted_by, 'asked to leave', String(before.updated_date)]
+    );
+    assert.equal((await runs(rita)).status, 403);
+  });
+
+  test('a free pass from the owner or a subscription is not mistaken for the invite', async () => {
+    const hugo = await legacyUser('hugo.handgrant@example.com');
+    await db.tx((tx) => grantFree(tx, { userId: hugo.user.id, source: 'admin', grantedBy: 'owner@example.com' }));
+    await oldBuildGrant(hugo, 'FP-HUGO-CODE');
+    assert.equal(await syncInviteEntitlements(db), 1);
+    assert.deepEqual((await entitlementsOf(hugo.user.id)).map((r) => r.source).sort(), ['admin', 'invite']);
   });
 });
 

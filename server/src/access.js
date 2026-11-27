@@ -80,6 +80,28 @@ export async function requireAccess(ctx) {
 }
 
 /**
+ * Gives every redeemed invite code (a row in `access_grants`) its `invite` entitlement
+ * when it has none. Migration 005 did this once; this repeats it at every start, because
+ * the previous build may serve traffic after that migration has run (a rollback, or the
+ * old instance during a deploy) and it writes `access_grants` only. Without this, people
+ * who redeemed a code in that window would be locked out by this build.
+ * A row that already exists is never touched, so a revoked pass stays revoked.
+ * Returns how many rows were added.
+ */
+export async function syncInviteEntitlements(db) {
+  const added = await db.query(
+    `insert into entitlements (user_id, source, status, granted_by, created_date)
+     select g.user_id, 'invite', 'active', g.code, coalesce(g.granted_at, g.created_date)
+       from access_grants g
+      where not exists (select 1 from entitlements e where e.user_id = g.user_id and e.source = 'invite')
+     on conflict (user_id, source) where source in ('invite', 'admin') do nothing
+     returning id`,
+    []
+  );
+  return added.length;
+}
+
+/**
  * Gives an account a free pass: `invite` (a redeemed code) or `admin` (granted by
  * hand). One row per account and source. Granting again leaves a pass that is
  * still good as it is, and brings back one that was revoked. Call inside a transaction.
