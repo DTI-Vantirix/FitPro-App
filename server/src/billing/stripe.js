@@ -37,7 +37,7 @@ export function encodeForm(object) {
 const idOf = (value) => (value && typeof value === 'object' ? value.id ?? null : value ?? null);
 const seg = (id) => encodeURIComponent(String(id));
 
-export function createStripe(config, { fetch = globalThis.fetch } = {}) {
+export function createStripe(config, { fetch = globalThis.fetch, now = Date.now } = {}) {
   async function request(method, path, params, { idempotencyKey } = {}) {
     if (!config?.stripe?.ready) throw new StripeError(503, 'Stripe is not set up on this server.');
     const encoded = encodeForm(params);
@@ -82,9 +82,15 @@ export function createStripe(config, { fetch = globalThis.fetch } = {}) {
   const missing = (error) => error instanceof StripeError && (error.status === 404 || error.code === 'resource_missing');
 
   return {
-    /** One customer per account. The key makes a repeat (a retry, a second tab) return the same customer. */
+    /**
+     * One customer per account. The key makes a repeat (a retry, a second tab) return the
+     * same customer. It carries the UTC day: Stripe replays whatever it first answered for a
+     * key, an error included, for 24 hours, and without the day a stored error could keep
+     * someone from subscribing for all of that time. With it, the next day starts clean.
+     */
     createCustomer({ userId, email }) {
-      return request('POST', '/v1/customers', { email, metadata: { user_id: userId } }, { idempotencyKey: `customer-${userId}` });
+      const day = Math.floor(now() / 86400000);
+      return request('POST', '/v1/customers', { email, metadata: { user_id: userId } }, { idempotencyKey: `customer-${userId}-${day}` });
     },
 
     /** Deleting a customer cancels its subscriptions at once. One that is already gone counts as done. */

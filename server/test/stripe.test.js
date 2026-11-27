@@ -164,10 +164,17 @@ describe('the Stripe client', () => {
 
   test('createCustomer is safe to repeat for one account', async () => {
     const { fetch, requests } = stub([{ status: 200, body: { id: 'cus_9' } }]);
-    const customer = await createStripe(config, { fetch }).createCustomer({ userId: 'user-9', email: 'a@example.com' });
+    const day = 20000;
+    const now = () => day * 86400000 + 5000;
+    const customer = await createStripe(config, { fetch, now }).createCustomer({ userId: 'user-9', email: 'a@example.com' });
     assert.equal(customer.id, 'cus_9');
     assert.equal(requests[0].url, 'https://api.stripe.com/v1/customers');
-    assert.equal(requests[0].headers['Idempotency-Key'], 'customer-user-9');
+    // The key carries the day, so an answer Stripe has stored against it (an error included)
+    // can be replayed for the rest of that day at most, never for a rolling 24 hours.
+    assert.equal(requests[0].headers['Idempotency-Key'], 'customer-user-9-20000');
+    const next = stub([{ status: 200, body: { id: 'cus_9' } }]);
+    await createStripe(config, { fetch: next.fetch, now: () => now() + 86400000 }).createCustomer({ userId: 'user-9', email: 'a@example.com' });
+    assert.equal(next.requests[0].headers['Idempotency-Key'], 'customer-user-9-20001');
     assert.equal(requests[0].body.get('metadata[user_id]'), 'user-9');
     assert.equal(requests[0].body.get('email'), 'a@example.com');
   });
