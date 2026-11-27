@@ -59,7 +59,7 @@ export default function ChallengeForm({ open, onOpenChange, profile, onCreate })
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="November 100"
-              className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70 focus:border-primary/60"
+              className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm placeholder:text-muted-foreground/70 focus:border-primary"
             />
           </label>
 
@@ -69,7 +69,7 @@ export default function ChallengeForm({ open, onOpenChange, profile, onCreate })
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="100 miles before the month is out"
-              className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70 focus:border-primary/60"
+              className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm placeholder:text-muted-foreground/70 focus:border-primary"
             />
           </label>
 
@@ -105,7 +105,7 @@ export default function ChallengeForm({ open, onOpenChange, profile, onCreate })
                   value={target}
                   onChange={(e) => setTarget(e.target.value.replace(/[^0-9.]/g, ''))}
                   inputMode="decimal"
-                  className="num min-w-0 flex-1 bg-transparent text-sm outline-none"
+                  className="num min-w-0 flex-1 bg-transparent text-sm"
                 />
                 <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
                   {METRICS[metric].unit}
@@ -117,7 +117,7 @@ export default function ChallengeForm({ open, onOpenChange, profile, onCreate })
               <select
                 value={month}
                 onChange={(e) => setMonth(e.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3 py-2.5 text-sm outline-none focus:border-primary/60"
+                className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3 py-2.5 text-sm focus:border-primary"
               >
                 {months.map((m) => (
                   <option key={m.key} value={m.key}>
@@ -134,7 +134,7 @@ export default function ChallengeForm({ open, onOpenChange, profile, onCreate })
             type="button"
             onClick={create}
             disabled={saving || !name.trim() || !target}
-            className="w-full rounded-full bg-primary py-3 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
+            className="w-full rounded-full bg-primary py-3 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
           >
             {saving ? 'Creating…' : 'Create challenge'}
           </button>

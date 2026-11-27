@@ -13,9 +13,9 @@ export default function NextSession({ session, cta = { label: 'Start leg 1', to:
             <span className="h-1.5 w-1.5 rounded-full bg-primary" />
             Next up
           </p>
-          <h2 className="mt-2 font-heading text-xl font-bold leading-tight sm:text-2xl">{session.title}</h2>
+          <h2 className="mt-2 font-heading text-xl leading-tight sm:text-2xl">{session.title}</h2>
         </div>
-        <span className="num shrink-0 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground">
+        <span className="tabular-nums shrink-0 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground">
           {session.total}
         </span>
       </header>
@@ -39,7 +39,7 @@ export default function NextSession({ session, cta = { label: 'Start leg 1', to:
 
       <Link
         to={cta.to}
-        className="relative flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 active:scale-[0.99]"
+        className="relative flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground transition hover:brightness-95 active:scale-[0.99]"
       >
         <Footprints className="h-4 w-4" strokeWidth={2.2} />
         {cta.label}

@@ -1,4 +1,4 @@
-import { hrLabel, zoneRangeLabel } from '@/lib/zones';
+import { hrLabel, zoneColor, zoneRangeLabel } from '@/lib/zones';
 
 export default function ZoneTable({ zones = [], renderActions }) {
   return (
@@ -7,15 +7,15 @@ export default function ZoneTable({ zones = [], renderActions }) {
         <li key={zone.id || zone.name} className="panel flex items-stretch gap-3 p-4">
           <span
             className="w-1.5 shrink-0 rounded-full"
-            style={{ background: zone.color || '#C9F84A' }}
+            style={{ background: zoneColor(zone) }}
             aria-hidden="true"
           />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <p className="font-heading text-sm font-bold leading-tight">
+              <p className="font-heading text-sm leading-tight">
                 {zone.name}
                 {zone.intensity ? (
-                  <span className="ml-2 font-mono text-[10px] font-normal uppercase tracking-[0.14em] text-muted-foreground">
+                  <span className="ml-2 vr-label text-[10px] font-normal">
                     {zone.intensity}
                   </span>
                 ) : null}

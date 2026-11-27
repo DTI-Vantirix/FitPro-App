@@ -67,7 +67,7 @@ export default function SocialProfileCard() {
   return (
     <section className="panel space-y-3 p-5">
       <div>
-        <h2 className="font-heading text-base font-bold">Social profile</h2>
+        <h2 className="font-heading text-base">Social profile</h2>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
           How friends find you and who sees what you post. Nothing is ever posted automatically — every run you
           share is one you pick.
@@ -82,7 +82,7 @@ export default function SocialProfileCard() {
             <input
               value={handle}
               onChange={(e) => setHandle(cleanHandle(e.target.value))}
-              className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+              className="min-w-0 flex-1 bg-transparent text-sm"
             />
           </div>
         </label>
@@ -91,7 +91,7 @@ export default function SocialProfileCard() {
           <input
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none focus:border-primary/60"
+            className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm focus:border-primary"
           />
         </label>
       </div>
@@ -102,7 +102,7 @@ export default function SocialProfileCard() {
           value={bio}
           onChange={(e) => setBio(e.target.value)}
           placeholder="Chasing a sub-20 5k"
-          className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70 focus:border-primary/60"
+          className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm placeholder:text-muted-foreground/70 focus:border-primary"
         />
       </label>
 
@@ -136,7 +136,7 @@ export default function SocialProfileCard() {
             >
               <span
                 className={cn(
-                  'flex items-center gap-1.5 font-heading text-xs font-semibold',
+                  'flex items-center gap-1.5 font-heading text-xs',
                   visibility === option.id ? 'text-primary' : 'text-foreground'
                 )}
               >
@@ -156,7 +156,7 @@ export default function SocialProfileCard() {
         type="button"
         onClick={save}
         disabled={saving || !profile}
-        className="flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-2.5 font-heading text-xs font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
+        className="flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
       >
         {saved ? <Check className="h-3.5 w-3.5" /> : null}
         {saving ? 'Saving…' : saved ? 'Saved' : 'Save social profile'}

@@ -56,14 +56,14 @@ export default function PostCard({ post, mine, onDeleted }) {
   return (
     <article className="panel overflow-hidden">
       <header className="flex items-center gap-3 px-4 py-3.5">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15 font-heading text-xs font-bold uppercase text-primary">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold uppercase text-primary">
           {(post.author_name || post.author_handle || '?').slice(0, 2)}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate font-heading text-sm font-semibold">
+          <p className="truncate font-heading text-sm">
             {post.author_name || post.author_handle}
           </p>
-          <p className="num truncate text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          <p className="vr-label truncate text-[10px]">
             @{post.author_handle} · {moment(post.created_date).fromNow()}
           </p>
         </div>
@@ -85,10 +85,10 @@ export default function PostCard({ post, mine, onDeleted }) {
                     <span className="ml-1 text-xs text-muted-foreground">mi</span>
                   </p>
                   <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
-                    <span className="num text-xs text-muted-foreground">
+                    <span className="tabular-nums text-xs text-muted-foreground">
                       {formatPace(post.avg_pace_sec)} /mi
                     </span>
-                    <span className="num text-xs text-muted-foreground">
+                    <span className="tabular-nums text-xs text-muted-foreground">
                       {formatDuration(post.duration_sec || 0)}
                     </span>
                     {post.zone_name && (
@@ -104,10 +104,10 @@ export default function PostCard({ post, mine, onDeleted }) {
                     <span className="ml-1 text-xs text-muted-foreground">lb</span>
                   </p>
                   <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
-                    <span className="num text-xs text-muted-foreground">
+                    <span className="tabular-nums text-xs text-muted-foreground">
                       {post.set_count || 0} sets
                     </span>
-                    <span className="num text-xs text-muted-foreground">
+                    <span className="tabular-nums text-xs text-muted-foreground">
                       {post.duration_min || Math.round((post.duration_sec || 0) / 60)} min
                     </span>
                   </div>
@@ -119,7 +119,7 @@ export default function PostCard({ post, mine, onDeleted }) {
             )}
           </div>
           {post.title && (
-            <p className="border-t border-border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            <p className="border-t border-border px-4 py-2 vr-label text-[10px]">
               {post.title}
             </p>
           )}
@@ -162,7 +162,7 @@ export default function PostCard({ post, mine, onDeleted }) {
           </button>
         )}
         {(post.shared_to || []).length > 0 && (
-          <span className={cn('num text-[9px] uppercase tracking-[0.1em] text-muted-foreground', mine ? '' : 'ml-auto')}>
+          <span className={cn('vr-label text-[9px]', mine ? '' : 'ml-auto')}>
             {post.shared_to.join(' · ')}
           </span>
         )}

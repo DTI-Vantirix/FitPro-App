@@ -75,6 +75,6 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   actionText: { fontSize: 15, fontWeight: '800', color: colors.accentText },
   secondaryText: { color: colors.text },
-  error: { padding: 14, backgroundColor: colors.dangerBg, borderRadius: 12, marginVertical: 12 },
+  error: { padding: 14, backgroundColor: colors.dangerBg, borderColor: colors.danger, borderWidth: 1, borderRadius: 12, marginVertical: 12 },
   errorText: { color: colors.danger, fontSize: 13, lineHeight: 21 },
 });

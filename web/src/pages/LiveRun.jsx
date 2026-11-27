@@ -11,6 +11,7 @@ import HeartRateCard from '@/components/run/HeartRateCard';
 import useHeartRate from '@/hooks/useHeartRate';
 import { loadProfile } from '@/lib/profile';
 import { haversineMiles, pathMiles, zoneStatus } from '@/lib/geo';
+import { locationProblem } from '@/lib/location';
 import { formatDuration, formatPace } from '@/lib/format';
 import { sortZones } from '@/lib/zones';
 import { cn } from '@/lib/utils';
@@ -102,8 +103,8 @@ export default function LiveRun() {
   }, [zone]);
 
   useEffect(() => {
-    if (!navigator.geolocation) {
-      setGeoError('This device cannot share a GPS location.');
+    if (!navigator.geolocation || !window.isSecureContext) {
+      setGeoError(locationProblem(null));
       return;
     }
     watchId.current = navigator.geolocation.watchPosition(
@@ -139,12 +140,7 @@ export default function LiveRun() {
           return [...t, { ...p, t: Date.now() }];
         });
       },
-      (err) =>
-        setGeoError(
-          err.code === 1
-            ? 'Location access is blocked. Allow location for this app, then try again.'
-            : 'Waiting for a GPS signal — step outside for a clearer fix.'
-        ),
+      (err) => setGeoError(locationProblem(err)),
       { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
     );
     return () => {
@@ -262,7 +258,7 @@ export default function LiveRun() {
           </Link>
           <div>
             <p className="eyebrow">{live ? 'Live run' : 'Ready to run'}</p>
-            <h1 className="font-heading text-lg font-bold leading-tight">{route?.name || 'Free run'}</h1>
+            <h1 className="font-heading text-lg leading-tight">{route?.name || 'Free run'}</h1>
           </div>
         </div>
         {live && (
@@ -273,7 +269,7 @@ export default function LiveRun() {
                 status === 'running' ? 'animate-pulse bg-primary' : 'bg-muted-foreground'
               )}
             />
-            <span className="num text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            <span className="vr-label text-[10px]">
               {status === 'running' ? 'recording' : 'paused'}
             </span>
           </span>
@@ -281,7 +277,7 @@ export default function LiveRun() {
       </div>
 
       {geoError && (
-        <p className="flex items-start gap-2 rounded-xl border border-[#FFC24B]/30 bg-[#FFC24B]/10 px-3 py-2.5 text-xs leading-relaxed text-[#FFD27D]">
+        <p className="flex items-start gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-xs leading-relaxed text-foreground">
           <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {geoError}
         </p>
@@ -313,7 +309,7 @@ export default function LiveRun() {
             <div key={s.label} className="bg-card px-3 py-3">
               <p className="eyebrow text-[9px]">{s.label}</p>
               <p className="num mt-1 text-lg leading-none">{s.value}</p>
-              <p className="num mt-1 text-[9px] uppercase tracking-[0.1em] text-muted-foreground">{s.unit}</p>
+              <p className="vr-label mt-1 text-[9px]">{s.unit}</p>
             </div>
           ))}
         </div>
@@ -365,7 +361,7 @@ export default function LiveRun() {
             <button
               type="button"
               onClick={start}
-              className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-4 font-heading text-base font-semibold text-primary-foreground transition hover:brightness-95 active:scale-[0.99]"
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-4 text-base font-semibold text-primary-foreground transition hover:brightness-95 active:scale-[0.99]"
             >
               <Play className="h-4 w-4" strokeWidth={2.5} /> Start run
             </button>
@@ -377,7 +373,7 @@ export default function LiveRun() {
               <button
                 type="button"
                 onClick={status === 'running' ? pause : resume}
-                className="flex flex-1 items-center justify-center gap-2 rounded-full border border-border py-3.5 font-heading text-sm font-semibold transition-colors hover:border-primary/40 hover:text-primary"
+                className="flex flex-1 items-center justify-center gap-2 rounded-full border border-border py-3.5 text-sm font-semibold transition-colors hover:border-primary/40 hover:text-primary"
               >
                 {status === 'running' ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                 {status === 'running' ? 'Pause' : 'Resume'}
@@ -386,7 +382,7 @@ export default function LiveRun() {
                 type="button"
                 onClick={finish}
                 disabled={saving || distance < 0.01}
-                className="flex flex-1 items-center justify-center gap-2 rounded-full bg-primary py-3.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
+                className="flex flex-1 items-center justify-center gap-2 rounded-full bg-primary py-3.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
               >
                 <Square className="h-3.5 w-3.5" strokeWidth={2.5} /> {saving ? 'Saving…' : 'Finish'}
               </button>

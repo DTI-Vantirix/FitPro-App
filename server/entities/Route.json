@@ -12,7 +12,7 @@
     },
     "points": {
       "type": "array",
-      "description": "Ordered waypoints tapped on the map",
+      "description": "Ordered waypoints tapped on the map. offroad: the leg arriving at this waypoint is a straight line, not routed along roads",
       "items": {
         "type": "object",
         "properties": {
@@ -21,13 +21,16 @@
           },
           "lng": {
             "type": "number"
+          },
+          "offroad": {
+            "type": "boolean"
           }
         }
       }
     },
     "path": {
       "type": "array",
-      "description": "Dense road-following geometry drawn between the waypoints",
+      "description": "Dense geometry drawn between the waypoints: road-following, with straight lines across off-road legs",
       "items": {
         "type": "object",
         "properties": {

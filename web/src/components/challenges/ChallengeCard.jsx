@@ -11,8 +11,8 @@ export default function ChallengeCard({ challenge, joined }) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate font-heading text-base font-bold leading-tight">{challenge.name}</h3>
-          <p className="num mt-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          <h3 className="truncate font-heading text-base leading-tight">{challenge.name}</h3>
+          <p className="vr-label mt-1 text-[10px]">
             {monthWindow(challenge.month).label} · {metric.label}
           </p>
         </div>
@@ -24,10 +24,10 @@ export default function ChallengeCard({ challenge, joined }) {
       )}
 
       <div className="flex items-center gap-2">
-        <span className="num rounded-full border border-border px-2.5 py-1 text-[10px] text-muted-foreground">
+        <span className="tabular-nums rounded-full border border-border px-2.5 py-1 text-[10px] text-muted-foreground">
           goal {goalLabel(challenge)}
         </span>
-        <span className="num rounded-full border border-border px-2.5 py-1 text-[10px] text-muted-foreground">
+        <span className="tabular-nums rounded-full border border-border px-2.5 py-1 text-[10px] text-muted-foreground">
           {daysLeft(challenge.end_date)}d left
         </span>
         {joined ? (

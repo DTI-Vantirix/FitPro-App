@@ -1,6 +1,6 @@
 import { HttpError } from '../lib/http.js';
 import { isUuid } from '../lib/serialize.js';
-import { decodePolyline, routerRequestUrl } from './snapRoute.js';
+import { fetchTrip, haversineMiles, legShape, readWaypoints, routeSections } from './snapRoute.js';
 
 // Turn-by-turn directions for one of the caller's saved routes. The app fetches
 // them when a route is opened to run and keeps them for the run, so a connection
@@ -12,10 +12,36 @@ const isDestination = (type) => type >= 4 && type <= 6;
 
 const UNAVAILABLE = { available: false, maneuvers: [] };
 
-function legPoints(leg) {
-  if (Array.isArray(leg?.shape)) return leg.shape.map((c) => [Number(c[0]), Number(c[1])]);
-  if (typeof leg?.shape === 'string' && leg.shape) return decodePolyline(leg.shape, 6);
-  return [];
+export const OFFROAD_INSTRUCTION = 'Leave the road and head straight for the next marker.';
+const ARRIVED = 'You have arrived at your destination.';
+
+// The whole route as one trip. Road sections come from the router; each off-road
+// section is one made-up leg with a single maneuver (type 0) telling the runner to
+// head for the next marker, since there are no turns to give. Returns null when a
+// road section cannot be routed: half a set of directions is worse than none.
+export async function buildTrip(points, config) {
+  const sections = routeSections(points);
+  const legs = [];
+  for (const [index, section] of sections.entries()) {
+    if (section.offroad) {
+      let miles = 0;
+      for (let i = 1; i < section.points.length; i += 1) {
+        miles += haversineMiles(section.points[i - 1], section.points[i]);
+      }
+      const maneuvers = [{ type: 0, instruction: OFFROAD_INSTRUCTION, length: miles, begin_shape_index: 0 }];
+      if (index === sections.length - 1) {
+        maneuvers.push({ type: 4, instruction: ARRIVED, length: 0, begin_shape_index: section.points.length - 1 });
+      }
+      legs.push({ shape: section.points.map((p) => [p.lat, p.lng]), maneuvers });
+      continue;
+    }
+    try {
+      legs.push(...(await fetchTrip(config, section.points, {}, 'VantraRun route directions')).legs);
+    } catch {
+      return null;
+    }
+  }
+  return { legs };
 }
 
 // Flattens a Valhalla trip into one list of maneuvers for the whole route.
@@ -27,7 +53,7 @@ export function toManeuvers(trip) {
   const out = [];
   let miles = 0;
   legs.forEach((leg, legIndex) => {
-    const points = legPoints(leg);
+    const points = legShape(leg);
     const lastLeg = legIndex === legs.length - 1;
     for (const m of Array.isArray(leg?.maneuvers) ? leg.maneuvers : []) {
       const length = Number.isFinite(Number(m?.length)) ? Number(m.length) : 0;
@@ -61,22 +87,11 @@ export default async function routeDirections({ db, user, body, config }) {
 
   if (!config.routerUrl || config.routerUrl === 'off') return UNAVAILABLE;
 
-  const locations = (Array.isArray(route.points) ? route.points : [])
-    .map((p) => ({ lat: Number(p?.lat), lon: Number(p?.lng) }))
-    .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180);
-  if (locations.length < 2) return UNAVAILABLE;
+  const points = readWaypoints(route.points).filter(
+    (p) => Number.isFinite(p.lat) && Number.isFinite(p.lng) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180
+  );
+  if (points.length < 2) return UNAVAILABLE;
 
-  const payload = { locations, costing: 'pedestrian', units: 'miles' };
-  const url = routerRequestUrl(config, payload);
-  try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(9000),
-      headers: { 'User-Agent': 'VantraRun route directions' },
-    });
-    if (!res.ok) throw new Error(`router responded ${res.status}`);
-    const maneuvers = toManeuvers((await res.json())?.trip);
-    return maneuvers.length ? { available: true, maneuvers } : UNAVAILABLE;
-  } catch {
-    return UNAVAILABLE;
-  }
+  const maneuvers = toManeuvers(await buildTrip(points, config));
+  return maneuvers.length ? { available: true, maneuvers } : UNAVAILABLE;
 }

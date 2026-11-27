@@ -46,7 +46,7 @@ export default function FriendSearch({ me, myProfile, connections, onChanged }) 
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search by @handle or name"
-          className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
+          className="min-w-0 flex-1 bg-transparent text-sm placeholder:text-muted-foreground/70"
         />
       </label>
 
@@ -64,14 +64,14 @@ export default function FriendSearch({ me, myProfile, connections, onChanged }) 
                 key={profile.id}
                 className="flex items-center gap-3 rounded-xl border border-border bg-secondary/30 px-3 py-2.5"
               >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15 font-heading text-xs font-bold uppercase text-primary">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold uppercase text-primary">
                   {(profile.display_name || profile.handle || '?').slice(0, 2)}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-heading text-sm font-semibold">
+                  <p className="truncate font-heading text-sm">
                     {profile.display_name || profile.handle}
                   </p>
-                  <p className="num truncate text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                  <p className="vr-label truncate text-[10px]">
                     @{profile.handle} · {profile.visibility}
                   </p>
                 </div>
@@ -84,7 +84,7 @@ export default function FriendSearch({ me, myProfile, connections, onChanged }) 
                     type="button"
                     onClick={() => connect(profile)}
                     disabled={busyId === profile.id}
-                    className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 font-heading text-[11px] font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
+                    className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
                   >
                     <UserPlus className="h-3 w-3" />
                     {busyId === profile.id ? '…' : 'Connect'}

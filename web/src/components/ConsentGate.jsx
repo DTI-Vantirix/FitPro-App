@@ -42,11 +42,11 @@ export default function ConsentGate() {
   }
 
   return (
-    <div className="grain flex min-h-screen items-center justify-center px-4 py-10">
+    <div className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="panel w-full max-w-md space-y-5 p-6">
         <div>
           <p className="eyebrow">Before your first run</p>
-          <h1 className="mt-1 font-heading text-xl font-bold leading-tight">Your training data, in your hands</h1>
+          <h1 className="mt-1 font-heading text-xl leading-tight">Your training data, in your hands</h1>
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
             VantraRun records health and location data, so we ask once before using it. Nothing is shared or sold.
           </p>
@@ -89,7 +89,7 @@ export default function ConsentGate() {
           type="button"
           onClick={accept}
           disabled={!agreed || busy}
-          className="w-full rounded-full bg-primary py-3.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
+          className="w-full rounded-full bg-primary py-3.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
         >
           {busy ? 'Saving…' : 'Agree and continue'}
         </button>

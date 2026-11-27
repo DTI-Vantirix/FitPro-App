@@ -28,7 +28,7 @@ export default function Leaderboard({ rows, metric, target, meId }) {
             <div className="flex items-center gap-3">
               <span
                 className={cn(
-                  'num w-4 shrink-0 text-center text-xs',
+                  'tabular-nums w-4 shrink-0 text-center text-xs',
                   i === 0 ? 'text-primary' : 'text-muted-foreground'
                 )}
               >
@@ -36,18 +36,18 @@ export default function Leaderboard({ rows, metric, target, meId }) {
               </span>
               <span
                 className={cn(
-                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-heading text-[10px] font-bold uppercase',
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold uppercase',
                   i === 0 ? 'bg-primary text-primary-foreground' : 'bg-primary/15 text-primary'
                 )}
               >
                 {(row.name || row.handle || '?').slice(0, 2)}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-heading text-sm font-semibold">
+                <p className="truncate font-heading text-sm">
                   {row.name}
                   {mine && <span className="ml-1.5 text-[10px] uppercase tracking-[0.1em] text-primary">you</span>}
                 </p>
-                <p className="num truncate text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                <p className="vr-label truncate text-[10px]">
                   @{row.handle}
                 </p>
               </div>

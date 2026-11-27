@@ -49,11 +49,11 @@ export default function Routes() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="eyebrow">Mapped on the map</p>
-          <h1 className="mt-2 font-heading text-3xl font-extrabold leading-none">Routes</h1>
+          <h1 className="mt-2 font-heading text-3xl leading-none">Routes</h1>
         </div>
         <Link
           to="/routes/new"
-          className="flex items-center gap-2 rounded-full bg-primary px-4 py-2.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 active:scale-[0.99]"
+          className="flex items-center gap-2 rounded-full bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 active:scale-[0.99]"
         >
           <Plus className="h-4 w-4" strokeWidth={2.5} /> Draw a route
         </Link>
@@ -70,14 +70,14 @@ export default function Routes() {
           <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
             <RouteIcon className="h-5 w-5" />
           </span>
-          <h2 className="font-heading text-lg font-bold">No routes yet</h2>
+          <h2 className="font-heading text-lg">No routes yet</h2>
           <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
             Tap your start point and trace the way — around the park, along the river, wherever you run. The
             line follows the roads for you.
           </p>
           <Link
             to="/routes/new"
-            className="mt-2 rounded-full border border-border px-4 py-2.5 font-heading text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary"
+            className="mt-2 rounded-full border border-border px-4 py-2.5 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary"
           >
             Draw your first route
           </Link>

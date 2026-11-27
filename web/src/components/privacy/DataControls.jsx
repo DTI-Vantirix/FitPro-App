@@ -65,7 +65,7 @@ export default function DataControls() {
   return (
     <section className="panel space-y-3 p-5">
       <div>
-        <h2 className="font-heading text-base font-bold">Your data</h2>
+        <h2 className="font-heading text-base">Your data</h2>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
           VantraRun keeps your GPS tracks and heart rate so you can look back at them. You can erase all of it
           yourself, without asking anyone.
@@ -83,7 +83,7 @@ export default function DataControls() {
             <button
               type="button"
               disabled={busy}
-              className="mt-3 rounded-full border border-destructive/50 px-3.5 py-1.5 font-heading text-[11px] font-semibold text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
+              className="mt-3 rounded-full border border-destructive/50 px-3.5 py-1.5 text-[11px] font-semibold text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
             >
               {busy ? 'Deleting…' : 'Delete everything'}
             </button>
@@ -125,7 +125,7 @@ export default function DataControls() {
           <AlertDialogTrigger asChild>
             <button
               type="button"
-              className="mt-3 rounded-full border border-destructive/50 px-3.5 py-1.5 font-heading text-[11px] font-semibold text-destructive transition hover:bg-destructive/10"
+              className="mt-3 rounded-full border border-destructive/50 px-3.5 py-1.5 text-[11px] font-semibold text-destructive transition hover:bg-destructive/10"
             >
               Delete account
             </button>
@@ -146,7 +146,7 @@ export default function DataControls() {
                   autoFocus
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-primary/60"
+                  className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm transition-colors focus:border-primary"
                 />
               </label>
               {deleteError && <p className="text-xs text-destructive">{deleteError}</p>}

@@ -125,7 +125,7 @@ export default function MfaMethodSetup({ session, method, onDone, onBack, signIn
               <li>In your authenticator app, add an account and paste the key.</li>
               <li>Come back here and enter the code the app shows.</li>
             </ol>
-            <code className="block rounded-lg border border-border px-3 py-3 text-center font-mono font-medium tracking-wider break-all">
+            <code className="block rounded-lg border border-border px-3 py-3 text-center tabular-nums font-medium tracking-wider break-all">
               {setup.secret_formatted}
             </code>
             <CopyKeyButton text={setup.secret_formatted} wide />
@@ -136,7 +136,7 @@ export default function MfaMethodSetup({ session, method, onDone, onBack, signIn
             <img src={setup.qr_code} alt="QR code for authenticator app setup" className="w-36 h-36 rounded-lg border border-border bg-white p-1" />
             <p className="text-muted-foreground mt-3">Can't scan the code? Enter it manually:</p>
             <div className="flex flex-wrap items-center justify-center gap-1">
-              <code className="font-mono font-medium tracking-wider break-all">{setup.secret_formatted}</code>
+              <code className="tabular-nums font-medium tracking-wider break-all">{setup.secret_formatted}</code>
               <CopyKeyButton text={setup.secret_formatted} />
             </div>
           </div>

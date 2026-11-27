@@ -11,14 +11,14 @@ export default function WorkoutCard({ workout, onDelete }) {
     <article className="panel p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate font-heading text-sm font-bold leading-tight">{workout.name}</h3>
-          <p className="num mt-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          <h3 className="truncate font-heading text-sm leading-tight">{workout.name}</h3>
+          <p className="vr-label mt-1 text-[10px]">
             {formatShortDate(workout.performed_at || workout.created_date)} · {sets} sets
             {volume > 0 ? ` · ${volume.toLocaleString('en-US')} lb` : ''}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <span className="num rounded-full border border-border px-2.5 py-1 text-[10px] text-muted-foreground">
+          <span className="tabular-nums rounded-full border border-border px-2.5 py-1 text-[10px] text-muted-foreground">
             {workout.duration_min || 0} min
           </span>
           <Link
@@ -46,7 +46,7 @@ export default function WorkoutCard({ workout, onDelete }) {
             return (
               <li
                 key={`${ex.name}-${i}`}
-                className="num rounded-md bg-secondary/70 px-2 py-1 text-[10px] text-muted-foreground"
+                className="tabular-nums rounded-md bg-secondary/70 px-2 py-1 text-[10px] text-muted-foreground"
               >
                 {ex.name}
                 {best ? ` · ${ex.sets.length}×${best.reps}` : ''}
@@ -54,7 +54,7 @@ export default function WorkoutCard({ workout, onDelete }) {
             );
           })}
           {exercises.length > 5 && (
-            <li className="num rounded-md bg-secondary/70 px-2 py-1 text-[10px] text-muted-foreground">
+            <li className="tabular-nums rounded-md bg-secondary/70 px-2 py-1 text-[10px] text-muted-foreground">
               +{exercises.length - 5} more
             </li>
           )}

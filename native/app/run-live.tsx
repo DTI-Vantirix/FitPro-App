@@ -14,7 +14,7 @@ import { useHeartRateSensor, useRun } from '../src/run/use-run';
 import { formatPace, hrBounds } from '../src/run/zones';
 import { colors } from '../src/theme';
 
-const STATUS_COLOR = { in: colors.accent, out: '#FFC24B', none: colors.subtle };
+const STATUS_COLOR = { in: colors.accent, out: colors.notice, none: colors.subtle };
 
 function Marker({ status }: { status: string }) {
   const symbol = status === 'in' ? '●' : status === 'faster' || status === 'above' ? '▲' : status === 'slower' || status === 'below' ? '▼' : '○';
@@ -147,13 +147,13 @@ const styles = StyleSheet.create({
   turn: { color: colors.text, fontSize: 18, fontWeight: '800', flex: 1 },
   turnDistance: { color: colors.accent, fontSize: 18, fontWeight: '800' },
   turnQuiet: { color: colors.muted, fontSize: 15 },
-  offRoute: { color: '#FFC24B', fontSize: 20, fontWeight: '900' },
+  offRoute: { color: colors.notice, fontSize: 20, fontWeight: '900' },
   map: { flex: 1, minHeight: 160, marginBottom: 10 },
   stats: { backgroundColor: colors.panel, borderColor: colors.panelBorder, borderWidth: 1, borderRadius: 14, padding: 16, gap: 10 },
   statsTall: { flex: 1, justifyContent: 'center' },
   big: { color: colors.text, fontSize: 38, fontWeight: '900', fontVariant: ['tabular-nums'] },
   unit: { color: colors.muted, fontSize: 15, fontWeight: '700' },
-  paused: { color: '#FFC24B', fontWeight: '900', letterSpacing: 2, fontSize: 13 },
+  paused: { color: colors.notice, fontWeight: '900', letterSpacing: 2, fontSize: 13 },
   metric: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   metricName: { color: colors.subtle, fontWeight: '800', letterSpacing: 1.5, fontSize: 12, width: 44 },
   metricValue: { color: colors.text, fontSize: 26, fontWeight: '800', flex: 1, fontVariant: ['tabular-nums'] },

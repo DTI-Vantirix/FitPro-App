@@ -25,6 +25,7 @@ cp .env.example server/.env # defaults work for local development
 npm run migrate             # creates the tables
 npm run create-admin -- you@example.com 'a-long-password'
 npm run dev                 # API on :4000, web app on :5173
+npm run dev:phone           # web app over https for phones on your Wi-Fi (needs npm run dev:api too); location only works over https
 ```
 
 Open http://localhost:5173 and sign in with the admin account. Admins skip the invite

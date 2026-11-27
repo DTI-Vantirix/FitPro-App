@@ -7,13 +7,21 @@ import { boundsOf, toLatLngs } from '@/lib/geo';
 const pinIcon = (label, tone) =>
   divIcon({
     className: 'map-pin-icon',
-    html: `<div class="map-pin ${tone}">${label}</div>`,
-    iconSize: [62, 22],
-    iconAnchor: [31, 11],
+    // The pill sits inside a taller grip so a finger can pick it up.
+    html: `<div class="map-pin-grip"><div class="map-pin ${tone}">${label}</div></div>`,
+    iconSize: [62, 40],
+    iconAnchor: [31, 20],
   });
 
 const START_ICON = pinIcon('START', 'start');
 const FINISH_ICON = pinIcon('FINISH', 'finish');
+// A waypoint you can drag: a small dot inside a finger-sized grip.
+const HANDLE_ICON = divIcon({
+  className: 'map-pin-icon',
+  html: '<div class="map-handle"><span></span></div>',
+  iconSize: [40, 40],
+  iconAnchor: [20, 20],
+});
 
 function Fit({ points, fitKey }) {
   const map = useMap();
@@ -57,6 +65,7 @@ export default function MapView({
   position = null,
   editable = false,
   onAddPoint,
+  onMovePoint,
   className = 'h-64 w-full',
   initialCenter,
   initialZoom = 14,
@@ -99,19 +108,38 @@ export default function MapView({
         {editable ? <ClickCatcher onAddPoint={onAddPoint} /> : null}
 
         {pathLine.length > 1 ? (
-          <Polyline positions={pathLine} pathOptions={{ color: '#C9F84A', weight: 4, lineCap: 'round' }} />
+          <Polyline positions={pathLine} pathOptions={{ color: '#C6FF00', weight: 5, lineCap: 'round', lineJoin: 'round' }} />
         ) : waypointLine.length > 1 ? (
           <Polyline
             positions={waypointLine}
-            pathOptions={{ color: '#8A9463', weight: 3, dashArray: '1 7', lineCap: 'round' }}
+            pathOptions={{ color: '#8A8A93', weight: 3, dashArray: '1 7', lineCap: 'round', lineJoin: 'round' }}
           />
         ) : null}
 
         {trailLine.length > 1 && (
-          <Polyline positions={trailLine} pathOptions={{ color: '#C9F84A', weight: 5, lineCap: 'round' }} />
+          <Polyline positions={trailLine} pathOptions={{ color: '#C6FF00', weight: 5, lineCap: 'round', lineJoin: 'round' }} />
         )}
 
-        {showWaypoints &&
+        {/* While drawing, every waypoint is a grip that can be dragged to a new spot. */}
+        {editable &&
+          points.map((p, i) => (
+            <Marker
+              key={`grip-${i}`}
+              position={[p.lat, p.lng]}
+              icon={i === 0 ? START_ICON : i === points.length - 1 ? FINISH_ICON : HANDLE_ICON}
+              draggable
+              autoPan
+              eventHandlers={{
+                dragend: (e) => {
+                  const at = e.target.getLatLng();
+                  onMovePoint?.(i, { lat: at.lat, lng: at.lng });
+                },
+              }}
+            />
+          ))}
+
+        {!editable &&
+          showWaypoints &&
           points.map((p, i) => {
             if (startPin && i === 0) return null;
             if (finishPin && i === points.length - 1) return null;
@@ -120,19 +148,24 @@ export default function MapView({
                 key={`wp-${i}`}
                 center={[p.lat, p.lng]}
                 radius={4}
-                pathOptions={{ color: '#16170F', fillColor: '#E9FFA8', fillOpacity: 1, weight: 2 }}
+                pathOptions={{ color: '#0B0B0C', fillColor: '#F5F5F2', fillOpacity: 1, weight: 2 }}
               />
             );
           })}
 
-        {startPin && <Marker position={[startPin.lat, startPin.lng]} icon={START_ICON} interactive={false} />}
-        {finishPin && <Marker position={[finishPin.lat, finishPin.lng]} icon={FINISH_ICON} interactive={false} />}
+        {!editable && startPin && (
+          <Marker position={[startPin.lat, startPin.lng]} icon={START_ICON} interactive={false} />
+        )}
+        {!editable && finishPin && (
+          <Marker position={[finishPin.lat, finishPin.lng]} icon={FINISH_ICON} interactive={false} />
+        )}
 
         {position && (
           <CircleMarker
             center={[position.lat, position.lng]}
             radius={9}
-            pathOptions={{ color: '#0C0C0A', weight: 3, fillColor: '#C9F84A', fillOpacity: 1 }}
+            className="you-are-here"
+            pathOptions={{ color: '#0B0B0C', weight: 3, fillColor: '#C6FF00', fillOpacity: 1 }}
           />
         )}
       </MapContainer>

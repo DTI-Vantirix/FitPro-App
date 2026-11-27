@@ -68,7 +68,7 @@ export default function Zones() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="eyebrow">Live pace feedback</p>
-          <h1 className="mt-2 font-heading text-3xl font-extrabold leading-none">Pace zones</h1>
+          <h1 className="mt-2 font-heading text-3xl leading-none">Pace zones</h1>
         </div>
         <div className="flex flex-wrap gap-2">
           {zones?.length > 0 && profile?.threshold_sec ? (
@@ -76,14 +76,14 @@ export default function Zones() {
               type="button"
               onClick={rebuild}
               disabled={busy}
-              className="flex items-center gap-2 rounded-full border border-border px-4 py-2.5 font-heading text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
+              className="flex items-center gap-2 rounded-full border border-border px-4 py-2.5 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
             >
               <RefreshCw className="h-4 w-4" /> {busy ? 'Updating…' : 'Rebuild'}
             </button>
           ) : null}
           <Link
             to="/settings"
-            className="rounded-full border border-border px-4 py-2.5 font-heading text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary"
+            className="rounded-full border border-border px-4 py-2.5 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary"
           >
             Profile
           </Link>
@@ -97,7 +97,7 @@ export default function Zones() {
           to="/settings"
           className="block rounded-xl border border-primary/30 bg-primary/5 p-4 text-xs leading-relaxed text-muted-foreground"
         >
-          <span className="font-heading text-sm font-bold text-primary">These zones use the old setup</span>
+          <span className="font-heading text-sm text-primary">These zones use the old setup</span>
           <span className="mt-1 block">
             Add your age, height and weight in Settings to rebuild them as Zone 1–5 with heart-rate bands and pace
             ranges from your own threshold.
@@ -112,7 +112,7 @@ export default function Zones() {
           <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
             <Check className="h-5 w-5" />
           </span>
-          <h2 className="mt-4 font-heading text-lg font-bold">
+          <h2 className="mt-4 font-heading text-lg">
             {profile ? 'Build your five zones' : 'Your zones come from your body, not a guess'}
           </h2>
           <p className="mt-1.5 max-w-md text-sm leading-relaxed text-muted-foreground">
@@ -125,14 +125,14 @@ export default function Zones() {
               type="button"
               onClick={rebuild}
               disabled={busy}
-              className="mt-4 rounded-full bg-primary px-5 py-3 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-50"
+              className="mt-4 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-50"
             >
               {busy ? 'Building…' : 'Create my zones'}
             </button>
           ) : (
             <Link
               to="/settings"
-              className="mt-4 inline-block rounded-full bg-primary px-5 py-3 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95"
+              className="mt-4 inline-block rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground transition hover:brightness-95"
             >
               Set my profile
             </Link>

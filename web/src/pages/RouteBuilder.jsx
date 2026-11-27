@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Crosshair, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { ArrowLeft, Crosshair, RotateCcw, Save, Trash2, TriangleAlert } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { api } from '@/api/client';
 import MapView from '@/components/MapView';
 import ZonePicker from '@/components/run/ZonePicker';
 import { pathMiles } from '@/lib/geo';
+import { locationProblem } from '@/lib/location';
 import { sortZones } from '@/lib/zones';
 
 export default function RouteBuilder() {
@@ -18,9 +20,12 @@ export default function RouteBuilder() {
   const [zoneId, setZoneId] = useState('');
   const [center, setCenter] = useState([40.7128, -74.006]);
   const [here, setHere] = useState(null);
+  const [geoError, setGeoError] = useState(null);
+  // How the next point joins the route: along roads and paths, or straight
+  // across ground the map has no path for.
+  const [offroad, setOffroad] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-  const [fitSeed] = useState(0);
+  const [error, setError] = useState(null);
   const requestId = useRef(0);
 
   const distance = useMemo(() => (path.length > 1 ? pathMiles(path) : pathMiles(points)), [path, points]);
@@ -31,17 +36,20 @@ export default function RouteBuilder() {
       setZones(list);
       if (list.length) setZoneId((list.find((z) => Number(z.zone_number) === 2) || list[0]).id);
     });
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          setHere(p);
-          setCenter([p.lat, p.lng]);
-        },
-        () => {},
-        { enableHighAccuracy: true, timeout: 12000 }
-      );
+    if (!navigator.geolocation || !window.isSecureContext) {
+      setGeoError(locationProblem(null));
+      return;
     }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setHere(p);
+        setCenter([p.lat, p.lng]);
+        setGeoError(null);
+      },
+      (err) => setGeoError(locationProblem(err)),
+      { enableHighAccuracy: true, timeout: 12000 }
+    );
   }, []);
 
   const snap = async (waypoints) => {
@@ -69,7 +77,16 @@ export default function RouteBuilder() {
   };
 
   const addPoint = (p) => {
-    const next = [...points, p];
+    const point = { lat: p.lat, lng: p.lng };
+    if (offroad && points.length) point.offroad = true;
+    const next = [...points, point];
+    setPoints(next);
+    snap(next);
+  };
+
+  // A dragged point keeps how it joins the route (road or off-road).
+  const movePoint = (index, at) => {
+    const next = points.map((p, i) => (i === index ? { ...p, lat: at.lat, lng: at.lng } : p));
     setPoints(next);
     snap(next);
   };
@@ -120,22 +137,75 @@ export default function RouteBuilder() {
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <div>
-          <p className="eyebrow">Tap the map — the line follows the roads</p>
-          <h1 className="font-heading text-lg font-bold leading-tight">Draw a route</h1>
+          <p className="eyebrow">
+            {offroad ? 'Off-road: points join in a straight line' : 'Tap the map — the line follows the roads'}
+            {points.length > 0 && ' · drag a point to move it'}
+          </p>
+          <h1 className="font-heading text-lg leading-tight">Draw a route</h1>
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-border">
+      {geoError && (
+        <p className="flex items-start gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-xs leading-relaxed text-foreground">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {geoError}
+        </p>
+      )}
+
+      <div className="relative overflow-hidden rounded-2xl border border-border">
         <MapView
           points={points}
+          position={here}
           path={path}
           editable
           onAddPoint={addPoint}
+          onMovePoint={movePoint}
           initialCenter={center}
           initialZoom={15}
-          fitKey={`${points.length}-${fitSeed}`}
+          // Never refit while drawing: the map stays at the zoom and place you chose.
+          fitKey="builder"
           className="h-[44vh] min-h-[260px] w-full"
         />
+        <div className="absolute bottom-3 left-3 z-[500] flex rounded-full border border-border bg-background p-1">
+          {[
+            { value: false, label: 'Follow roads' },
+            { value: true, label: 'Off-road' },
+          ].map((mode) => (
+            <button
+              key={mode.label}
+              type="button"
+              aria-pressed={offroad === mode.value}
+              onClick={() => setOffroad(mode.value)}
+              className={cn(
+                'min-h-9 rounded-full px-3.5 text-xs font-semibold transition-colors',
+                offroad === mode.value ? 'bg-primary text-primary-foreground' : 'text-steel hover:text-foreground'
+              )}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+        {/* On the map itself, so a wrong tap can be taken back without scrolling. */}
+        <div className="absolute right-3 top-3 z-[500] flex flex-col items-end gap-2">
+          <button
+            type="button"
+            onClick={undo}
+            disabled={!points.length}
+            aria-label="Undo last point"
+            className="flex min-h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-semibold text-foreground transition-colors hover:border-foreground disabled:text-steel"
+          >
+            <RotateCcw className="h-4 w-4" strokeWidth={1.75} /> Undo
+          </button>
+          <button
+            type="button"
+            onClick={clearPoints}
+            disabled={!points.length}
+            aria-label="Clear all points"
+            className="flex min-h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-semibold text-foreground transition-colors hover:border-foreground disabled:text-steel"
+          >
+            <Trash2 className="h-4 w-4" strokeWidth={1.75} /> Clear
+          </button>
+        </div>
       </div>
 
       <div className="panel space-y-4 p-5">
@@ -146,7 +216,7 @@ export default function RouteBuilder() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Ironworks loop"
-              className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary/60"
+              className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm transition-colors placeholder:text-muted-foreground/70 focus:border-primary"
             />
           </label>
         </div>
@@ -159,10 +229,17 @@ export default function RouteBuilder() {
               <span className="ml-1 text-xs text-muted-foreground">mi</span>
             </p>
           </div>
-          <p className="num text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+          <p className="vr-label text-[11px]">
             {snapping ? 'Following roads…' : `${points.length} ${points.length === 1 ? 'point' : 'points'}`}
           </p>
         </div>
+
+        {points.some((p) => p.offroad) && (
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Off-road legs are drawn straight between your points, so add a point at each bend. Spoken directions tell
+            you to head for the next marker there.
+          </p>
+        )}
 
         {snapFailed && (
           <p className="text-[11px] leading-relaxed text-muted-foreground">
@@ -181,22 +258,6 @@ export default function RouteBuilder() {
           >
             <Crosshair className="h-3.5 w-3.5" /> Add my location
           </button>
-          <button
-            type="button"
-            onClick={undo}
-            disabled={!points.length}
-            className="flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-          >
-            <RotateCcw className="h-3.5 w-3.5" /> Undo
-          </button>
-          <button
-            type="button"
-            onClick={clearPoints}
-            disabled={!points.length}
-            className="flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-40"
-          >
-            <Trash2 className="h-3.5 w-3.5" /> Clear
-          </button>
         </div>
 
         {error && <p className="text-xs text-destructive">{error}</p>}
@@ -205,7 +266,7 @@ export default function RouteBuilder() {
           type="button"
           onClick={save}
           disabled={saving || !name.trim() || points.length < 2}
-          className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
+          className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
         >
           <Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save route'}
         </button>

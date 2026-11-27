@@ -15,8 +15,8 @@ export default function MiniStat({ icon: Icon, label, value, unit, caption, clas
         ) : null}
       </div>
       <div className="flex items-baseline gap-1.5">
-        <span className="num text-2xl font-medium leading-none text-foreground sm:text-[26px]">{value}</span>
-        {unit ? <span className="num text-[10px] uppercase tracking-widest text-muted-foreground">{unit}</span> : null}
+        <span className="num text-2xl leading-none text-foreground sm:text-[26px]">{value}</span>
+        {unit ? <span className="vr-label text-[10px]">{unit}</span> : null}
       </div>
       {caption ? <p className="text-[11px] leading-tight text-muted-foreground">{caption}</p> : null}
     </div>

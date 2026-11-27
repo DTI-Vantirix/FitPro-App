@@ -45,12 +45,12 @@ export default function Challenges() {
       <div className="flex items-end justify-between gap-3">
         <div>
           <p className="eyebrow">Group goals</p>
-          <h1 className="mt-1 font-heading text-3xl font-extrabold leading-none">Challenges</h1>
+          <h1 className="mt-1 font-heading text-3xl leading-none">Challenges</h1>
         </div>
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-2.5 font-heading text-xs font-semibold text-primary-foreground transition hover:brightness-95"
+          className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-2.5 text-xs font-semibold text-primary-foreground transition hover:brightness-95"
         >
           <Plus className="h-3.5 w-3.5" /> New challenge
         </button>
@@ -66,7 +66,7 @@ export default function Challenges() {
       {challenges?.length === 0 && (
         <div className="panel p-6 text-center">
           <Trophy className="mx-auto h-6 w-6 text-primary" />
-          <p className="mt-3 font-heading text-base font-bold">No challenge groups yet</p>
+          <p className="mt-3 font-heading text-base">No challenge groups yet</p>
           <p className="mx-auto mt-1.5 max-w-sm text-xs leading-relaxed text-muted-foreground">
             Start one for the month — a 100 mile goal or 20 runs — and anyone who joins
             climbs the same board.
