@@ -2,7 +2,8 @@ import http from 'node:http';
 import { syncInviteEntitlements } from './access.js';
 import { createApp } from './app.js';
 import { bootstrapAdmin } from './auth/bootstrap.js';
-import { startTrialReminders } from './billing/reminders.js';
+import { startBillingSweeps } from './billing/reminders.js';
+import { createStripe } from './billing/stripe.js';
 import { loadConfig } from './config.js';
 import { createDb } from './db.js';
 import { trustedProxyHops } from './lib/http.js';
@@ -43,7 +44,8 @@ if (config.stripe.ready) {
 
 // Nothing a single request does may stop the process: a failure that escapes the
 // request handler is logged and answered, and a stray rejection is only logged.
-const handle = createApp({ db, config, registry });
+const stripe = createStripe(config);
+const handle = createApp({ db, config, registry, stripe });
 const server = http.createServer((req, res) => {
   handle(req, res).catch((error) => {
     console.error('[error] unhandled in request', error);
@@ -57,9 +59,10 @@ server.listen(config.port, () => {
   console.log(`[uploads] stored ${config.storage.s3 ? `in the bucket "${config.storage.s3.bucket}"` : `on disk at ${config.uploadDir}`}`);
 });
 
-// The "your trial ends in two days" email: once now, then every hour. Only where Stripe
-// is set up; without it there are no trials to remind anyone about.
-if (config.stripe.ready) startTrialReminders({ db, config });
+// Billing's background jobs: the "your trial ends in two days" email every hour, and a
+// daily check of subscriptions whose period has passed without word from Stripe. Only
+// where Stripe is set up.
+if (config.stripe.ready) startBillingSweeps({ db, config, stripe });
 
 const shutdown = () => {
   server.close(() => db.close().then(() => process.exit(0)));

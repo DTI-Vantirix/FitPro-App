@@ -2,8 +2,10 @@
 // cancel. Ours, not Stripe's: Stripe's reminder goes out seven days before a trial
 // ends, which for a seven-day trial is the moment it starts (docs/decisions.md).
 // A sweep run every hour from src/index.js; it does not depend on a webhook arriving.
+// This file also starts billing's other background job, the daily check (at the end).
 import { sendMail } from '../lib/mail.js';
 import { PLANS } from './plans.js';
+import { syncOverdue } from './sync.js';
 
 const WINDOW_HOURS = 48;
 const SUPPORT_EMAIL = 'info@dtisys.com';
@@ -73,16 +75,34 @@ export async function sendTrialReminders({ db, config, now = new Date(), send = 
   return sent;
 }
 
-/** Runs the sweep now and then every hour. Never throws; never keeps the process alive. */
-export function startTrialReminders({ db, config, everyMs = 60 * 60 * 1000, log = console }) {
-  const run = () =>
-    sendTrialReminders({ db, config })
-      .then((sent) => {
-        if (sent) log.log(`[billing] sent ${sent} trial reminder(s)`);
-      })
-      .catch((error) => log.error('[billing] trial reminder sweep failed', error));
+/**
+ * Runs `work` now and then every `everyMs`. A run that fails is logged and the next one
+ * still happens; the timer never keeps the process alive.
+ */
+export function repeat(name, everyMs, work, log = console) {
+  const run = () => Promise.resolve().then(work).catch((error) => log.error(`[billing] ${name} failed`, error));
   run();
   const timer = setInterval(run, everyMs);
   timer.unref();
   return timer;
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * The two background jobs of billing, started from src/index.js when Stripe is set up:
+ * the trial reminder every hour, and once a day a check of every subscription whose
+ * period has passed without word from Stripe (sync.js, syncOverdue).
+ */
+export function startBillingSweeps({ db, config, stripe, log = console }) {
+  return [
+    repeat('trial reminder sweep', HOUR_MS, async () => {
+      const sent = await sendTrialReminders({ db, config, stripe });
+      if (sent) log.log(`[billing] sent ${sent} trial reminder(s)`);
+    }, log),
+    repeat('daily subscription check', 24 * HOUR_MS, async () => {
+      const { checked, failed } = await syncOverdue({ db, stripe, config });
+      if (checked || failed) log.log(`[billing] daily check: ${checked} overdue subscription(s) checked with Stripe, ${failed} could not be`);
+    }, log),
+  ];
 }

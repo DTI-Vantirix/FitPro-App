@@ -15,6 +15,7 @@ import { hashPassword } from '../src/auth/crypto.js';
 import { formatDay, sendTrialReminders } from '../src/billing/reminders.js';
 import { deleteAccount } from '../src/billing/account.js';
 import { serialised } from '../src/billing/queue.js';
+import { syncOverdue } from '../src/billing/sync.js';
 import { loadRegistry } from '../src/entities/registry.js';
 import { migrate } from '../src/migrate.js';
 import { createPsqlDb } from './psql-db.js';
@@ -3395,5 +3396,72 @@ describe('deleting an account leaves nothing behind at Stripe', () => {
     await deliver('invoice.payment_failed', { customer: 'cus_orphan_quiet' });
     await new Promise((r) => setTimeout(r, 200));
     assert.equal((await db.query(`select id from client_errors where message like '%cus_orphan_quiet%'`, [])).length, 0);
+  });
+});
+
+describe('the daily sweep puts overdue subscriptions right', () => {
+  let store;
+  const selling = () => ({ ...testConfig, ...SELLING });
+  const listCalls = (customer) => store.fake.callsTo('listSubscriptions').filter((c) => c.args.customerId === customer).length;
+  // A subscriber whose row is in place, then made to look as it would after missed notices.
+  async function subscriber(email, { status = 'active', endedDaysAgo }) {
+    const who = await legacyUser(email);
+    const sub = await store.subscribe(who);
+    await store.subscription(who, { action: 'refresh' });
+    await db.query(`update entitlements set status = $2, expires_at = $3 where user_id = $1 and source = 'stripe' returning id`, [
+      who.user.id, status, daysFromNow(-endedDaysAgo),
+    ]);
+    return { who, sub, customer: (await userRow(who.user.id)).stripe_customer_id };
+  }
+  const rowOf = async (who) => (await entitlementsOf(who.user.id)).find((r) => r.source === 'stripe');
+
+  before(async () => {
+    store = await shop();
+    // rows left by earlier tests are not this suite's business
+    await db.query(`update entitlements set expires_at = now() + interval '30 days' where source = 'stripe' and status in ('trial', 'active', 'grace') and expires_at < now() returning id`, []);
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('a renewal and a cancellation whose notices were lost are both picked up', async () => {
+    const renewed = await subscriber('rex.renewed@example.com', { endedDaysAgo: 5 });
+    store.fake.setSubscription(renewed.sub.id, { status: 'active', current_period_start: daysFromNowUnix(-5), current_period_end: daysFromNowUnix(25) });
+    const ended = await subscriber('eve.ended@example.com', { endedDaysAgo: 1 });
+    store.fake.setSubscription(ended.sub.id, { status: 'canceled', canceled_at: daysFromNowUnix(-1), ended_at: daysFromNowUnix(-1) });
+    const current = await subscriber('cai.current@example.com', { endedDaysAgo: -20 });
+    const before = listCalls(current.customer);
+
+    const result = await syncOverdue({ db, stripe: store.fake, config: selling() });
+    assert.deepEqual(result, { checked: 2, failed: 0 });
+    const fixed = await rowOf(renewed.who);
+    assert.equal(fixed.status, 'active');
+    assert.ok(new Date(fixed.expires_at).getTime() > Date.now() + 24 * 24 * 60 * 60 * 1000);
+    assert.equal((await store.runs(renewed.who)).status, 200);
+    assert.equal((await rowOf(ended.who)).status, 'expired');
+    assert.equal(listCalls(current.customer), before, 'a subscription that is not overdue is not asked about');
+    // nothing is overdue any more
+    assert.deepEqual(await syncOverdue({ db, stripe: store.fake, config: selling() }), { checked: 0, failed: 0 });
+  });
+
+  test('it does at most so many in one run, and one failure does not stop the rest', async () => {
+    const people = [];
+    for (const name of ['una', 'duo', 'tri']) people.push(await subscriber(`${name}.overdue@example.com`, { status: 'grace', endedDaysAgo: 6 }));
+    for (const person of people) store.fake.setSubscription(person.sub.id, { status: 'canceled', canceled_at: daysFromNowUnix(0), ended_at: daysFromNowUnix(0) });
+
+    assert.deepEqual(await syncOverdue({ db, stripe: store.fake, config: selling(), limit: 1 }), { checked: 1, failed: 0 });
+    assert.equal((await Promise.all(people.map((p) => rowOf(p.who)))).filter((r) => r.status === 'expired').length, 1);
+
+    store.fake.failNext('listSubscriptions');
+    assert.deepEqual(await syncOverdue({ db, stripe: store.fake, config: selling(), limit: 10 }), { checked: 1, failed: 1 });
+    assert.deepEqual(await syncOverdue({ db, stripe: store.fake, config: selling(), limit: 10 }), { checked: 1, failed: 0 });
+    assert.equal((await Promise.all(people.map((p) => rowOf(p.who)))).filter((r) => r.status === 'expired').length, 3);
+  });
+
+  test('without the Stripe settings it does nothing', async () => {
+    await subscriber('nia.nokeys@example.com', { endedDaysAgo: 2 });
+    const calls = store.fake.calls.length;
+    assert.deepEqual(await syncOverdue({ db, stripe: store.fake, config: testConfig }), { checked: 0, failed: 0 });
+    assert.equal(store.fake.calls.length, calls);
   });
 });

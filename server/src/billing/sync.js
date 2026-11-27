@@ -172,3 +172,38 @@ export async function syncCustomer(db, stripe, config, customerId) {
     return writeSubscriptions(db, config, customerId, subscriptions);
   });
 }
+
+/**
+ * The daily safety net: subscriptions our table says are running but whose period has
+ * passed. Either a renewal notice was lost (the person paid and we never heard) or an
+ * ending was (they stopped and we never heard). Stripe is asked about each such
+ * customer, one at a time, at most `limit` per run so a backlog cannot flood Stripe;
+ * the choice is random, so the same few cannot crowd out the rest run after run.
+ * One customer failing does not stop the others. Holds nothing in the database while
+ * Stripe is asked (syncCustomer). Returns how many were checked and how many failed.
+ */
+export async function syncOverdue({ db, stripe, config, limit = 50, now = new Date() }) {
+  if (!config?.stripe?.ready) return { checked: 0, failed: 0 };
+  const due = await db.query(
+    `select customer from (
+       select distinct u.stripe_customer_id as customer
+         from entitlements e join users u on u.id = e.user_id
+        where e.source = 'stripe' and e.status in ('trial', 'active', 'grace')
+          and e.expires_at < $1 and u.stripe_customer_id is not null) overdue
+      order by random()
+      limit $2::int`,
+    [now.toISOString(), limit]
+  );
+  let checked = 0;
+  let failed = 0;
+  for (const { customer } of due) {
+    try {
+      await syncCustomer(db, stripe, config, customer);
+      checked += 1;
+    } catch (error) {
+      failed += 1;
+      console.error(`[billing] daily sweep could not check ${customer}: ${error?.message || error}`);
+    }
+  }
+  return { checked, failed };
+}
