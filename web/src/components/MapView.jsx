@@ -132,6 +132,7 @@ export default function MapView({
           <CircleMarker
             center={[position.lat, position.lng]}
             radius={9}
+            className="you-are-here"
             pathOptions={{ color: '#0C0C0A', weight: 3, fillColor: '#C9F84A', fillOpacity: 1 }}
           />
         )}
