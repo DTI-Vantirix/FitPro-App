@@ -1,6 +1,6 @@
 // A tester's flow: sign up with the owner's code, get in, look around, sign out.
 import { expect, test } from '@playwright/test';
-import { RUNNER } from './fixtures.mjs';
+import { ADMIN, RUNNER } from './fixtures.mjs';
 import { acceptConsent, expectSignedIn, mintCode, signIn, submitSignUp, watchForTrouble } from './helpers.mjs';
 
 test.describe.configure({ mode: 'serial' });
@@ -22,6 +22,35 @@ test.afterAll(async () => {
 test('the app is closed to people who are not signed in', async () => {
   await page.goto('/');
   await expect(page).toHaveURL(/\/login/);
+});
+
+test('the sign-up form is the invite-only one while subscriptions are off', async ({ request }) => {
+  const options = await (await request.get('/api/auth/options')).json();
+  expect(options.subscriptions).toBe(false);
+
+  await page.goto('/register');
+  await expect(page.getByText('VantraRun is invite-only. Use the code you were sent.')).toBeVisible();
+  await expect(page.getByLabel('Invite code')).toHaveAttribute('required', '');
+  await expect(page.getByText(/Have an invite code\?/)).toHaveCount(0);
+
+  // and the server refuses a sign-up with no code, whatever the form allows
+  const res = await request.post('/api/auth/register', { data: { email: 'nocode@e2e.test', password: 'e2e-nocode-pass-1' } });
+  expect(res.status()).toBe(400);
+  expect((await res.json()).error).toBe('Enter your invite code.');
+});
+
+test('the form makes the code optional once the server reports subscriptions on', async ({ browser }) => {
+  // The test server runs with the switch off, so only the form is checked here: its
+  // answer from /api/auth/options is replaced. The server side is covered in server/test.
+  const visitor = await browser.newPage();
+  await visitor.route('**/api/auth/options', (route) =>
+    route.fulfill({ json: { name: 'VantraRun', auth_config: { mfa_policy: 'off', providers: [] }, subscriptions: true } })
+  );
+  await visitor.goto('/register');
+  await expect(visitor.getByText('Have an invite code? Enter it here. Otherwise leave this empty.')).toBeVisible();
+  await expect(visitor.getByText('VantraRun is invite-only. Use the code you were sent.')).toHaveCount(0);
+  await expect(visitor.getByLabel('Invite code')).not.toHaveAttribute('required', '');
+  await visitor.close();
 });
 
 test('sign-up without a real code is refused', async () => {
@@ -110,6 +139,30 @@ test('a runner does not see the invite-code controls', async () => {
   await expectSignedIn(page);
   await page.waitForLoadState('networkidle');
   await expect(page.getByRole('heading', { name: 'Invite codes' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Who has access' })).toHaveCount(0);
+});
+
+test('the owner sees the runner listed with an invite code, and a runner cannot ask for the list', async ({ browser, request }) => {
+  const owner = await browser.newPage();
+  const ownerTrouble = watchForTrouble(owner);
+  await signIn(owner, ADMIN);
+  await expectSignedIn(owner);
+  await owner.goto('/settings');
+  const card = owner.locator('section', { has: owner.getByRole('heading', { name: 'Who has access' }) });
+  await expect(card).toBeVisible();
+  await expect(card.getByRole('row').filter({ hasText: RUNNER.email })).toContainText('Invite code');
+  await expect(card.getByRole('row').filter({ hasText: ADMIN.email })).toContainText('Admin');
+
+  await card.getByLabel('Search by email').fill('runner@');
+  await expect(card.getByRole('row').filter({ hasText: ADMIN.email })).toHaveCount(0);
+  await expect(card.getByRole('row').filter({ hasText: RUNNER.email })).toHaveCount(1);
+  expect(ownerTrouble).toEqual([]);
+  await owner.close();
+
+  const login = await request.post('/api/auth/login', { data: RUNNER });
+  const { access_token: token } = await login.json();
+  const res = await request.post('/api/functions/adminAccess', { headers: { Authorization: `Bearer ${token}` }, data: { action: 'list' } });
+  expect(res.status()).toBe(403);
 });
 
 test('signing out closes the app, and signing back in reopens it', async () => {

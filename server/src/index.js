@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { syncInviteEntitlements } from './access.js';
 import { createApp } from './app.js';
 import { bootstrapAdmin } from './auth/bootstrap.js';
 import { loadConfig } from './config.js';
@@ -10,6 +11,9 @@ const config = loadConfig();
 const db = createDb(config.databaseUrl);
 
 if (process.env.MIGRATE_ON_START !== 'false') await migrate(db);
+// Invite codes redeemed while an older build was serving (see access.js).
+const carried = await syncInviteEntitlements(db);
+if (carried) console.log(`[access] gave ${carried} redeemed invite code(s) their entitlement`);
 await bootstrapAdmin(db, process.env, console.log);
 const registry = await loadRegistry(db);
 

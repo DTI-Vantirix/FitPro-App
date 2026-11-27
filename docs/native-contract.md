@@ -35,12 +35,31 @@ POST {API_URL}/api/auth/login
 ```
 
 Sign-up is `POST /api/auth/register` with `{ email, password, full_name?, invite_code }`,
-then `POST /api/auth/verify-otp` with the emailed 6-digit code, which also returns
-`{ access_token, user }`. `invite_code` is required: FitPro is invite-only and the server
+then `POST /api/auth/verify-otp` with `{ email, otp_code, password }` (the emailed 6-digit
+code and the password just chosen), which also returns `{ access_token, user }`.
+
+`password` at `verify-otp` was added on 2026-11-27. Anyone can register again with an
+address that is not verified yet, which replaces the password and mails that address a
+new code; sending the password back with the code stops the owner of the address from
+confirming an account that holds somebody else's password. When it is sent it must match
+the account's password, or the answer is `400 "That code is wrong or has expired."`
+(the same as a wrong code, and the code is not used up: registering again and retrying
+works). While `SUBSCRIPTIONS` is off it may be left out, so builds from before this
+date keep working; when it is on it is required. Always send it. The screen reached
+from sign-in for an unverified account has no password to send yet: see
+`docs/decisions.md`, "Known gaps before the switch is turned on".
+
+`invite_code` is required: FitPro is invite-only and the server
 creates no account without a valid unused code (`400` with `"Enter your invite code."`,
 `"That code is not recognised."` or `"That code has already been used."`). The code is
 claimed when the email is verified, not at register; if someone else verified with the same
 code first, `verify-otp` answers `409` and the person registers again with a new code.
+
+That is the behaviour while the server's `SUBSCRIPTIONS` setting is off, which it is
+today. `GET /api/auth/options` reports the setting as `"subscriptions": true|false`. When
+it is on, `invite_code` is optional: left out (or empty), the account is created and
+verified as usual but has no access until it subscribes or redeems a code. A code that
+is given is checked and claimed exactly as above.
 
 Store the token in `expo-secure-store` and send it on every request. Tokens last 30 days
 by default. Any `401` means the token is no longer valid (expired, password changed,
@@ -49,10 +68,36 @@ token and returns the user.
 
 ### Invite and consent checks
 
-- Invite status: `POST /api/functions/inviteAccess` with `{ "action": "status" }` ->
-  `{ "allowed": true|false, "admin"?: true }`. Redeem with
-  `{ "action": "redeem", "code": "FP-XXXX-XXXX" }` -> `{ "allowed": true }` or
-  `{ "allowed": false, "error": "..." }` (still HTTP 200).
+- Access status: `POST /api/functions/inviteAccess` with `{ "action": "status" }` ->
+
+  ```
+  {
+    "allowed": true|false,
+    "admin"?: true,                  // only present for admins
+    "reason": "admin"|"subscription"|"trial"|"invite"|"granted"|null,
+    "source": "stripe"|"apple"|"invite"|"admin"|null,
+    "plan": "monthly"|"annual"|null,
+    "expires_at": "<ISO>"|null,      // end of the paid period; null for free passes
+    "cancel_at_period_end": true|false,
+    "subscriptions": true|false      // the server's SUBSCRIPTIONS setting
+  }
+  ```
+
+  `allowed` and `admin` are unchanged and are all the app reads today. The other
+  fields were added on 2026-11-27 for the subscription screens; with no access every
+  one of them is `null` (`cancel_at_period_end` is `false`). Ignore fields you do not know.
+- Redeem with `{ "action": "redeem", "code": "FP-XXXX-XXXX" }` -> `{ "allowed": true }` or
+  `{ "allowed": false, "error": "..." }` (still HTTP 200). Unchanged.
+
+An account without access (no subscription, no invite code, no free pass; admins always
+have access) can still sign in and out, read and update `/api/auth/me`, change or reset
+its password, delete itself, report a crash, and call `inviteAccess`. **Every other
+call** (all of `/api/entities/*`, `POST /api/uploads`, and every other function,
+`ingestActivity` included) answers
+`403 { "error": "Enter an invite code to use VantraRun." }` while the server's
+`SUBSCRIPTIONS` setting is off (today), and
+`403 { "error": "Subscribe or enter an invite code to use VantraRun." }` when it is on. Before
+2026-11-27 only `ingestActivity` refused, with a different message.
 - Consent: the user object's `consent_version` / `consent_accepted_at`. Record acceptance
   with `PUT /api/auth/me { "consent_version": "...", "consent_accepted_at": "<ISO>" }`.
 
@@ -328,7 +373,7 @@ All errors are `{ "error": "<message>" }` with the message written for a human:
 | ------ | ---------------------------------------------------------------- |
 | 400    | missing `external_id`, bad `distance_mi`/`duration_sec`, invalid `started_at`/`performed_at`, no usable exercises, unknown `kind` |
 | 401    | no app-user session                                              |
-| 403    | signed in, but no accepted invite code (admins are exempt): `"Redeem your invite code before syncing activities."` |
+| 403    | signed in, but the account has no access (admins are exempt): `"Enter an invite code to use VantraRun."`, or `"Subscribe or enter an invite code to use VantraRun."` when the server's `SUBSCRIPTIONS` setting is on. Until 2026-11-27 the message was `"Redeem your invite code before syncing activities."`; the status is the same. Keep the activity queued and retry later: access can come back. Never match on the message text. |
 | 500    | unexpected — surface the message, do not retry in a loop          |
 
 The shell should surface 400s verbatim next to the affected activity. A 400 means the

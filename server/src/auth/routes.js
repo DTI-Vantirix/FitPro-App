@@ -63,13 +63,18 @@ export function registerAuthRoutes(router) {
     const fullName = ctx.body.full_name ? String(ctx.body.full_name).trim().slice(0, 120) : null;
     signupLimit(`signup:${clientIp(ctx.req)}`);
 
-    // VantraRun is invite-only: no account without a code from the owner. The code
-    // is only held here; it is claimed when the email is verified.
-    const inviteCode = normalizeCode(ctx.body.invite_code);
-    if (!inviteCode) throw new HttpError(400, 'Enter your invite code.');
-    const [invite] = await ctx.db.query('select status from invite_codes where code = $1', [inviteCode]);
-    if (!invite) throw new HttpError(400, 'That code is not recognised.');
-    if (invite.status !== 'available') throw new HttpError(400, 'That code has already been used.');
+    // Invite-only (SUBSCRIPTIONS off): no account without a code from the owner.
+    // With subscriptions on the code is optional: an account made without one is
+    // verified with no access and meets the paywall. A code that is given is
+    // checked the same way either way, and only held here; it is claimed when the
+    // email is verified.
+    const inviteCode = normalizeCode(ctx.body.invite_code) || null;
+    if (!inviteCode && !ctx.config.subscriptions) throw new HttpError(400, 'Enter your invite code.');
+    if (inviteCode) {
+      const [invite] = await ctx.db.query('select status from invite_codes where code = $1', [inviteCode]);
+      if (!invite) throw new HttpError(400, 'That code is not recognised.');
+      if (invite.status !== 'available') throw new HttpError(400, 'That code has already been used.');
+    }
     mailLimit(`mail:${email}`);
 
     const existing = await findByEmail(ctx.db, email);
@@ -100,7 +105,21 @@ export function registerAuthRoutes(router) {
     const email = readEmail(ctx.body.email);
     codeLimit(`code:${email}`);
     const user = await findByEmail(ctx.db, email);
-    const ok = user && (await consumeCodeForUser(ctx.db, user.id, 'verify_email', ctx.body.otp_code));
+    // Anyone can sign up again with an address that is not verified yet, which replaces
+    // the password and mails the address a new code. The owner of the address must not
+    // then confirm somebody else's password by typing that code, so the password chosen
+    // at sign-up comes back with the code and has to match. It is checked first: a
+    // mismatch leaves the code unused and answers exactly like a wrong code.
+    // Builds of the phone app from before this check send no password. That is still
+    // accepted while sign-up needs an invite code, and required once sign-up is open.
+    const password = typeof ctx.body.password === 'string' ? ctx.body.password : '';
+    let passwordOk = !ctx.config.subscriptions;
+    if (password) {
+      passwordOk = user?.password_hash
+        ? await verifyPassword(password, user.password_hash)
+        : await burnPasswordCheck(password);
+    }
+    const ok = passwordOk && user && (await consumeCodeForUser(ctx.db, user.id, 'verify_email', ctx.body.otp_code));
     if (!ok) throw new HttpError(400, 'That code is wrong or has expired.');
     const verified = await ctx.db.tx(async (tx) => {
       // The code they registered with is claimed here, together with the
@@ -242,8 +261,10 @@ export function registerAuthRoutes(router) {
   });
 
   // What the sign-in screens can offer. Social sign-in and MFA come later.
-  router.add('GET', '/api/auth/options', async () => ({
+  // `subscriptions` tells the sign-up form whether an invite code is still required.
+  router.add('GET', '/api/auth/options', async (ctx) => ({
     name: 'VantraRun',
     auth_config: { mfa_policy: 'off', providers: [] },
+    subscriptions: Boolean(ctx.config.subscriptions),
   }));
 }

@@ -1,6 +1,6 @@
 // The owner's flow: sign in, hand out invite codes, take one back.
 import { expect, test } from '@playwright/test';
-import { ADMIN } from './fixtures.mjs';
+import { ADMIN, CARRIED } from './fixtures.mjs';
 import { CODE_RE, acceptConsent, expectSignedIn, signIn, watchForTrouble } from './helpers.mjs';
 
 test.describe.configure({ mode: 'serial' });
@@ -67,6 +67,65 @@ test('a revoked code cannot be used to sign up', async ({ browser }) => {
   await visitor.getByRole('button', { name: 'Create account' }).click();
   await expect(visitor.getByText('That code has already been used.')).toBeVisible();
   await visitor.close();
+});
+
+test('the admin sees who has access, and can give and take back a free pass', async ({ request }) => {
+  // someone who signed up with a code, so there is a person to look at
+  const code = (await page.locator('section', { has: page.getByRole('heading', { name: 'Invite codes' }) })
+    .getByRole('listitem').filter({ hasText: CODE_RE }).first().textContent()).match(CODE_RE)[0];
+  const tester = { email: 'tester@e2e.test', password: 'e2e-tester-pass-1' };
+  const reg = await request.post('/api/auth/register', { data: { ...tester, invite_code: code } });
+  const ver = await request.post('/api/auth/verify-otp', { data: { email: tester.email, otp_code: (await reg.json()).dev_code } });
+  expect(ver.ok()).toBeTruthy();
+  const { access_token: token } = await ver.json();
+  const runs = () => request.post('/api/entities/Run/query', { headers: { Authorization: `Bearer ${token}` }, data: {} });
+  expect((await runs()).status()).toBe(200);
+
+  await page.reload();
+  const card = page.locator('section', { has: page.getByRole('heading', { name: 'Who has access' }) });
+  await expect(card).toBeVisible();
+  const row = card.getByRole('row').filter({ hasText: tester.email });
+  await expect(row).toContainText('Invite code');
+  await expect(card.getByRole('row').filter({ hasText: ADMIN.email })).toContainText('Admin');
+
+  // take the invite pass away: asks first, then the person is closed out on the server
+  const removeButton = row.getByRole('button', { name: `Remove invite code access from ${tester.email}` });
+  await removeButton.click();
+  // Only asked so far: nothing has been taken away on the server.
+  await expect(row.getByRole('button', { name: 'Yes, remove' })).toBeVisible();
+  expect((await runs()).status()).toBe(200);
+  // Backing out leaves it that way.
+  await row.getByRole('button', { name: 'Keep' }).click();
+  await expect(removeButton).toBeVisible();
+  expect((await runs()).status()).toBe(200);
+
+  // Asked again and confirmed: now the person is refused.
+  await removeButton.click();
+  await row.getByRole('button', { name: 'Yes, remove' }).click();
+  await expect(row).toContainText('No access');
+  const refused = await runs();
+  expect(refused.status()).toBe(403);
+  expect((await refused.json()).error).toBe('Enter an invite code to use VantraRun.');
+
+  // give it back by hand
+  await card.getByLabel('Email to give free access').fill(tester.email);
+  await card.getByLabel('Note (optional)').fill('e2e pass');
+  await card.getByRole('button', { name: 'Grant free access' }).click();
+  await expect(row).toContainText('Granted by you');
+  expect((await runs()).status()).toBe(200);
+
+  // an email with no account says what to do instead
+  await card.getByLabel('Email to give free access').fill('nobody@e2e.test');
+  await card.getByRole('button', { name: 'Grant free access' }).click();
+  await expect(card.getByText('No account with that email yet. Send them an invite code instead.')).toBeVisible();
+});
+
+test('someone who redeemed a code under the previous build was given access when the API started', async ({ request }) => {
+  const login = await request.post('/api/auth/login', { data: CARRIED });
+  expect(login.ok()).toBeTruthy();
+  const { access_token: token } = await login.json();
+  const res = await request.post('/api/entities/Run/query', { headers: { Authorization: `Bearer ${token}` }, data: {} });
+  expect(res.status()).toBe(200);
 });
 
 test('the admin screens raised no errors', async () => {
