@@ -80,10 +80,14 @@ export function registerAuthRoutes(router, config) {
   const isOpen = (ctx, user) => Boolean(ctx.config.subscriptions) && !user.pending_invite_code;
 
   /**
-   * May one more verification email go to this open sign-up? True: send it. False: one
-   * went out in the last minute, so say nothing and send nothing. Throws 429 when the
-   * address has had 3 in the hour or 8 in the day, or when everyone together has reached
-   * the hourly ceiling. `userId` is empty for an address with no account yet.
+   * May one more verification email go to this open sign-up? Never throws.
+   *   { send: true }
+   *   { send: false, why: 'recent' }   one went out in the last minute
+   *   { send: false, why: 'address' }  this address has had 3 in the hour or 8 in the day
+   *   { send: false, why: 'busy' }     everyone together has reached the hourly ceiling
+   * What the caller says about it differs: sign-up refuses, "resend" says nothing, and
+   * sign-in still sends the person on to enter the code they have. `userId` is empty for
+   * an address with no account yet.
    */
   async function mayMailOpenSignup(ctx, userId) {
     if (userId) {
@@ -95,8 +99,8 @@ export function registerAuthRoutes(router, config) {
           where user_id = $1 and purpose = 'verify_email' and created_date > now() - interval '1 day'`,
         [userId]
       );
-      if (sent.just_now) return false;
-      if (sent.hour >= 3 || sent.day >= 8) throw new HttpError(429, TOO_MANY_EMAILS, { retryAfter: 3600 });
+      if (sent.just_now) return { send: false, why: 'recent' };
+      if (sent.hour >= 3 || sent.day >= 8) return { send: false, why: 'address', retryAfter: 3600 };
     }
     const now = Date.now();
     if (now - openMails.since >= HOUR_MS) {
@@ -110,12 +114,16 @@ export function registerAuthRoutes(router, config) {
         new Error(`Open sign-up reached its ceiling of ${openMailCeiling} verification emails in an hour. New sign-ups without an invite code are refused until the hour is up.`),
         { method: 'POST', pathname: '/api/auth/register' }
       );
-      throw new HttpError(429, 'Sign-up is busy right now. Try again in an hour.', {
-        retryAfter: Math.max(1, Math.ceil((openMails.since + HOUR_MS - now) / 1000)),
-      });
+      return { send: false, why: 'busy', retryAfter: Math.max(1, Math.ceil((openMails.since + HOUR_MS - now) / 1000)) };
     }
     openMails.count += 1;
-    return true;
+    return { send: true };
+  }
+
+  // The refusal a sign-up gets when its email may not be sent. ('recent' is not a refusal.)
+  function refuseMail(decision) {
+    if (decision.why === 'address') throw new HttpError(429, TOO_MANY_EMAILS, { retryAfter: decision.retryAfter });
+    if (decision.why === 'busy') throw new HttpError(429, 'Sign-up is busy right now. Try again in an hour.', { retryAfter: decision.retryAfter });
   }
 
   router.add('POST', '/api/auth/register', async (ctx) => {
@@ -144,7 +152,8 @@ export function registerAuthRoutes(router, config) {
       throw new HttpError(409, 'An account with that email already exists. Log in instead.');
     }
     // Checked before anything is written, so a refused sign-up changes nothing.
-    const mail = inviteCode ? true : await mayMailOpenSignup(ctx, existing?.id);
+    const mail = inviteCode ? { send: true } : await mayMailOpenSignup(ctx, existing?.id);
+    refuseMail(mail);
     const hash = await hashPassword(password);
     let user;
     if (existing) {
@@ -162,7 +171,7 @@ export function registerAuthRoutes(router, config) {
         [email, hash, fullName, inviteCode]
       );
     }
-    return { ok: true, ...(mail ? await sendVerifyCode(ctx, user) : {}) };
+    return { ok: true, ...(mail.send ? await sendVerifyCode(ctx, user) : {}) };
   });
 
   router.add('POST', '/api/auth/verify-otp', async (ctx) => {
@@ -207,7 +216,11 @@ export function registerAuthRoutes(router, config) {
     mailLimit(`mail:${email}`);
     const user = await findByEmail(ctx.db, email);
     if (!user || user.email_verified_at) return { ok: true };
-    if (isOpen(ctx, user) && !(await mayMailOpenSignup(ctx, user.id))) return { ok: true };
+    if (isOpen(ctx, user)) {
+      const mail = await mayMailOpenSignup(ctx, user.id);
+      refuseMail(mail);
+      if (!mail.send) return { ok: true };
+    }
     return { ok: true, ...(await sendVerifyCode(ctx, user)) };
   });
 
@@ -221,8 +234,17 @@ export function registerAuthRoutes(router, config) {
       : await burnPasswordCheck(ctx.body.password);
     if (!ok) throw new HttpError(401, 'Invalid email or password.');
     if (!user.email_verified_at) {
-      const mail = isOpen(ctx, user) ? await mayMailOpenSignup(ctx, user.id) : true;
-      const dev = mail ? await sendVerifyCode(ctx, user) : {};
+      // The password was right, so the person is always told to confirm their email. Whether
+      // a new code goes out is a separate matter: an open sign-up that has had its share is
+      // sent none, and the message must not say otherwise. (Both begin "Verify your email":
+      // the phone app recognises this reply by those words.)
+      const mail = isOpen(ctx, user) ? await mayMailOpenSignup(ctx, user.id) : { send: true };
+      if (!mail.send) {
+        throw new HttpError(403, 'Verify your email first. Enter the latest code we emailed you; you can ask for a new one later.', {
+          needs_verification: true,
+        });
+      }
+      const dev = await sendVerifyCode(ctx, user);
       throw new HttpError(403, 'Verify your email first. We just sent you a new code.', {
         needs_verification: true,
         ...dev,

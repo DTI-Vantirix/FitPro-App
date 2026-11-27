@@ -2931,6 +2931,12 @@ describe('AccessGrant is history only', () => {
 describe('open sign-up cannot be used to send mail', () => {
   let open; // SUBSCRIPTIONS=on
   const BUSY_INBOX = { status: 429, data: { error: 'Too many emails requested. Try again later.' } };
+  // Signing in before confirming: what is said when a code went out, and when none did.
+  const CODE_SENT = { status: 403, error: 'Verify your email first. We just sent you a new code.' };
+  const NO_CODE_SENT = {
+    status: 403,
+    data: { error: 'Verify your email first. Enter the latest code we emailed you; you can ask for a new one later.', needs_verification: true },
+  };
   const from = (address) => ({ 'X-Forwarded-For': address });
   const post = (app, path, body, address) => call('POST', path, { body, headers: address ? from(address) : {}, origin: app.origin });
   const register = (app, email, address, extra = {}) => post(app, '/api/auth/register', { email, password: 'longenough1', ...extra }, address);
@@ -2964,10 +2970,8 @@ describe('open sign-up cannot be used to send mail', () => {
     assert.ok(first.data.dev_code);
     assert.deepEqual(await resend(open, email), { status: 200, data: { ok: true } }, 'the same answer, and no new code');
     assert.deepEqual(await register(open, email, '203.0.113.1'), { status: 200, data: { ok: true } });
-    const unverified = await login(open, email);
-    assert.equal(unverified.status, 403);
-    assert.equal(unverified.data.needs_verification, true);
-    assert.equal(unverified.data.dev_code, undefined);
+    // signing in still says the email needs confirming, and does not claim a code was sent
+    assert.deepEqual(await login(open, email), NO_CODE_SENT);
     assert.equal(await codesSent(email), 1);
     // the one code that was mailed still works
     const ok = await post(open, '/api/auth/verify-otp', { email, otp_code: first.data.dev_code, password: 'longenough1' });
@@ -2983,13 +2987,14 @@ describe('open sign-up cannot be used to send mail', () => {
     assert.ok(second.data.dev_code, 'a resend counts as the second');
     await later(email, '2 minutes');
     const third = await login(open, email);
-    assert.equal(third.status, 403);
+    assert.deepEqual([third.status, third.data.error, third.data.needs_verification], [CODE_SENT.status, CODE_SENT.error, true]);
     assert.ok(third.data.dev_code, 'the sign-in that re-sends a code is the third');
     await later(email, '2 minutes');
 
     assert.deepEqual(await resend(open, email), BUSY_INBOX);
     assert.deepEqual(await register(open, email, '203.0.113.2'), BUSY_INBOX);
-    assert.deepEqual(await login(open, email), BUSY_INBOX);
+    // signing in is not refused for it: the person is sent to enter the code they have
+    assert.deepEqual(await login(open, email), NO_CODE_SENT);
     assert.equal(await codesSent(email), 3);
     // an hour on, there is room again
     await later(email, '1 hour');
@@ -3039,6 +3044,7 @@ describe('open sign-up cannot be used to send mail', () => {
       assert.equal((await db.query(`select id from users where email = 'crowd.3@example.com'`, [])).length, 0, 'no account is made');
       await later('crowd.0@example.com', '2 minutes');
       assert.deepEqual(await resend(small, 'crowd.0@example.com'), BUSY, 'a resend is one of those emails too');
+      assert.deepEqual(await login(small, 'crowd.0@example.com'), NO_CODE_SENT, 'and so is the sign-in that would re-send one');
       // a sign-up with an invite code is not part of the ceiling
       assert.equal((await register(small, 'crowd.invited@example.com', '203.0.113.71', { invite_code: await mintCode() })).status, 200);
       // the owner is told, once

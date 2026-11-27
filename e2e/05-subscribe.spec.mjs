@@ -19,6 +19,9 @@ async function signUpWithoutCode(target, account) {
   const answer = await submitSignUp(target, { ...account, inviteCode: '' });
   expect(answer.status).toBe(200);
   await expect(target.getByRole('heading', { name: 'Verify your email' })).toBeVisible();
+  // a code went out a moment ago, so Resend says when it can be asked for again
+  await expect(target.getByText(/You can ask for a new one in \d+ seconds?\./)).toBeVisible();
+  await expect(target.getByRole('button', { name: 'Resend' })).toHaveCount(0);
   await target.locator('input[autocomplete="one-time-code"]').fill(answer.body.dev_code);
   await target.getByRole('button', { name: 'Verify' }).click();
 }

@@ -61,7 +61,7 @@ export default function SignUp() {
 
   const resend = () => attempt(async () => {
     await resendEmailCode(email);
-    setNotice('If that address is waiting to be confirmed, a new code is on its way.');
+    setNotice('If that address is waiting to be confirmed, a new code is on its way. If you asked less than a minute ago, use the code you already have.');
   });
 
   const detailsReady = email.trim().includes('@') && password.length >= 8 && inviteCode.trim().length > 0;
