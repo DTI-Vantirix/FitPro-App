@@ -69,8 +69,8 @@ routes the website uses; nothing here is new on the server. All need the bearer 
 | The signed-in user | `GET /api/auth/me` -> `{ id, email, ... }` |
 | Resend the sign-up code | `POST /api/auth/resend-otp { email }` |
 | Delete the account | `DELETE /api/auth/me { password }` -> `{ ok: true, deleted: true }`; `401` when the password is wrong. Removes the user and every record they own |
-| Profile (`hr_max`, `threshold_sec`) | `POST /api/entities/Profile/query`, then `POST /api/entities/Profile` or `PUT /api/entities/Profile/:id` |
-| Pace zones | `POST /api/entities/PaceZone/query`; first-time setup writes the five zones with `PUT` or `POST /api/entities/PaceZone/bulk` (and `DELETE /api/entities/PaceZone/:id` to clear a non-standard set), exactly as the website's onboarding does. The Pace zones screen rebuilds them the same way, and changes one zone's name and pace range with `PUT /api/entities/PaceZone/:id { name, fast_sec, slow_sec }` (the website's zone editor; nothing else about the zone is sent). The app also reads `intensity`, `purpose` and `feel` to show them |
+| Profile | `POST /api/entities/Profile/query`, then `POST /api/entities/Profile` or `PUT /api/entities/Profile/:id`. Typed in, the app sends `{ hr_max }` or `{ hr_max, threshold_sec }`. Estimated from age, sex, height and weight it sends what the website's profile form sends: `{ age, sex, height_in, weight_lb, hr_max, vo2max, auto_threshold_sec }`, plus `threshold_sec` (the runner's own pace, else the estimate) when that pace changes. `sex` is `male` or `female`. The estimate is the website's `estimateZones`, ported to `native/src/run/zones.ts` and tested against its numbers. Unlike the website, the app rebuilds the five zones only when there are none or the threshold pace changed |
+| Pace zones | `POST /api/entities/PaceZone/query`; first-time setup writes the five zones with `PUT` or `POST /api/entities/PaceZone/bulk` (and `DELETE /api/entities/PaceZone/:id` to clear a non-standard set), exactly as the website's onboarding does. The Pace zones screen rebuilds them the same way, and changes one zone's name and pace range with `PUT /api/entities/PaceZone/:id { name, fast_sec, slow_sec }` (the website's zone editor; nothing else about the zone is sent). It adds a zone of the runner's own with `POST /api/entities/PaceZone { name, fast_sec, slow_sec, color, sort_order }` (the record the website's editor creates: no `zone_number` and no heart-rate band, `color` one of the five ramp colours, `sort_order` the number of zones plus one) and deletes any zone with `DELETE /api/entities/PaceZone/:id` after a confirmation. A rebuild removes zones that were added, on the website too. The app also reads `intensity`, `purpose` and `feel` to show them |
 | Saved routes | `POST /api/entities/Route/query` to list them. The route builder saves one with `POST /api/entities/Route { name, distance_mi, points: [{ lat, lng, offroad? }], path: [{ lat, lng }], target_zone_id, target_zone_name }` (`distance_mi` to 2 decimals; `path` is the snapped line, or the points when there is none; no zone is `""`), and the Routes tab removes one with `DELETE /api/entities/Route/:id`. Same records and fields as the website's builder |
 | Road-following line while drawing a route | `POST /api/functions/snapRoute { points: [{ lat, lng, offroad? }] }` -> `{ snapped, path: [{ lat, lng }], distance_mi }`. 2 to 40 waypoints (`400` otherwise). A waypoint with `offroad: true` is joined to the one before by a straight line; the rest follow roads. `snapped: false` means a road section could not be routed and straight lines were used: the route still saves. The app sends one request per change and uses only the answer to the latest |
 | The runner's runs (read only) | `POST /api/entities/Run/query { q, sort: "-started_at", limit }` (default 40, at most 200), the query the website's Home and Analytics pages make. The app reads `id`, `route_id`, `route_name`, `distance_mi`, `duration_sec`, `avg_pace_sec`, `started_at` (`created_date` when a run has no start time), `target_zone_name`, `in_zone_pct`, `avg_hr`, `source`, `external_id`. One query in `native/src/run/api.ts` makes the call, behind two helpers: `listServerRuns` (the Today tab asks for 40 and the Analytics tab for 200) and `listRunsToShare`, which also reads each run's `points` for the post composer (8, or 40 when opened for one run). Today joins them with the runs on the phone that have not uploaded yet, matching on `external_id` (or the `run_id` `ingestActivity` returned) so no run is counted twice |
@@ -149,8 +149,45 @@ Photo and video backgrounds, what the phone does and does not do:
 
 The invite link and the link in a shared post are `{API_URL}/friends?add=<handle>` and
 `{API_URL}/feed?post=<id>`: the hosted API serves the website at the same address. They
-are handed to the phone's share sheet and never fetched by the app. The app does not open
-these links itself (no deep link is registered).
+are handed to the phone's share sheet and never fetched by the app.
+
+### Invite links that open the app
+
+Added 2026-11-27. A friend invite link opens the app when it is installed and the website
+otherwise. A post link (`/feed?post=<id>`) and every other page still open in the browser.
+
+| What | Route |
+| ---- | ----- |
+| iOS universal links | `GET /.well-known/apple-app-site-association` -> `200`, `Content-Type: application/json`, no sign-in, no redirect: `{ "applinks": { "details": [{ "appIDs": ["LA4YX3HF32.com.vantrarun.app"], "components": [{ "/": "/friends", "?": { "add": "?*" }, "comment": "..." }] }] } }`. Only `/friends` with a non-empty `add` is handed to the app. The app id comes from `IOS_APP_ID` (comma separated for more than one); that value is the default |
+| Android app links | `GET /.well-known/assetlinks.json` -> `200`, `Content-Type: application/json`: `[]` until `ANDROID_CERT_SHA256` is set (comma-separated SHA-256 fingerprints of the signing certificate, colons optional), then `[{ "relation": ["delegate_permission/common.handle_all_urls"], "target": { "namespace": "android_app", "package_name": "com.vantrarun.app", "sha256_cert_fingerprints": [...] } }]` |
+
+Both are served by `server/src/well-known.js`, ahead of the website; any other
+`/.well-known/` path is a `404`. The app's side is in `native/app.json`:
+`ios.associatedDomains: ["applinks:vantrarun.onrender.com"]`, an Android `intentFilters`
+entry (`autoVerify`, `https`, that host, path `/friends`) and the scheme `vantrarun`, so
+`vantrarun://friends?add=<handle>` works too. **The host is written into `app.json`**: if the
+site moves, those two entries and the links must change together (see
+`docs/launch-checklist.md`). Android can only match the path, not the query, so there any
+`https://<site>/friends` link opens the app's Friends screen.
+
+What the app does with one (`native/src/social/invite-link.ts`, `native/app/friends.tsx`),
+which is what the website's Friends page does:
+
+- The handle is cleaned first (`cleanHandle`: lower case, `a-z 0-9 . _`, 24 characters at
+  most) and is only ever sent as a value in the body of `SocialProfile/query`; it is never
+  put into an address.
+- Signed in and set up: the profile is looked up, and one friend request is sent with the
+  "Send a friend request" calls above (accepted at once only when that account is public).
+  The screen says whose request is being sent and what came of it.
+- Nothing is sent when the handle is the runner's own, when nobody has that handle, or when
+  a connection between the two already exists in either direction (the screen says which).
+  A link is acted on once per account while the app stays open, so drawing the screen again,
+  cancelling the request or opening the same link again does not send a second one; after a
+  restart the existing connection is what stops it.
+- Signed out, consent not given, no invite, or zones not set: the access gate keeps the
+  cleaned handle in memory (never on disk, 30 minutes at most) while the person goes through
+  those steps, then sends them to Friends with it. The destination is fixed; a link cannot
+  choose where the app goes. A run being started, recorded or reviewed is never interrupted.
 
 Feed and friend data is not stored on the phone. With no connection those screens say so.
 

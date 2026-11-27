@@ -12,6 +12,9 @@
       "icon": "./assets/icon.png",
       "supportsTablet": false,
       "bundleIdentifier": "com.vantrarun.app",
+      "associatedDomains": [
+        "applinks:vantrarun.onrender.com"
+      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
@@ -24,6 +27,23 @@
     },
     "android": {
       "package": "com.vantrarun.app",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "vantrarun.onrender.com",
+              "path": "/friends"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
       "permissions": [
         "android.permission.health.READ_EXERCISE",
         "android.permission.health.READ_DISTANCE",

@@ -62,6 +62,48 @@ await test('profile: only the caller\'s own, created or updated', async () => {
   await api.saveProfile('tok', 'u1', { hr_max: 190, threshold_sec: 510 });
   assert.deepEqual([last().method, last().url], ['PUT', `${BASE}/api/entities/Profile/p1`]);
 });
+await test('profile: the body numbers and estimates the website stores are read and saved as they are', async () => {
+  const stored = { id: 'p1', age: 35, sex: 'male', height_in: '70', weight_lb: 170.5, hr_max: 184, vo2max: 43.3, threshold_sec: 500, auto_threshold_sec: 551, created_by_id: 'u1' };
+  reset(() => ({ status: 200, data: { items: [stored] } }));
+  assert.deepEqual(await api.loadProfile('tok', 'u1'),
+    { id: 'p1', hr_max: 184, threshold_sec: 500, age: 35, sex: 'male', height_in: 70, weight_lb: 170.5, vo2max: 43.3, auto_threshold_sec: 551 });
+  // A profile made by the phone before, or with a value that is not usable: null, never a guess.
+  reset(() => ({ status: 200, data: { items: [{ id: 'p2', hr_max: 190, threshold_sec: 510, sex: 'x', age: 'old' }] } }));
+  assert.deepEqual(await api.loadProfile('tok', 'u1'),
+    { id: 'p2', hr_max: 190, threshold_sec: 510, age: null, sex: null, height_in: null, weight_lb: null, vo2max: null, auto_threshold_sec: null });
+  const values = { age: 35, sex: 'male', height_in: 70, weight_lb: 170, hr_max: 184, vo2max: 43.3, threshold_sec: 551, auto_threshold_sec: 551 };
+  reset((c) => (c.url.endsWith('/query') ? { status: 200, data: { items: [stored] } } : { status: 200, data: { id: 'p1' } }));
+  await api.saveProfile('tok', 'u1', values);
+  assert.deepEqual([last().method, last().url, last().body], ['PUT', `${BASE}/api/entities/Profile/p1`, values]);
+  reset((c) => (c.url.endsWith('/query') ? { status: 200, data: { items: [] } } : { status: 201, data: { id: 'p9' } }));
+  await api.saveProfile('tok', 'u1', values);
+  assert.deepEqual([last().method, last().url, last().body], ['POST', `${BASE}/api/entities/Profile`, values]);
+});
+await test('createZone sends the record the website\'s zone editor creates', async () => {
+  const values = { name: 'Tempo', fast_sec: 450, slow_sec: 480, color: '#9FCC00', sort_order: 6 };
+  reset(() => ({ status: 201, data: { id: 'z6', ...values, zone_number: null, hr_min_pct: null, hr_max_pct: null } }));
+  const zone = await api.createZone('tok', values);
+  assert.equal(calls.length, 1);
+  assert.deepEqual([last().method, last().url, last().body, last().headers.Authorization],
+    ['POST', `${BASE}/api/entities/PaceZone`, values, 'Bearer tok']);
+  assert.deepEqual(zone, { id: 'z6', name: 'Tempo', zone_number: 0, fast_sec: 450, slow_sec: 480, hr_min_pct: null, hr_max_pct: null, color: '#9FCC00' });
+  // Nothing but those five fields goes out, whatever the caller holds.
+  await api.createZone('tok', { ...values, id: 'x', zone_number: 3, created_by_id: 'u2' });
+  assert.deepEqual(last().body, values);
+  reset(() => ({ status: 400, data: { error: 'One of the values is not allowed.' } }));
+  await assert.rejects(api.createZone('tok', values), (e) => e.status === 400 && /not allowed/.test(e.message));
+  reset(() => ({ status: 201, data: {} }));
+  await assert.rejects(api.createZone('tok', values), /did not confirm/);
+});
+await test('deleteZone removes one zone by id', async () => {
+  reset(() => ({ status: 200, data: { ok: true } }));
+  await api.deleteZone('tok', 'z 6');
+  assert.equal(calls.length, 1);
+  assert.deepEqual([last().method, last().url, last().body, last().headers.Authorization],
+    ['DELETE', `${BASE}/api/entities/PaceZone/z%206`, undefined, 'Bearer tok']);
+  reset(() => ({ status: 403, data: { error: "You can't delete this PaceZone." } }));
+  await assert.rejects(api.deleteZone('tok', 'z9'), (e) => e.status === 403 && /can't delete/.test(e.message));
+});
 await test('zones: five existing zones are updated in place', async () => {
   const existing = [1, 2, 3, 4, 5].map((n) => ({ id: `z${n}`, zone_number: n, name: `Zone ${n}`, fast_sec: 500, slow_sec: 600, hr_min_pct: 50, hr_max_pct: 60 }));
   reset((c) => (c.url.endsWith('/query') ? { status: 200, data: { items: existing } } : { status: 200, data: [] }));

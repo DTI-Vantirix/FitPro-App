@@ -59,6 +59,12 @@ little to learn or upgrade.
   `S3_*` settings are present (requests signed here, no SDK).
 - `src/errors.js`: error reports kept in our own table (`client_errors`): crashes the
   phone app posts to `POST /api/client-errors`, and the API's own unexpected errors.
+- `src/well-known.js`: the two public files that let a friend invite link
+  (`/friends?add=<handle>`) open the phone app instead of the website:
+  `GET /.well-known/apple-app-site-association` (iOS; app id from `IOS_APP_ID`) and
+  `GET /.well-known/assetlinks.json` (Android; an empty list until `ANDROID_CERT_SHA256`
+  is set). They are matched before the website's single-page fallback, and any other
+  `/.well-known/` path is a 404 rather than the website's HTML.
 - `src/auth/bootstrap.js`: creates the first admin from `ADMIN_EMAIL` / `ADMIN_PASSWORD`
   on a host with no shell. It never changes an existing account.
 - `migrations/`: numbered SQL files, applied in order by `npm run migrate` (and on

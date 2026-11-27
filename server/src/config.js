@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { certFingerprints } from './well-known.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const SERVER_ROOT = path.resolve(here, '..');
@@ -52,6 +53,14 @@ export function loadConfig(env = process.env) {
     maxUploadBytes: (Number(env.MAX_UPLOAD_MB) || 50) * 1024 * 1024,
     // Built web app to serve from this process (optional; handy for single-box deploys).
     webDist: env.WEB_DIST ? path.resolve(env.WEB_DIST) : '',
+    // Friend invite links that open the phone app (src/well-known.js, native/app.json).
+    appLinks: {
+      // <Apple team id>.<bundle id>, comma separated if there is ever more than one.
+      iosAppIds: list(env.IOS_APP_ID || 'LA4YX3HF32.com.vantrarun.app'),
+      androidPackage: 'com.vantrarun.app',
+      // SHA-256 fingerprint(s) of the Android signing certificate. Empty until a build exists.
+      androidCertSha256: certFingerprints(env.ANDROID_CERT_SHA256),
+    },
     mail: {
       from: env.MAIL_FROM || 'VantraRun <no-reply@vantrarun.local>',
       resendApiKey: env.RESEND_API_KEY || '',

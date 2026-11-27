@@ -128,7 +128,7 @@ for (const name of PURE) {
   assert(existsSync(join(native, 'scripts')), 'scripts folder missing');
 }
 // The social rules (audiences, the post record, handles, challenges) are plain TypeScript too.
-for (const name of ['logic', 'challenges', 'media']) {
+for (const name of ['logic', 'challenges', 'media', 'invite-link']) {
   const text = readFileSync(join(native, `src/social/${name}.ts`), 'utf8');
   for (const [, spec] of text.matchAll(importPattern)) assert(spec.startsWith('./'), `src/social/${name}.ts must stay pure but imports ${spec}.`);
 }
@@ -199,6 +199,26 @@ for (const blocked of ['android.permission.READ_EXTERNAL_STORAGE', 'android.perm
 }
 const videoPlugin = cfg.expo.plugins.find((plugin) => plugin === 'expo-video' || (Array.isArray(plugin) && plugin[0] === 'expo-video'));
 assert(videoPlugin === 'expo-video', 'expo-video is configured with no options: no background playback, no picture in picture.');
+// ---- Friend invite links that open the app (owner, 2026-11-27) ----
+// The app claims one host, the one it is built against, and on it only what the server's
+// /.well-known files hand over: /friends. No other host or path may be added by accident.
+const hostedAt = new URL(JSON.parse(readFileSync(join(native, 'eas.json'), 'utf8')).build.production.env.EXPO_PUBLIC_API_URL).host;
+assert.deepEqual(cfg.expo.ios.associatedDomains, [`applinks:${hostedAt}`], 'iOS may open links to the hosted site only (applinks, nothing else).');
+assert.deepEqual(cfg.expo.android.intentFilters, [{ action: 'VIEW', autoVerify: true, data: [{ scheme: 'https', host: hostedAt, path: '/friends' }], category: ['BROWSABLE', 'DEFAULT'] }],
+  'Android may open only verified https links to /friends on the hosted site.');
+assert(cfg.expo.scheme === 'vantrarun', 'The custom scheme is vantrarun.');
+// A link can be written by anyone: its handle is cleaned before use, the request it leads to is
+// decided by inviteStep, and the gate's way back after sign-in is a fixed screen, never the link's choice.
+const inviteLinks = readFileSync(join(native, 'src/social/invite-link.ts'), 'utf8');
+const friendsScreen = readFileSync(join(native, 'app/friends.tsx'), 'utf8');
+assert(inviteLinks.includes("return typeof first === 'string' ? cleanHandle(first) : '';") && inviteLinks.includes("return { pathname: '/friends', params: { add: handle } };"),
+  'An invite link\'s handle is cleaned, and the only place it can lead after sign-in is the Friends screen.');
+assert(friendsScreen.includes("const linked = inviteHandle(useLocalSearchParams<{ add?: string | string[] }>().add);") && friendsScreen.split('useLocalSearchParams').length === 3,
+  'The Friends screen reads the add parameter once, through inviteHandle.');
+assert(/const first = inviteStep\(\{ add: linked,[\s\S]*markInviteHandled\(who\.id, first\.handle\);[\s\S]*if \(next\.kind === 'send'\) \{[\s\S]*await sendRequest\(/.test(friendsScreen),
+  'A link sends a request only when inviteStep says so, after being marked as handled.');
+assert(gateSource.includes("if (turnedAway && path === '/friends') rememberInvite(add, Date.now());") && gateSource.includes('const invited = setup ? inviteRedirect(path, Date.now()) : null;'),
+  'The gate keeps an invite link only through rememberInvite and returns to it only through inviteRedirect.');
 const autoPolicy = readFileSync(join(native, 'src/ingestion/auto-import-policy.ts'), 'utf8');
 assert(/AUTO_HEALTH_IMPORT_ENABLED = false;/.test(autoPolicy), 'Automatic health import must stay off in Stage 1 (duplicate runs).');
 assert(readFileSync(join(native, 'src/ingestion/manual-import-panel.tsx'), 'utf8').includes('AUTO_HEALTH_IMPORT_ENABLED'), 'The import panel must honour the automatic-import switch.');

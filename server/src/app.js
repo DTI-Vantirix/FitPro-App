@@ -8,6 +8,7 @@ import { createEntityService } from './entities/service.js';
 import { registerFunctionRoutes } from './functions/index.js';
 import { HttpError, REPLY, Router, readJson, sendJson } from './lib/http.js';
 import { HANDLED, registerUploadRoutes, serveFile } from './uploads.js';
+import { registerWellKnownRoutes } from './well-known.js';
 
 const STATIC_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -49,6 +50,7 @@ export function createApp({ db, config, registry }) {
   registerFunctionRoutes(router);
   registerUploadRoutes(router);
   registerErrorRoutes(router);
+  registerWellKnownRoutes(router);
 
   const cors = (req, res) => {
     const origin = req.headers.origin;
@@ -101,7 +103,10 @@ export function createApp({ db, config, registry }) {
 
       const match = router.match(req.method, url.pathname);
       if (!match) {
-        if (config.webDist && req.method === 'GET' && !url.pathname.startsWith('/api/')) {
+        // The website answers every other page; a well-known file that does not exist is a
+        // plain 404, never the app's HTML.
+        const ownPage = !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/.well-known/');
+        if (config.webDist && req.method === 'GET' && ownPage) {
           await serveWeb(res, url.pathname);
           return;
         }
