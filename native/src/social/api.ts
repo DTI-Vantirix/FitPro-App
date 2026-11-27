@@ -4,10 +4,14 @@
  * goes to any other host. Who may read or change a record is decided by the server.
  * Run and workout records are never touched from here: a post is made from a run that
  * src/run/api.ts has already read.
+ *
+ * A post's photo or video goes to the server's own upload route (uploadMedia) and nowhere
+ * else, and only when the composer calls it: after the runner taps Post.
  */
-import { APP_AUTH_URL, FUNCTIONS_URL } from '../config';
+import { API_URL, APP_AUTH_URL, FUNCTIONS_URL, UPLOADS_URL } from '../config';
 import { ApiError, entityUrl, items, num, record, request, str, toPath } from '../run/api';
 import { visibleChallenges, type Board, type BoardRow, type Challenge, type ChallengeRecord } from './challenges';
+import { BAD_TYPE, UPLOAD_TYPES, mediaUrl, uploadPercent } from './media';
 import { HANDLE_TAKEN, defaultHandleBase, requestStatusFor, visiblePosts, type Connection, type Post, type ProfileValues, type SocialProfile } from './logic';
 
 export type Account = { id: string; email: string; fullName: string };
@@ -102,7 +106,14 @@ function toPost(row: Record<string, unknown>): Post | null {
     visibility: text(row.visibility) || 'friends',
     authorHandle: text(row.author_handle),
     authorName: text(row.author_name),
+    ...background(row),
   };
+}
+
+function background(row: Record<string, unknown>): Pick<Post, 'backgroundType' | 'backgroundUrl'> {
+  const type = row.background_type;
+  const url = text(row.background_url);
+  return (type === 'photo' || type === 'video') && url ? { backgroundType: type, backgroundUrl: url } : { backgroundType: 'none', backgroundUrl: '' };
 }
 
 const posts = (rows: unknown): Post[] =>
@@ -125,6 +136,55 @@ export async function createPost(token: string, payload: Record<string, unknown>
   const post = toPost(record(await request('POST', entityUrl('Post'), { token, body: payload })));
   if (!post) throw new ApiError('The server did not confirm the post. Check your feed before posting it again.', 0);
   return post;
+}
+
+/** Sends one file's bytes. The app's sender is src/social/upload-file.ts; tests pass their own. */
+export type SendFile = (request: {
+  url: string;
+  uri: string;
+  mimeType: string;
+  headers: Record<string, string>;
+  onProgress?: (sentBytes: number, totalBytes: number) => void;
+  signal?: AbortSignal;
+}) => Promise<{ status: number; body: string }>;
+
+/** Uploads the photo or video of a post the way the website does: the file's own bytes as
+ * the body of a POST to the upload route (UPLOADS_URL), its type in Content-Type, the sign-in as a bearer token.
+ * Returns the address the server stored it at, which is what the post then names. Nothing
+ * about the file but its bytes and type is sent: no name, no album, no place. */
+export async function uploadMedia(token: string, file: { uri: string; mimeType: string }, send: SendFile,
+  options: { onProgress?: (percent: number) => void; signal?: AbortSignal } = {}): Promise<string> {
+  if (!API_URL) throw new ApiError('EXPO_PUBLIC_API_URL is not set. Add it to native/.env and restart Expo.', 0);
+  if (!token) throw new ApiError('You are signed out. Sign in again.', 0);
+  if (!file.uri || !UPLOAD_TYPES[file.mimeType]) throw new ApiError(BAD_TYPE, 0);
+  const { onProgress, signal } = options;
+  let reply: { status: number; body: string };
+  try {
+    reply = await send({
+      url: UPLOADS_URL,
+      uri: file.uri,
+      mimeType: file.mimeType,
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}`, 'Content-Type': file.mimeType },
+      ...(onProgress ? { onProgress: (sent: number, total: number) => onProgress(uploadPercent(sent, total)) } : {}),
+      ...(signal ? { signal } : {}),
+    });
+  } catch {
+    if (signal?.aborted) throw new ApiError('The upload was cancelled.', 0);
+    throw new ApiError("Can't reach VantraRun. Check your connection and try again.", 0);
+  }
+  let data: unknown = null;
+  try {
+    data = reply.body ? JSON.parse(reply.body) : null;
+  } catch {
+    data = null;
+  }
+  if (reply.status < 200 || reply.status >= 300) {
+    const error = record(data).error;
+    throw new ApiError(typeof error === 'string' && error ? error : reply.status === 413 ? 'That upload is too large.' : `Request failed (${reply.status}).`, reply.status, data);
+  }
+  const fileUrl = record(data).file_url;
+  if (typeof fileUrl !== 'string' || !mediaUrl(API_URL, fileUrl)) throw new ApiError('The server did not say where it stored the file. Try again.', 0);
+  return fileUrl;
 }
 
 export async function deletePost(token: string, postId: string): Promise<void> {

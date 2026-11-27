@@ -72,6 +72,28 @@ await test('a post goes to the audience picked and never to an unknown one', () 
   assert.throws(() => s.buildPost({ run: run(), caption: '', audience: undefined, profile: profile() }), /audience/i);
 });
 
+await test('a post with a background carries the website\'s two fields: the type and the address', () => {
+  const base = { run: run(), caption: '', audience: 'friends', profile: profile() };
+  const plain = s.buildPost(base);
+  const photo = s.buildPost({ ...base, background: { type: 'photo', url: '/backgrounds/trees.jpg' } });
+  const video = s.buildPost({ ...base, background: { type: 'video', url: '/uploads/0b0e6c1e-6f0a-4a57-9a43-5d0b8f0f2a11.mp4' } });
+  assert.deepEqual([photo.background_type, photo.background_url], ['photo', '/backgrounds/trees.jpg']);
+  assert.deepEqual([video.background_type, video.background_url], ['video', '/uploads/0b0e6c1e-6f0a-4a57-9a43-5d0b8f0f2a11.mp4']);
+  // Nothing else about the record changes, and no field is added: no file name, size, place or time of the media.
+  assert.deepEqual({ ...photo, background_type: 'none', background_url: '' }, plain);
+  assert.deepEqual(Object.keys(video), Object.keys(plain));
+  assert.deepEqual([s.buildPost({ ...base, background: { type: 'none', url: '' } }).background_type, s.buildPost({ ...base, background: undefined }).background_url], ['none', '']);
+});
+
+await test('a post never names a background it does not have, or a kind the server does not know', () => {
+  const base = { run: run(), caption: '', audience: 'friends', profile: profile() };
+  assert.throws(() => s.buildPost({ ...base, background: { type: 'photo', url: '' } }), /background/i);
+  assert.throws(() => s.buildPost({ ...base, background: { type: 'video', url: '   ' } }), /background/i);
+  assert.throws(() => s.buildPost({ ...base, background: { type: 'gif', url: '/uploads/x.gif' } }), /background/i);
+  // "None" never carries an address, even if one is left over from an earlier choice.
+  assert.equal(s.buildPost({ ...base, background: { type: 'none', url: '/uploads/left-over.jpg' } }).background_url, '');
+});
+
 await test('gym is hidden: workout posts are not shown', () => {
   assert.deepEqual(s.visiblePosts([{ id: 'a', kind: 'run' }, { id: 'b', kind: 'workout' }, { id: 'c', kind: 'run' }]).map((p) => p.id), ['a', 'c']);
   assert.deepEqual(s.visiblePosts(null), []);

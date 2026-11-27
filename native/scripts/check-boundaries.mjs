@@ -128,19 +128,77 @@ for (const name of PURE) {
   assert(existsSync(join(native, 'scripts')), 'scripts folder missing');
 }
 // The social rules (audiences, the post record, handles, challenges) are plain TypeScript too.
-for (const name of ['logic', 'challenges']) {
+for (const name of ['logic', 'challenges', 'media']) {
   const text = readFileSync(join(native, `src/social/${name}.ts`), 'utf8');
   for (const [, spec] of text.matchAll(importPattern)) assert(spec.startsWith('./'), `src/social/${name}.ts must stay pure but imports ${spec}.`);
 }
-// Social calls go to the VantraRun API only, and posts carry no photo or video from the phone yet.
+// Social calls go to the VantraRun API only.
 for (const file of sourceFiles(join(native, 'src/social'))) {
   assert(!/https?:\/\//.test(readFileSync(file, 'utf8')), `${file}: social code may only talk to the VantraRun API.`);
 }
 const socialLogic = readFileSync(join(native, 'src/social/logic.ts'), 'utf8');
 assert(socialLogic.includes("return profile?.visibility === 'public' ? 'public' : 'friends';"), 'The default audience of a post must stay the website\'s: friends, public only for a public account.');
-assert(socialLogic.includes("background_type: 'none'") && socialLogic.includes("map((p) => ({ lat: p.lat, lng: p.lng }))"), 'A post sends no media and only lat/lng for its route points.');
-assert(!Object.keys(JSON.parse(readFileSync(join(native, 'package.json'), 'utf8')).dependencies).some((name) => /image-picker|media-library|expo-camera|document-picker/i.test(name)),
-  'No photo, camera or media-library package: posts with media are not built in the app.');
+assert(socialLogic.includes("map((p) => ({ lat: p.lat, lng: p.lng }))"), 'A post sends only lat/lng for its route points.');
+// ---- Posts with a photo or video background (owner, 2026-11-27) ----
+// Of its media a post carries two fields, the website's: the kind and the address the server stored it at.
+assert(socialLogic.includes("background_type: none ? 'none' : background.type,") && socialLogic.includes("background_url: none ? '' : background.url,"),
+  'A post names its background by kind and address only, and "none" never carries an address.');
+// Exactly two media packages: the system picker and the video player. Anything that reads the
+// whole library, runs its own camera, picks arbitrary documents or records sound stays out.
+const deps = Object.keys(pkg.dependencies);
+assert(/^~58\./.test(pkg.dependencies['expo-image-picker'] ?? '') && /^~58\./.test(pkg.dependencies['expo-video'] ?? ''),
+  'Media posts use expo-image-picker and expo-video at Expo SDK 58.');
+assert(!deps.some((name) => /media-library|expo-camera|vision-camera|document-picker|image-crop-picker|react-native-image-picker|react-native-video|image-manipulator|expo-audio/i.test(name) || name === 'expo-av'),
+  'Only expo-image-picker and expo-video are allowed for media: no media-library, camera, document-picker, audio or other video package.');
+const appSources = [...sourceFiles(join(native, 'app')), ...sourceFiles(join(native, 'src'))];
+const rel = (file) => file.slice(native.length + 1).split(sep).join('/');
+const filesWith = (pattern) => appSources.filter((file) => pattern.test(readFileSync(file, 'utf8'))).map(rel).sort();
+const only = (pattern, files, message) => assert.deepEqual(filesWith(pattern), [...files].sort(), message);
+// The picker is opened from one module, which only the composer uses; video is played by one component.
+only(/['"]expo-image-picker['"]/, ['src/social/media-picker.ts'], 'expo-image-picker may be imported by src/social/media-picker.ts only.');
+only(/['"]expo-video['"]/, ['src/social/ui/Media.tsx'], 'expo-video may be imported by src/social/ui/Media.tsx only.');
+only(/media-picker['"]/, ['app/share-run.tsx'], 'Only the composer may open the photo picker or the camera.');
+const picker = readFileSync(join(native, 'src/social/media-picker.ts'), 'utf8');
+// Permission is asked at the tap, for the camera only. The library goes through the system
+// picker, which needs none, so the photo-library permission is never requested anywhere.
+assert(picker.split('requestCameraPermissionsAsync').length === 2 && /export async function takePhoto\(\)[\s\S]*requestCameraPermissionsAsync[\s\S]*launchCameraAsync/.test(picker),
+  'The camera permission is asked once, inside takePhoto, just before the camera opens.');
+only(/requestCameraPermissionsAsync|useCameraPermissions/, ['src/social/media-picker.ts'], 'Nothing but takePhoto may ask for the camera.');
+only(/MediaLibraryPermissions/, [], 'The photo-library permission is never requested: the system picker needs none.');
+assert(picker.includes('exif: false') && picker.includes('base64: false') && picker.includes("launchCameraAsync({ ...COMMON, mediaTypes: ['images'] })")
+  && !/legacy:\s*true|allowsMultipleSelection:\s*true/.test(picker),
+  'The picker returns one item, no EXIF and no file contents to JavaScript, and the camera takes photos only (no microphone).');
+// Uploads: one route on our own server, one sender, called by the composer when Post is tapped.
+only(/api\/uploads/, ['src/config.ts'], 'The upload address is defined once, in src/config.ts, from EXPO_PUBLIC_API_URL.');
+only(/\bUPLOADS_URL\b/, ['src/config.ts', 'src/social/api.ts'], 'Only uploadMedia in src/social/api.ts may use the upload address.');
+only(/\buploadMedia\(/, ['app/share-run.tsx', 'src/social/api.ts'], 'Media is uploaded from the composer only.');
+only(/\.upload\(|createUploadTask|uploadAsync|UploadType|new FormData|FormData\(/, ['src/social/upload-file.ts'], 'Files are sent by src/social/upload-file.ts only.');
+only(/\bsendFile\b/, ['app/share-run.tsx', 'src/social/upload-file.ts'], 'Only the composer may hand the file sender to uploadMedia.');
+const composer = readFileSync(join(native, 'app/share-run.tsx'), 'utf8');
+assert(composer.split('uploadMedia(').length === 2 && /async function post\(\) \{[\s\S]*uploadMedia\(me\.token, media, sendFile/.test(composer)
+  && composer.indexOf('uploadMedia(') > composer.indexOf('async function post()') && composer.indexOf('uploadMedia(') < composer.indexOf('function shareOut('),
+  'The composer uploads in one place: inside post(), which runs when the runner taps Post.');
+// A feed can only make the phone fetch media from the VantraRun server itself.
+const mediaRules = readFileSync(join(native, 'src/social/media.ts'), 'utf8');
+assert(mediaRules.includes('const MEDIA_PATH = /^\\/(?:uploads\\/[0-9a-f-]{36}\\.[a-z0-9]{2,5}|backgrounds\\/[a-z0-9_-]+\\.jpg)$/;')
+  && readFileSync(join(native, 'src/social/ui/Parts.tsx'), 'utf8').includes('backgroundOf(post, API_URL)'),
+  'A post\'s background is shown only from /uploads or /backgrounds on the VantraRun API.');
+const mediaView = readFileSync(join(native, 'src/social/ui/Media.tsx'), 'utf8');
+assert(mediaView.includes('created.muted = true') && mediaView.includes("created.audioMixingMode = 'mixWithOthers'") && mediaView.includes('nativeControls={false}'),
+  'A video background is muted and never takes the audio from music or the run coach.');
+// Store review: every permission-gated API the picker links has an honest purpose string
+// (a missing one rejected build 1, ITMS-90683), and Android asks for the camera and nothing more.
+const pickerPlugin = cfg.expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-image-picker')?.[1] ?? {};
+const purpose = [pickerPlugin.photosPermission, pickerPlugin.cameraPermission, pickerPlugin.microphonePermission, cfg.expo.ios.infoPlist.NSPhotoLibraryAddUsageDescription];
+assert(purpose.every((text) => typeof text === 'string' && text.length > 40 && /VantraRun/.test(text) && !/PRODUCT_NAME|^Allow /.test(text)),
+  'Photo library, camera, microphone and add-to-library purpose strings must each be set and say what VantraRun does.');
+assert(/does not record sound/.test(pickerPlugin.microphonePermission) && /does not save anything/.test(cfg.expo.ios.infoPlist.NSPhotoLibraryAddUsageDescription),
+  'The app records no sound and saves nothing to the photo library, and its purpose strings must say so.');
+for (const blocked of ['android.permission.READ_EXTERNAL_STORAGE', 'android.permission.WRITE_EXTERNAL_STORAGE', 'android.permission.RECORD_AUDIO']) {
+  assert(cfg.expo.android.blockedPermissions.includes(blocked), `${blocked} must stay blocked on Android.`);
+}
+const videoPlugin = cfg.expo.plugins.find((plugin) => plugin === 'expo-video' || (Array.isArray(plugin) && plugin[0] === 'expo-video'));
+assert(videoPlugin === 'expo-video', 'expo-video is configured with no options: no background playback, no picture in picture.');
 const autoPolicy = readFileSync(join(native, 'src/ingestion/auto-import-policy.ts'), 'utf8');
 assert(/AUTO_HEALTH_IMPORT_ENABLED = false;/.test(autoPolicy), 'Automatic health import must stay off in Stage 1 (duplicate runs).');
 assert(readFileSync(join(native, 'src/ingestion/manual-import-panel.tsx'), 'utf8').includes('AUTO_HEALTH_IMPORT_ENABLED'), 'The import panel must honour the automatic-import switch.');

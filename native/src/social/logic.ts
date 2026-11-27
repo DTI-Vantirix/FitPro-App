@@ -2,6 +2,8 @@
  * web/src/components/social): same handles, same audiences and default, same post record.
  * Gym is hidden there, so workout posts are never shown or made here.
  */
+import { NO_BACKGROUND, type Background } from './media';
+
 export type LatLng = { lat: number; lng: number };
 /** Who may see a post: anyone on VantraRun, accepted friends, or only its author. */
 export type Audience = 'public' | 'friends' | 'private';
@@ -39,6 +41,9 @@ export type Post = {
   visibility: string;
   authorHandle: string;
   authorName: string;
+  /** 'none', 'photo' or 'video', and where the server keeps the file (src/social/media.ts). */
+  backgroundType: Background['type'];
+  backgroundUrl: string;
 };
 /** A run the server holds, with its track: what a post is made from. */
 export type ShareRun = {
@@ -115,10 +120,16 @@ export function thinTrack(points: unknown, max = 160): LatLng[] {
   return good.filter((_, index) => index % step === 0).map((p) => ({ lat: p.lat, lng: p.lng }));
 }
 
-/** The Post record the website's composer creates, without a photo or video background. */
-export function buildPost(input: { run: ShareRun; caption: string; audience: Audience; profile: SocialProfile }): Record<string, unknown> {
+/** The Post record the website's composer creates. `background` is the stock photo the runner
+ * chose or the file the server has just stored for them; left out, the post has none. Of the
+ * media, the record carries its kind and its address and nothing else. */
+export function buildPost(input: { run: ShareRun; caption: string; audience: Audience; profile: SocialProfile; background?: Background }): Record<string, unknown> {
   const { run, profile, audience } = input;
   if (!AUDIENCES.some((choice) => choice.id === audience)) throw new Error('Pick an audience for the post: Public, Friends or Only me.');
+  const background = input.background ?? NO_BACKGROUND;
+  const none = background.type === 'none';
+  if (!none && background.type !== 'photo' && background.type !== 'video') throw new Error('The background of a post is a photo, a video or none.');
+  if (!none && !background.url.trim()) throw new Error('The background was not uploaded, so the post cannot name it.');
   return {
     kind: 'run',
     ref_id: run.id,
@@ -130,8 +141,8 @@ export function buildPost(input: { run: ShareRun; caption: string; audience: Aud
     zone_name: run.targetZoneName || '',
     in_zone_pct: run.inZonePct || 0,
     route_points: thinTrack(run.points),
-    background_type: 'none',
-    background_url: '',
+    background_type: none ? 'none' : background.type,
+    background_url: none ? '' : background.url,
     visibility: audience,
     author_handle: profile.handle || '',
     author_name: profile.displayName || profile.handle || '',

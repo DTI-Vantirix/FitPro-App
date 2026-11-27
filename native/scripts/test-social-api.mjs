@@ -97,9 +97,84 @@ await test('the feed is the website\'s request: socialFeed with an empty body; w
   assert.deepEqual([last().method, last().url, last().body, last().headers.Authorization], ['POST', `${BASE}/api/functions/socialFeed`, {}, 'Bearer tok']);
   assert.deepEqual(posts, [{ id: 'post1', ownerId: 'u2', createdAt: '2026-11-27T10:00:00.000Z', kind: 'run', title: 'Loop', caption: 'Easy',
     distanceMi: 3.1, durationSec: 1800, avgPaceSec: 580, zoneName: 'Zone 2', routePoints: [pt(42, -71), pt(42.01, -71)],
-    visibility: 'friends', authorHandle: 'ben', authorName: 'Ben' }]);
+    visibility: 'friends', authorHandle: 'ben', authorName: 'Ben', backgroundType: 'none', backgroundUrl: '' }]);
   reset(() => 'offline');
   await assert.rejects(api.loadFeed('tok'), (e) => e.status === 0 && /Can't reach VantraRun/.test(e.message));
+});
+
+await test('a post\'s background is read as the server stores it; an unknown kind is none', async () => {
+  reset(() => ({ status: 200, data: { posts: [
+    postRow({ id: 'a', background_type: 'photo', background_url: '/backgrounds/trees.jpg' }),
+    postRow({ id: 'b', background_type: 'video', background_url: '/uploads/v.mp4' }),
+    postRow({ id: 'c', background_type: 'hologram', background_url: '/uploads/x.bin' }),
+    postRow({ id: 'd', background_type: 'photo', background_url: 42 }),
+    postRow({ id: 'e' }),
+  ] } }));
+  const posts = await api.loadFeed('tok');
+  assert.deepEqual(posts.map((p) => [p.id, p.backgroundType, p.backgroundUrl]),
+    [['a', 'photo', '/backgrounds/trees.jpg'], ['b', 'video', '/uploads/v.mp4'], ['c', 'none', ''], ['d', 'none', ''], ['e', 'none', '']]);
+});
+
+const NAME = '0b0e6c1e-6f0a-4a57-9a43-5d0b8f0f2a11';
+const sends = [];
+let sendReply = () => ({ status: 201, body: JSON.stringify({ file_url: `/uploads/${NAME}.mp4` }) });
+const send = async (request) => { sends.push(request); return sendReply(request); };
+const video = { uri: 'file:///cache/clip.mp4', mimeType: 'video/mp4' };
+
+await test('uploading media: the file\'s own bytes to /api/uploads, with the sign-in and the file\'s type, as the website sends it', async () => {
+  reset(() => ({ status: 500, data: {} }));
+  sends.length = 0;
+  const url = await api.uploadMedia('tok', video, send);
+  assert.equal(url, `/uploads/${NAME}.mp4`);
+  assert.equal(sends.length, 1);
+  assert.deepEqual([sends[0].url, sends[0].uri, sends[0].mimeType], [`${BASE}/api/uploads`, 'file:///cache/clip.mp4', 'video/mp4']);
+  assert.deepEqual(sends[0].headers, { Accept: 'application/json', Authorization: 'Bearer tok', 'Content-Type': 'video/mp4' });
+  // Nothing else is sent anywhere: no second request, no JSON call beside it.
+  assert.equal(calls.length, 0);
+});
+
+await test('uploading media: an address on this server is accepted whether it is written short or in full', async () => {
+  sendReply = () => ({ status: 201, body: JSON.stringify({ file_url: `${BASE}/uploads/${NAME}.jpg` }) });
+  assert.equal(await api.uploadMedia('tok', { uri: 'file:///a.jpg', mimeType: 'image/jpeg' }, send), `${BASE}/uploads/${NAME}.jpg`);
+  for (const body of [JSON.stringify({ file_url: `https://elsewhere.example/uploads/${NAME}.jpg` }), JSON.stringify({ file_url: '' }), JSON.stringify({}), 'not json', '']) {
+    sendReply = () => ({ status: 201, body });
+    await assert.rejects(api.uploadMedia('tok', video, send), (e) => e.name === 'ApiError' && /did not say where/.test(e.message), body);
+  }
+});
+
+await test('uploading media: progress is passed on as a whole percent, and the cancel signal reaches the sender', async () => {
+  const seen = [];
+  const controller = new AbortController();
+  sendReply = (request) => { request.onProgress(0, 2000); request.onProgress(500, 2000); request.onProgress(2000, 2000); return { status: 201, body: JSON.stringify({ file_url: `/uploads/${NAME}.mp4` }) }; };
+  await api.uploadMedia('tok', video, send, { onProgress: (percent) => seen.push(percent), signal: controller.signal });
+  assert.deepEqual(seen, [0, 25, 100]);
+  assert.equal(sends[sends.length - 1].signal, controller.signal);
+});
+
+await test('uploading media: the server\'s refusals come back in its words', async () => {
+  sendReply = () => ({ status: 413, body: JSON.stringify({ error: 'That upload is too large.' }) });
+  await assert.rejects(api.uploadMedia('tok', video, send), (e) => e.status === 413 && e.message === 'That upload is too large.');
+  sendReply = () => ({ status: 415, body: JSON.stringify({ error: 'Upload a photo (JPEG, PNG, WebP, GIF, HEIC) or a video (MP4, MOV, WebM).' }) });
+  await assert.rejects(api.uploadMedia('tok', video, send), (e) => e.status === 415 && /Upload a photo/.test(e.message));
+  sendReply = () => ({ status: 401, body: JSON.stringify({ error: 'Sign in again.' }) });
+  await assert.rejects(api.uploadMedia('tok', video, send), (e) => e.status === 401);
+  sendReply = () => ({ status: 413, body: '<html>Request Entity Too Large</html>' });
+  await assert.rejects(api.uploadMedia('tok', video, send), (e) => e.status === 413 && /too large/i.test(e.message));
+  sendReply = () => ({ status: 502, body: '<html>Bad gateway</html>' });
+  await assert.rejects(api.uploadMedia('tok', video, send), (e) => e.status === 502 && e.message === 'Request failed (502).');
+});
+
+await test('uploading media: no connection and a cancelled upload are told apart, and nothing is sent without a type or a file', async () => {
+  sendReply = () => { throw new TypeError('Network request failed'); };
+  await assert.rejects(api.uploadMedia('tok', video, send), (e) => e.status === 0 && /Can't reach VantraRun/.test(e.message));
+  const controller = new AbortController();
+  sendReply = () => { controller.abort(); throw new Error('AbortError'); };
+  await assert.rejects(api.uploadMedia('tok', video, send, { signal: controller.signal }), (e) => e.status === 0 && e.message === 'The upload was cancelled.');
+  sends.length = 0;
+  await assert.rejects(api.uploadMedia('tok', { uri: 'file:///a.tiff', mimeType: 'image/tiff' }, send), /cannot be used/);
+  await assert.rejects(api.uploadMedia('tok', { uri: '', mimeType: 'image/jpeg' }, send), /cannot be used/);
+  await assert.rejects(api.uploadMedia('', video, send), /signed out/i);
+  assert.equal(sends.length, 0);
 });
 
 await test('discover asks for public posts only', async () => {
