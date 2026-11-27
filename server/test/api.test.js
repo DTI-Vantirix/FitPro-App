@@ -3465,3 +3465,49 @@ describe('the daily sweep puts overdue subscriptions right', () => {
     assert.equal(store.fake.calls.length, calls);
   });
 });
+
+describe('a failed payment never extends access by being looked at again', () => {
+  let store;
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('past_due with no period start keeps the end date we already have, however often it is synced', async () => {
+    const gus = await legacyUser('gus.grace@example.com');
+    const sub = await store.subscribe(gus);
+    await store.subscription(gus, { action: 'refresh' });
+    // what was paid for ended two days ago
+    await db.query(`update entitlements set status = 'active', expires_at = $2 where user_id = $1 and source = 'stripe' returning id`, [gus.user.id, daysFromNow(-2)]);
+    const [before] = await entitlementsOf(gus.user.id);
+    // Stripe says the payment failed, and (unusually) gives no period start
+    store.fake.setSubscription(sub.id, { status: 'past_due', current_period_start: null });
+
+    for (let i = 0; i < 3; i++) {
+      const res = await store.subscription(gus, { action: 'refresh' });
+      assert.equal(res.status, 200, JSON.stringify(res.data));
+      const [row] = await entitlementsOf(gus.user.id);
+      assert.equal(row.status, 'grace');
+      assert.equal(new Date(row.expires_at).getTime(), new Date(before.expires_at).getTime(), `sync ${i + 1} left the end date alone`);
+    }
+    assert.equal((await store.runs(gus)).status, 200, 'inside the three days');
+    // and once the three days are up it is over, however many more times anyone looks
+    await db.query(`update entitlements set expires_at = $2 where user_id = $1 and source = 'stripe' returning id`, [gus.user.id, daysFromNow(-4)]);
+    await store.subscription(gus, { action: 'refresh' });
+    await store.subscription(gus, { action: 'refresh' });
+    assert.equal((await store.runs(gus)).status, 403);
+  });
+
+  test('a past_due subscription we have never seen, with no period start, gets no row at all', async () => {
+    const neo = await legacyUser('neo.new@example.com');
+    await store.subscription(neo, { action: 'checkout', plan: 'monthly' });
+    const customer = (await userRow(neo.user.id)).stripe_customer_id;
+    const sub = store.fake.addSubscription({ customerId: customer, priceId: TEST_STRIPE.prices.monthly, status: 'past_due' });
+    store.fake.setSubscription(sub.id, { current_period_start: null });
+    const res = await store.subscription(neo, { action: 'refresh' });
+    assert.equal(res.data.allowed, false);
+    assert.equal((await entitlementsOf(neo.user.id)).length, 0);
+  });
+});

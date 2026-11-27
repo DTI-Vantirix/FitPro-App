@@ -48,7 +48,10 @@ export function entitlementFromSubscription(config, subscription, now = new Date
   } else if (status === 'grace') {
     // A payment failed. The period Stripe shows is the one that has not been paid for, so
     // what was paid for ended when it started. access.js allows GRACE_DAYS past that, no more.
-    expiresAt = isTime(periodStart) ? iso(periodStart) : now.toISOString();
+    // With no period start there is no end date to give: null, and the writer keeps the one
+    // the row already has. Falling back to "now" would push the end forward on every sync,
+    // and the allowance with it, for as long as anyone kept looking.
+    expiresAt = isTime(periodStart) ? iso(periodStart) : null;
   } else {
     const end = status === 'trial' && isTime(subscription.trial_end) ? subscription.trial_end : periodEnd;
     if (!isTime(end)) {
@@ -124,6 +127,19 @@ async function writeSubscriptions(db, config, customerId, subscriptions) {
       const next = entitlementFromSubscription(config, subscription);
       if (!next) continue;
       if (next.trial_started_at && (!trialStartedAt || next.trial_started_at < trialStartedAt)) trialStartedAt = next.trial_started_at;
+      if (!next.expires_at) {
+        // No end date from Stripe (see the mapper): change what we know, keep the date we
+        // have, and write nothing for a subscription we have never seen.
+        await tx.query(
+          `update entitlements
+              set status = $3, plan = coalesce($4, plan), cancel_at_period_end = $5, updated_date = now()
+            where source = 'stripe' and external_id = $2 and user_id = $1 and status <> 'revoked'
+              and (status, plan, cancel_at_period_end) is distinct from ($3, coalesce($4, plan), $5::boolean)
+            returning id`,
+          [owner.id, next.external_id, next.status, next.plan, next.cancel_at_period_end]
+        );
+        continue;
+      }
       await tx.query(
         `insert into entitlements (user_id, source, status, plan, expires_at, cancel_at_period_end, external_id)
          values ($1, 'stripe', $2, $3, $4, $5, $6)

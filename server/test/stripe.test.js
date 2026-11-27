@@ -305,6 +305,12 @@ describe('a Stripe subscription as our entitlement row', () => {
     assert.deepEqual([row.status, row.expires_at], ['grace', '2026-11-20T00:00:00.000Z']);
   });
 
+  test('past_due with no period start names no end date, rather than inventing one from the clock', () => {
+    const row = map({ status: 'past_due' }, { current_period_start: undefined });
+    assert.deepEqual([row.status, row.expires_at], ['grace', null]);
+    assert.deepEqual(map({ status: 'past_due', current_period_start: at('2026-11-21T00:00:00Z') }, { current_period_start: undefined }).expires_at, '2026-11-21T00:00:00.000Z');
+  });
+
   test('canceled, unpaid, incomplete_expired and paused are expired, at the time Stripe ended them', () => {
     for (const status of ['canceled', 'unpaid', 'incomplete_expired', 'paused']) {
       const row = map({ status, ended_at: at('2026-11-30T00:00:00Z'), canceled_at: at('2026-11-29T00:00:00Z') });
