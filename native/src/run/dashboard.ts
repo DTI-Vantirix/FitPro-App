@@ -10,6 +10,8 @@ export type DashRun = {
   key: string;
   /** external_id of the copy kept on this phone, when there is one: it opens the full summary. */
   localId: string | null;
+  /** The server's id for the run, once it is known to be saved there: what a post is made from. */
+  serverId: string | null;
   routeName: string;
   distanceMi: number;
   durationSec: number;
@@ -38,6 +40,7 @@ function fromPhone(run: StoredRun): DashRun {
   return {
     key: `phone-${summary.externalId}`,
     localId: summary.externalId,
+    serverId: run.status === 'uploaded' ? run.serverRunId : null,
     routeName: summary.routeName,
     distanceMi: summary.distanceMi,
     durationSec: summary.durationSec,
@@ -67,6 +70,7 @@ export function mergeRuns(server: ServerRun[] | null, stored: StoredRun[]): Dash
       runs.push({
         key: run.id,
         localId: local ? local.summary.externalId : null,
+        serverId: run.id,
         routeName: run.routeName,
         distanceMi: run.distanceMi,
         durationSec: run.durationSec,

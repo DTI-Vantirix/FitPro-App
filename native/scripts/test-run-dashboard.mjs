@@ -100,4 +100,15 @@ await test('an empty week has no average pace', () => {
   assert.equal(d.weekStats(d.mergeRuns([server('s', on(24), 0.05, 40)], []), NOW).avgPaceSec, null); // too short to be a pace
 });
 
+await test('a run can be shared only once the server has it: its server id, or none', () => {
+  const merged = d.mergeRuns(
+    [server('s1', on(25), 3, 1800, { externalId: 'x-1' }), server('s2', on(24), 5, 3000)],
+    [stored('x-1', on(25), 3, 1800, 'uploaded', { serverRunId: 's1' }), stored('x-9', on(26), 2, 1200, 'pending')],
+  );
+  assert.deepEqual(merged.map((r) => [r.key, r.serverId]), [['phone-x-9', null], ['s1', 's1'], ['s2', 's2']]);
+  // With no connection, a run the phone saw uploaded keeps the id the server gave it.
+  assert.deepEqual(d.mergeRuns(null, [stored('x-1', on(25), 3, 1800, 'uploaded', { serverRunId: 's1' })]).map((r) => r.serverId), ['s1']);
+  assert.deepEqual(d.mergeRuns(null, [stored('x-2', on(25), 3, 1800, 'pending')]).map((r) => r.serverId), [null]);
+});
+
 done('dashboard: merging server and phone runs, weekly totals');

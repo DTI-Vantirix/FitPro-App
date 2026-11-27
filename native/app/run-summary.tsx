@@ -47,7 +47,7 @@ function RunSummary() {
   if (run === null) return <Loading />;
   if (run === 'missing') {
     return <Screen>
-      <Brand />
+      <Brand nav={false} />
       <ErrorNotice message={error} />
       <Text style={shared.body}>That run is not on this phone.</Text>
       <Action label="Home" onPress={() => router.replace('/home')} />
@@ -57,7 +57,7 @@ function RunSummary() {
   const s = run.summary;
   const hasMap = s.points.length >= 2;
   return <Screen>
-    <Brand />
+    <Brand nav={false} />
     <View style={styles.hero}>
       <Label>Run complete · {new Date(s.startedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</Label>
       <Heading size={22}>{s.routeName}</Heading>
@@ -121,8 +121,13 @@ function RunSummary() {
       {run.status === 'local_only' && <Text style={shared.body}>Too short to save to VantraRun (under 0.01 mi). It is kept on this phone only.</Text>}
     </Panel>
 
+    {/* Only a run the server has can be posted: the post is made from the server's copy. */}
+    {run.status === 'uploaded' && <Action label="Share to feed" icon="share-2" secondary
+      onPress={() => router.push({ pathname: '/share-run', params: run.serverRunId ? { run: run.serverRunId, ext: s.externalId } : { ext: s.externalId } })} />}
     <Action label="Done" onPress={() => router.replace('/home')} />
-    <Note>Sharing a run to the feed comes in a later version. Until then you can share it from the website.</Note>
+    <Note>{run.status === 'uploaded'
+      ? 'Nothing is posted unless you share it, and you choose who sees it: only you, your friends or everyone on VantraRun.'
+      : 'You can share this run to the feed once it is saved to VantraRun.'}</Note>
   </Screen>;
 }
 

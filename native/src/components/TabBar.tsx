@@ -1,6 +1,7 @@
 /** Bottom tab bar of the signed-in area, matching the website's: Ink bar, Line top border,
  * Steel outline icons, the active tab in Volt with a 2 px underline, and a raised round
- * Volt button in the centre that starts a run.
+ * Volt button in the centre that starts a run. Challenges and Settings are not tabs: they are
+ * the two round buttons in the header (HeaderNav in src/run/ui/Screen.tsx).
  *
  * To add a tab: create `app/(tabs)/<name>.tsx`, register it in `app/(tabs)/_layout.tsx` and
  * add one line to TABS. Tabs are split evenly either side of the centre button. A screen in
@@ -18,9 +19,9 @@ import type { IconName } from './Ui';
 
 export const TABS: { name: string; label: string; icon: IconName }[] = [
   { name: 'home', label: 'Today', icon: 'home' },
+  { name: 'feed', label: 'Feed', icon: 'users' },
   { name: 'routes', label: 'Routes', icon: 'map' },
   { name: 'analytics', label: 'Analytics', icon: 'bar-chart-2' },
-  { name: 'settings', label: 'Settings', icon: 'settings' },
 ];
 
 export function TabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {

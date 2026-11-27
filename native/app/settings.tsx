@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Text } from 'react-native';
-import { useSession } from '../../src/auth/session';
-import { Action, ErrorNotice, Field, Heading, Notice, SectionHeading } from '../../src/components/Ui';
-import { deleteAccount } from '../../src/run/api';
-import { deviceCache, runCheckpoint, runStore } from '../../src/run/device/run-files';
-import { removeOwnerRuns } from '../../src/run/queue';
-import { heartRateMonitor, setRunAuth } from '../../src/run/runtime';
-import { Brand, Gated, Note, Panel, Screen, styles } from '../../src/run/ui/Screen';
-import { useRun, useRunAccount, useWaitingRuns } from '../../src/run/use-run';
+import { useSession } from '../src/auth/session';
+import { Action, ErrorNotice, Field, Heading, Notice, SectionHeading } from '../src/components/Ui';
+import { deleteAccount } from '../src/run/api';
+import { deviceCache, runCheckpoint, runStore } from '../src/run/device/run-files';
+import { removeOwnerRuns } from '../src/run/queue';
+import { heartRateMonitor, setRunAuth } from '../src/run/runtime';
+import { Brand, Gated, Note, Panel, Screen, styles } from '../src/run/ui/Screen';
+import { useRun, useRunAccount, useWaitingRuns } from '../src/run/use-run';
 
 function Settings() {
   const router = useRouter();
@@ -63,8 +63,8 @@ function Settings() {
   }
 
   return <Screen>
-    <Brand />
-    <SectionHeading kicker="Settings" title="Your account" subtitle="Your pace zones, importing runs, signing out and deleting your account." />
+    <Brand onBack={() => (router.canGoBack() ? router.back() : router.replace('/home'))} />
+    <SectionHeading kicker="Settings" title="Your account" subtitle="Your pace zones, your social profile and friends, importing runs, signing out and deleting your account." />
     <ErrorNotice message={error} />
     {run && <Notice>A run is in progress. Finish or discard it before signing out or deleting your account.</Notice>}
 
@@ -72,6 +72,13 @@ function Settings() {
       <Heading>Pace zones</Heading>
       <Text style={styles.body}>Your five training zones, your max heart rate and your threshold pace.</Text>
       <Action label="Pace zones" icon="sliders" onPress={() => router.push('/zones')} secondary />
+    </Panel>
+
+    <Panel>
+      <Heading>Social profile</Heading>
+      <Text style={styles.body}>How friends find you and who sees what you post. Nothing is ever posted automatically.</Text>
+      <Action label="Social profile" icon="at-sign" onPress={() => router.push('/social-profile')} secondary />
+      <Action label="Friends" icon="users" onPress={() => router.push('/friends')} secondary />
     </Panel>
 
     <Panel>

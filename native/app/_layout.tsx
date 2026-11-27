@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import Feather from '@expo/vector-icons/Feather';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { SessionProvider } from '../src/auth/session';
 import { AccessGateProvider } from '../src/access/access-gate';
 import { RunAccountProvider } from '../src/run/use-run';
@@ -14,7 +15,7 @@ import { fontAssets, fonts } from '../src/typography';
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
-  const [fontsLoaded, fontError] = useFonts({ ...fontAssets, ...Feather.font });
+  const [fontsLoaded, fontError] = useFonts({ ...fontAssets, ...Feather.font, ...Ionicons.font });
   // A font that fails to load must never lock the runner out: carry on with the system font.
   const ready = fontsLoaded || fontError !== null;
   useEffect(() => { if (ready) void SplashScreen.hideAsync().catch(() => {}); }, [ready]);
@@ -39,8 +40,17 @@ export default function RootLayout() {
         <Stack.Screen name="consent" options={{ title: 'Your data' }} />
         <Stack.Screen name="invite" options={{ title: 'Invite' }} />
         <Stack.Screen name="setup" options={{ title: 'Set your zones' }} />
-        {/* Today, Routes, Analytics and Settings, with the bottom tab bar. */}
+        {/* Today, Feed, Routes and Analytics, with the bottom tab bar. */}
         <Stack.Screen name="(tabs)" options={{ title: 'VantraRun' }} />
+        {/* Reached from the two round buttons in the header; each has a back button. */}
+        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+        <Stack.Screen name="challenges" options={{ title: 'Challenges' }} />
+        <Stack.Screen name="challenge" options={{ title: 'Challenge' }} />
+        {/* Reached from the Feed tab and from Settings. */}
+        <Stack.Screen name="friends" options={{ title: 'Friends' }} />
+        <Stack.Screen name="social-profile" options={{ title: 'Social profile' }} />
+        {/* The post composer: from the Feed tab, a finished run's summary and Recent activity. */}
+        <Stack.Screen name="share-run" options={{ title: 'New post' }} />
         {/* Full screen, no tab bar. The back swipe is off: it would fight dragging the map and its points. */}
         <Stack.Screen name="route-new" options={{ title: 'Draw a route', gestureEnabled: false }} />
         {/* Reached from Settings, Analytics and the zone picker of run-start. */}
