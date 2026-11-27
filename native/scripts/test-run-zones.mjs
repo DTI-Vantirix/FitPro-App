@@ -62,4 +62,44 @@ await test('setup is needed until there is a max heart rate and zones', () => {
   assert.equal(z.needsSetup({ id: 'p', hr_max: 190, threshold_sec: 600 }, []), true);
   assert.equal(z.needsSetup({ id: 'p', hr_max: 190, threshold_sec: null }, zones), false);
 });
+await test('zone colours: one ramp from Steel to Volt, by zone number, as on the website', () => {
+  assert.deepEqual(zones.map((zone) => z.zoneColor(zone)), ['#8A8A93', '#A6A6AE', '#F5F5F2', '#9FCC00', '#C6FF00']);
+  assert.equal(z.zoneColor({ ...zone2, color: '#FF0000' }), '#A6A6AE');                    // a stored pre-rebrand colour is ignored
+  assert.equal(z.zoneColor({ ...zone2, zone_number: 0, color: '#9fcc00' }), '#9FCC00');   // custom zone: its own, when it is on the ramp
+  assert.equal(z.zoneColor({ ...zone2, zone_number: 0, color: '#FF0000' }), '#C6FF00');
+  assert.equal(z.zoneColor({ ...zone2, zone_number: 9, color: undefined }), '#C6FF00');
+});
+await test('zone details: what is stored, else the standard text for that zone number', () => {
+  assert.deepEqual(z.zoneDetails({ ...zone2, intensity: 'Steady', purpose: 'Mine', feel: 'Fine' }), { intensity: 'Steady', purpose: 'Mine', feel: 'Fine' });
+  const { id, name, zone_number, fast_sec, slow_sec, hr_min_pct, hr_max_pct } = zone2;
+  assert.deepEqual(z.zoneDetails({ id, name, zone_number, fast_sec, slow_sec, hr_min_pct, hr_max_pct }),
+    { intensity: 'Light', purpose: 'Building aerobic base and endurance', feel: 'Comfortable. Full conversation, deeper breathing. Sustainable for hours.' });
+  assert.deepEqual(z.zoneDetails({ name: 'Easy', zone_number: 0, fast_sec: 500, slow_sec: 600, hr_min_pct: null, hr_max_pct: null }), { intensity: '', purpose: '', feel: '' });
+});
+await test('heart-rate band text: percent of max, with beats per minute when max is known', () => {
+  assert.equal(z.hrBandLabel(zone2, 190), '60–70% max HR · 114–133 bpm');
+  assert.equal(z.hrBandLabel(zone2, null), '60–70% max HR');
+  assert.equal(z.hrBandLabel({ ...zone2, hr_min_pct: null }, 190), '');
+});
+await test('editing a zone: a name and a pace range, fastest before slowest', () => {
+  assert.deepEqual(z.parseZoneEdit(' Easy ', '9:00', '10:15'), { ok: true, values: { name: 'Easy', fast_sec: 540, slow_sec: 615 } });
+  assert.deepEqual(z.parseZoneEdit('', '9:00', '10:00'), { ok: false, error: 'Give the zone a name.' });
+  assert.equal(z.parseZoneEdit('x'.repeat(41), '9:00', '10:00').ok, false);
+  for (const [fast, slow] of [['900', '10:00'], ['9:00', ''], ['2:00', '10:00'], ['9:00', '25:00']]) {
+    assert.deepEqual(z.parseZoneEdit('Easy', fast, slow), { ok: false, error: 'Enter each pace as minutes:seconds, between 3:00 and 20:00.' });
+  }
+  assert.deepEqual(z.parseZoneEdit('Easy', '10:00', '9:00'), { ok: false, error: 'The slowest pace must be slower than the fastest.' });
+  assert.equal(z.parseZoneEdit('Easy', '9:00', '9:00').ok, false);
+});
+await test('changing the profile: zones are rebuilt only when there are none or the threshold pace changed', () => {
+  const known = { id: 'p', hr_max: 185, threshold_sec: 600 };
+  assert.deepEqual(z.profileChange({ hrMax: 190, thresholdSec: 540, known, hasZones: true }), { values: { hr_max: 190, threshold_sec: 540 }, rebuildZones: true });
+  assert.deepEqual(z.profileChange({ hrMax: 190, thresholdSec: 600, known, hasZones: true }), { values: { hr_max: 190 }, rebuildZones: false });
+  assert.deepEqual(z.profileChange({ hrMax: 190, thresholdSec: null, known, hasZones: true }), { values: { hr_max: 190 }, rebuildZones: false });
+  assert.deepEqual(z.profileChange({ hrMax: 190, thresholdSec: 540, known: null, hasZones: false }), { values: { hr_max: 190, threshold_sec: 540 }, rebuildZones: true });
+  // Zones made on the website with no threshold on the profile: typing one in is a change.
+  assert.deepEqual(z.profileChange({ hrMax: 190, thresholdSec: 540, known: { ...known, threshold_sec: null }, hasZones: true }).rebuildZones, true);
+  assert.equal(z.profileChange({ hrMax: 99, thresholdSec: 540, known, hasZones: true }), null);
+  assert.equal(z.profileChange({ hrMax: 190, thresholdSec: null, known: null, hasZones: false }), null);
+});
 done('zones, status, pace text, setup gate');

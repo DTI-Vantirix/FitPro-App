@@ -2,8 +2,9 @@
  * Steel outline icons, the active tab in Volt with a 2 px underline, and a raised round
  * Volt button in the centre that starts a run.
  *
- * To add a tab: create `app/(tabs)/<name>.tsx` and add one line to TABS. Tabs are split
- * evenly either side of the centre button.
+ * To add a tab: create `app/(tabs)/<name>.tsx`, register it in `app/(tabs)/_layout.tsx` and
+ * add one line to TABS. Tabs are split evenly either side of the centre button. A screen in
+ * `app/(tabs)/` that is not listed here keeps the bar but has no button on it.
  */
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -18,7 +19,7 @@ import type { IconName } from './Ui';
 export const TABS: { name: string; label: string; icon: IconName }[] = [
   { name: 'home', label: 'Today', icon: 'home' },
   { name: 'routes', label: 'Routes', icon: 'map' },
-  { name: 'activities', label: 'Activities', icon: 'activity' },
+  { name: 'analytics', label: 'Analytics', icon: 'bar-chart-2' },
   { name: 'settings', label: 'Settings', icon: 'settings' },
 ];
 

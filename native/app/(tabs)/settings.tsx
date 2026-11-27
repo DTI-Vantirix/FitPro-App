@@ -64,9 +64,15 @@ function Settings() {
 
   return <Screen>
     <Brand />
-    <SectionHeading kicker="Settings" title="Your account" subtitle="Sign out, or delete your account and everything in it." />
+    <SectionHeading kicker="Settings" title="Your account" subtitle="Your pace zones, importing runs, signing out and deleting your account." />
     <ErrorNotice message={error} />
     {run && <Notice>A run is in progress. Finish or discard it before signing out or deleting your account.</Notice>}
+
+    <Panel>
+      <Heading>Pace zones</Heading>
+      <Text style={styles.body}>Your five training zones, your max heart rate and your threshold pace.</Text>
+      <Action label="Pace zones" icon="sliders" onPress={() => router.push('/zones')} secondary />
+    </Panel>
 
     <Panel>
       <Heading>Sign out</Heading>
@@ -79,7 +85,7 @@ function Settings() {
     <Panel>
       <Heading>Health import</Heading>
       <Text style={styles.body}>Automatic import from Apple Health and Health Connect is off, so a run recorded here and on your watch is not saved twice. You can still import a run by hand.</Text>
-      <Action label="Import a run by hand" onPress={() => router.push('/activities')} secondary />
+      <Action label="Import runs" icon="download" onPress={() => router.push('/activities')} secondary />
     </Panel>
 
     <Panel>
@@ -100,7 +106,7 @@ function Settings() {
       <Heading>For developers</Heading>
       <Action label="Connection test" onPress={() => router.push('/spike')} variant="ghost" />
     </Panel>
-    <Note>VantraRun uses no advertising or analytics software. Zones are edited on the website for now.</Note>
+    <Note>VantraRun uses no advertising or analytics software.</Note>
   </Screen>;
 }
 

@@ -39,10 +39,12 @@ export default function RootLayout() {
         <Stack.Screen name="consent" options={{ title: 'Your data' }} />
         <Stack.Screen name="invite" options={{ title: 'Invite' }} />
         <Stack.Screen name="setup" options={{ title: 'Set your zones' }} />
-        {/* Today, Routes, Activities and Settings, with the bottom tab bar. */}
+        {/* Today, Routes, Analytics and Settings, with the bottom tab bar. */}
         <Stack.Screen name="(tabs)" options={{ title: 'VantraRun' }} />
         {/* Full screen, no tab bar. The back swipe is off: it would fight dragging the map and its points. */}
         <Stack.Screen name="route-new" options={{ title: 'Draw a route', gestureEnabled: false }} />
+        {/* Reached from Settings, Analytics and the zone picker of run-start. */}
+        <Stack.Screen name="zones" options={{ title: 'Pace zones' }} />
         {/* Full screen, above the tabs: no tab bar while starting, running or reviewing a run. */}
         <Stack.Screen name="run-start" options={{ title: 'Start a run' }} />
         <Stack.Screen name="run-live" options={{ title: 'Run', gestureEnabled: false }} />

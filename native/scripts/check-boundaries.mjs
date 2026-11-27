@@ -91,10 +91,10 @@ assert(buildProp?.[1]?.android?.minSdkVersion === 26 && buildProp?.[1]?.android?
 assert(!activities.includes('sendSyntheticWorkout') && !activities.includes('ingestActivity'), 'Real activities screen cannot upload data in Step 5.');
 // ---- Stage 1B: the run experience ----
 for (const f of ['app/signup.tsx', 'app/setup.tsx', 'app/(tabs)/home.tsx', 'app/(tabs)/settings.tsx', 'app/run-start.tsx', 'app/run-live.tsx', 'app/run-summary.tsx',
-  'app/(tabs)/routes.tsx', 'app/route-new.tsx'])
+  'app/(tabs)/routes.tsx', 'app/route-new.tsx', 'app/(tabs)/analytics.tsx', 'app/zones.tsx'])
   assert(existsSync(join(native, f)), `Missing ${f}`);
 // Every screen past sign-up sits behind the same three checks: sign-in, consent, invite.
-for (const f of ['setup', '(tabs)/home', '(tabs)/settings', 'run-start', 'run-live', 'run-summary', '(tabs)/routes', 'route-new']) {
+for (const f of ['setup', '(tabs)/home', '(tabs)/settings', 'run-start', 'run-live', 'run-summary', '(tabs)/routes', 'route-new', '(tabs)/analytics', 'zones']) {
   const screen = readFileSync(join(native, `app/${f}.tsx`), 'utf8');
   assert(/export default function \w+\(\) \{\s*return <Gated/.test(screen), `app/${f}.tsx must render inside <Gated>.`);
 }
@@ -119,7 +119,7 @@ for (const file of [...runFiles, ...sourceFiles(join(native, 'app'))]) {
   assert(!/HealthKit|health-connect|react-native-healthkit/.test(text) || !file.includes(`${sep}run${sep}`), `${file}: the run code must not request health permissions.`);
 }
 // The run logic is plain TypeScript: no React, React Native or Expo, so it is unit-tested as is.
-const PURE = ['zones', 'geo', 'tracker', 'cues', 'directions', 'engine', 'payload', 'format', 'queue', 'hr-parse', 'controller', 'route-draft'];
+const PURE = ['zones', 'geo', 'tracker', 'cues', 'directions', 'engine', 'payload', 'format', 'queue', 'hr-parse', 'controller', 'route-draft', 'dashboard', 'analytics'];
 for (const name of PURE) {
   const text = readFileSync(join(native, `src/run/${name}.ts`), 'utf8');
   for (const [, spec] of text.matchAll(importPattern)) assert(spec.startsWith('./'), `src/run/${name}.ts must stay pure but imports ${spec}.`);

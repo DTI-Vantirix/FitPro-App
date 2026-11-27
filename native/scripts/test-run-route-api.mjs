@@ -91,4 +91,11 @@ await test('server runs: a sensible default and ceiling on how many are asked fo
   reset(() => ({ status: 500, data: { error: 'Server error' } }));
   await assert.rejects(api.listServerRuns('tok', 'u1'), (e) => e.status === 500);
 });
+await test('server runs: a run with no start time is dated by when it was created, as on the website', async () => {
+  reset(() => ({ status: 200, data: { items: [
+    { id: 'a', distance_mi: 2, duration_sec: 1200, created_date: '2026-11-21T09:00:00.000Z' },
+    { id: 'b', distance_mi: 2, duration_sec: 1200, started_at: '2026-11-20T07:00:00.000Z', created_date: '2026-11-22T09:00:00.000Z' }] } }));
+  const runs = await api.listServerRuns('tok', 'u1');
+  assert.deepEqual(runs.map((r) => r.startedAt), ['2026-11-21T09:00:00.000Z', '2026-11-20T07:00:00.000Z']);
+});
 done('route and run-list API client');
