@@ -667,6 +667,19 @@ describe('route directions', () => {
     const none = await call('POST', '/api/functions/routeDirections', { token: alice.token, body: {} });
     assert.equal(none.status, 404);
   });
+
+  test('an off-road waypoint is kept on the saved route and drawn as a straight line', async () => {
+    const points = [{ lat: 40.7, lng: -74.0 }, { lat: 40.71, lng: -74.0, offroad: true }, { lat: 40.72, lng: -74.0 }];
+    const route = await call('POST', '/api/entities/Route', { token: alice.token, body: { name: 'Across the field', points } });
+    assert.ok(route.status === 200 || route.status === 201);
+    const saved = await call('GET', '/api/entities/Route/' + route.data.id, { token: alice.token });
+    assert.deepEqual(saved.data.points, points);
+
+    const snap = await call('POST', '/api/functions/snapRoute', { token: alice.token, body: { points: points.slice(0, 2) } });
+    assert.equal(snap.status, 200);
+    assert.equal(snap.data.snapped, true, 'an all off-road route is not a routing failure');
+    assert.equal(snap.data.path.length, 2);
+  });
 });
 
 describe('social feed', () => {

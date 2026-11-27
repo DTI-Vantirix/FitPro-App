@@ -1,7 +1,9 @@
 import { HttpError } from '../lib/http.js';
 
-// Snaps tapped waypoints to walkable roads with a Valhalla router. Falls back to
-// straight lines when the router is slow or down, so route building never breaks.
+// Snaps tapped waypoints to walkable roads and paths with a Valhalla router. Falls
+// back to straight lines when the router is slow or down, so route building never
+// breaks. A waypoint marked "offroad" is reached in a straight line on purpose:
+// that is how a route crosses a field, a beach or a trail the map does not know.
 
 export function decodePolyline(encoded, precision = 6) {
   const factor = 10 ** precision;
@@ -47,11 +49,54 @@ export function haversineMiles(a, b) {
   return 2 * 3958.7613 * Math.asin(Math.sqrt(h));
 }
 
-function straightPath(points) {
-  const path = points.map((p) => ({ lat: p.lat, lng: p.lon }));
-  let total = 0;
-  for (let i = 1; i < path.length; i += 1) total += haversineMiles(path[i - 1], path[i]);
-  return { snapped: false, path, distance_mi: Number(total.toFixed(3)) };
+const validPoint = (p) =>
+  Number.isFinite(p.lat) && Number.isFinite(p.lng) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180;
+
+// Cleans stored or posted waypoints into { lat, lng, offroad }.
+export function readWaypoints(raw) {
+  return (Array.isArray(raw) ? raw : []).map((p) => ({
+    lat: Number(p?.lat),
+    lng: Number(p?.lng),
+    offroad: p?.offroad === true,
+  }));
+}
+
+// Splits a route into runs of waypoints that are all joined the same way. Each
+// section starts on the last waypoint of the one before. "offroad" on a waypoint
+// describes the leg arriving at it, so it means nothing on the first one.
+export function routeSections(points) {
+  const sections = [];
+  for (let i = 1; i < points.length; i += 1) {
+    const offroad = points[i].offroad === true;
+    const last = sections[sections.length - 1];
+    if (last && last.offroad === offroad) last.points.push(points[i]);
+    else sections.push({ offroad, points: [points[i - 1], points[i]] });
+  }
+  return sections;
+}
+
+export function legShape(leg) {
+  if (Array.isArray(leg?.shape)) return leg.shape.map((c) => [Number(c[0]), Number(c[1])]);
+  if (typeof leg?.shape === 'string' && leg.shape) return decodePolyline(leg.shape, 6);
+  return [];
+}
+
+// One request to the router for a run of waypoints. Throws when it cannot answer.
+export async function fetchTrip(config, points, options, userAgent) {
+  const payload = {
+    locations: points.map((p) => ({ lat: p.lat, lon: p.lng })),
+    costing: 'pedestrian',
+    units: 'miles',
+    ...options,
+  };
+  const res = await fetch(routerRequestUrl(config, payload), {
+    signal: AbortSignal.timeout(9000),
+    headers: { 'User-Agent': userAgent },
+  });
+  if (!res.ok) throw new Error('router responded ' + res.status);
+  const trip = (await res.json())?.trip;
+  if (!Array.isArray(trip?.legs) || !trip.legs.length) throw new Error('router returned no legs');
+  return trip;
 }
 
 export default async function snapRoute({ body, config }) {
@@ -59,43 +104,40 @@ export default async function snapRoute({ body, config }) {
   if (raw.length < 2) throw new HttpError(400, 'At least two waypoints are required');
   if (raw.length > 40) throw new HttpError(400, 'Too many waypoints (max 40)');
 
-  const points = raw.map((p) => ({ lat: Number(p?.lat), lon: Number(p?.lng) }));
-  const valid = points.every(
-    (p) => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180
-  );
-  if (!valid) throw new HttpError(400, 'Invalid coordinates');
+  const points = readWaypoints(raw);
+  if (!points.every(validPoint)) throw new HttpError(400, 'Invalid coordinates');
 
-  if (!config.routerUrl || config.routerUrl === 'off') return straightPath(points);
+  const routerOn = Boolean(config.routerUrl) && config.routerUrl !== 'off';
+  const path = [];
+  const add = (lat, lng) => {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const p = { lat: Number(lat.toFixed(6)), lng: Number(lng.toFixed(6)) };
+    const last = path[path.length - 1];
+    if (last && last.lat === p.lat && last.lng === p.lng) return;
+    path.push(p);
+  };
 
-  const payload = { locations: points, costing: 'pedestrian', units: 'miles', directions_type: 'none' };
-  const url = routerRequestUrl(config, payload);
-
-  try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(9000),
-      headers: { 'User-Agent': 'VantraRun route builder' },
-    });
-    if (!res.ok) throw new Error(`router responded ${res.status}`);
-    const data = await res.json();
-    const path = [];
-    for (const leg of data?.trip?.legs || []) {
-      let pts = [];
-      if (Array.isArray(leg?.shape)) pts = leg.shape.map((c) => ({ lat: Number(c[0]), lng: Number(c[1]) }));
-      else if (typeof leg?.shape === 'string' && leg.shape) {
-        pts = decodePolyline(leg.shape, 6).map(([lat, lng]) => ({ lat, lng }));
+  // "snapped" is false only when a section that should follow roads could not.
+  let snapped = true;
+  for (const section of routeSections(points)) {
+    let routed = null;
+    if (!section.offroad) {
+      if (routerOn) {
+        try {
+          const trip = await fetchTrip(config, section.points, { directions_type: 'none' }, 'VantraRun route builder');
+          const shape = trip.legs.flatMap(legShape);
+          if (shape.length >= 2) routed = shape;
+        } catch {
+          routed = null;
+        }
       }
-      for (const p of pts) {
-        if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue;
-        const last = path[path.length - 1];
-        if (last && Math.abs(last.lat - p.lat) < 1e-9 && Math.abs(last.lng - p.lng) < 1e-9) continue;
-        path.push({ lat: Number(p.lat.toFixed(6)), lng: Number(p.lng.toFixed(6)) });
-      }
+      if (!routed) snapped = false;
     }
-    if (path.length < 2) throw new Error('router returned no geometry');
-    let total = 0;
-    for (let i = 1; i < path.length; i += 1) total += haversineMiles(path[i - 1], path[i]);
-    return { snapped: true, path, distance_mi: Number(total.toFixed(3)) };
-  } catch {
-    return straightPath(points);
+    if (routed) for (const [lat, lng] of routed) add(lat, lng);
+    else for (const p of section.points) add(p.lat, p.lng);
   }
+
+  let total = 0;
+  for (let i = 1; i < path.length; i += 1) total += haversineMiles(path[i - 1], path[i]);
+  return { snapped, path, distance_mi: Number(total.toFixed(3)) };
 }
