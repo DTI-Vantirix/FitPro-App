@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { describe, test } from 'node:test';
 import { PLANS, TRIAL_DAYS, planForPrice } from '../src/billing/plans.js';
 import { verifyStripeSignature } from '../src/billing/signature.js';
+import { entitlementFromSubscription } from '../src/billing/sync.js';
 import { STRIPE_API_VERSION, StripeError, createStripe, encodeForm } from '../src/billing/stripe.js';
 import { loadConfig } from '../src/config.js';
 
@@ -242,5 +243,92 @@ describe('the Stripe client', () => {
     const stripe = createStripe(loadConfig({ NODE_ENV: 'test' }), { fetch });
     await assert.rejects(stripe.listSubscriptions('cus_1'), (error) => error instanceof StripeError && error.status === 503);
     assert.equal(requests.length, 0);
+  });
+});
+
+describe('a Stripe subscription as our entitlement row', () => {
+  const config = loadConfig({ NODE_ENV: 'test', ...KEYS });
+  const now = new Date('2026-12-01T12:00:00Z');
+  const at = (iso) => Math.floor(new Date(iso).getTime() / 1000);
+  const quiet = { warn: () => {} };
+  const subscription = (patch = {}, item = {}) => ({
+    id: 'sub_1',
+    object: 'subscription',
+    customer: 'cus_1',
+    status: 'active',
+    cancel_at: null,
+    cancel_at_period_end: false,
+    canceled_at: null,
+    ended_at: null,
+    trial_start: null,
+    trial_end: null,
+    items: {
+      data: [{ current_period_start: at('2026-11-20T00:00:00Z'), current_period_end: at('2026-12-20T00:00:00Z'), price: { id: 'price_m' }, ...item }],
+    },
+    ...patch,
+  });
+  const map = (patch, item) => entitlementFromSubscription(config, subscription(patch, item), now, quiet);
+
+  test('trialing is a trial that ends when the trial does', () => {
+    assert.deepEqual(
+      map({ status: 'trialing', trial_start: at('2026-11-28T00:00:00Z'), trial_end: at('2026-12-05T00:00:00Z') }, { current_period_end: at('2026-12-05T00:00:00Z') }),
+      {
+        external_id: 'sub_1',
+        status: 'trial',
+        plan: 'monthly',
+        expires_at: '2026-12-05T00:00:00.000Z',
+        cancel_at_period_end: false,
+        trial_started_at: '2026-11-28T00:00:00.000Z',
+      }
+    );
+  });
+
+  test('active runs to the end of the period, read from the item', () => {
+    const row = map({ current_period_end: at('2030-01-01T00:00:00Z') }, { price: { id: 'price_a' } });
+    assert.deepEqual([row.status, row.plan, row.expires_at, row.trial_started_at], ['active', 'annual', '2026-12-20T00:00:00.000Z', null]);
+  });
+
+  test('the top-level period end is used only when the item has none', () => {
+    const row = map({ current_period_end: at('2026-12-25T00:00:00Z') }, { current_period_end: undefined });
+    assert.equal(row.expires_at, '2026-12-25T00:00:00.000Z');
+  });
+
+  test('past_due is grace, counted from the start of the unpaid period', () => {
+    const row = map({ status: 'past_due' });
+    assert.deepEqual([row.status, row.expires_at], ['grace', '2026-11-20T00:00:00.000Z']);
+  });
+
+  test('canceled, unpaid, incomplete_expired and paused are expired, at the time Stripe ended them', () => {
+    for (const status of ['canceled', 'unpaid', 'incomplete_expired', 'paused']) {
+      const row = map({ status, ended_at: at('2026-11-30T00:00:00Z'), canceled_at: at('2026-11-29T00:00:00Z') });
+      assert.deepEqual([row.status, row.expires_at, row.cancel_at_period_end], ['expired', '2026-11-30T00:00:00.000Z', false], status);
+    }
+    assert.equal(map({ status: 'canceled', canceled_at: at('2026-11-29T00:00:00Z') }).expires_at, '2026-11-29T00:00:00.000Z');
+    assert.equal(map({ status: 'unpaid' }).expires_at, now.toISOString());
+  });
+
+  test('incomplete, and a status we do not know, write nothing', () => {
+    assert.equal(map({ status: 'incomplete' }), null);
+    assert.equal(map({ status: 'something_new' }), null);
+    assert.equal(entitlementFromSubscription(config, null, now, quiet), null);
+  });
+
+  test('cancelling at the end of the period keeps the row live and sets the flag', () => {
+    const row = map({ cancel_at_period_end: true });
+    assert.deepEqual([row.status, row.cancel_at_period_end], ['active', true]);
+    // newer subscriptions may carry the end as a date instead of the flag
+    assert.equal(map({ cancel_at: at('2026-12-20T00:00:00Z') }).cancel_at_period_end, true);
+  });
+
+  test('an unknown price gives no plan and a warning, never a refusal', () => {
+    const warnings = [];
+    const row = entitlementFromSubscription(config, subscription({}, { price: { id: 'price_other' } }), now, { warn: (m) => warnings.push(m) });
+    assert.deepEqual([row.status, row.plan], ['active', null]);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /price_other/);
+  });
+
+  test('a paid row is never written without an end date', () => {
+    assert.equal(map({ status: 'active' }, { current_period_end: undefined }), null);
   });
 });

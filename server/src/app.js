@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { registerAuthRoutes } from './auth/routes.js';
 import { authenticate } from './auth/users.js';
+import { createStripe } from './billing/stripe.js';
 import { registerEntityRoutes } from './entities/routes.js';
 import { recordServerError, registerErrorRoutes } from './errors.js';
 import { createEntityService } from './entities/service.js';
@@ -34,7 +35,8 @@ function databaseError(error) {
   return null;
 }
 
-export function createApp({ db, config, registry }) {
+// `stripe` is the one object that talks to Stripe (src/billing/stripe.js). Tests pass a fake.
+export function createApp({ db, config, registry, stripe = createStripe(config) }) {
   const entities = createEntityService(db, registry);
   const router = new Router();
 
@@ -123,6 +125,7 @@ export function createApp({ db, config, registry }) {
         params: match.params,
         db,
         config,
+        stripe,
         body: wantsJson ? await readJson(req) : {},
         user: await authenticate(req, db, config),
       };

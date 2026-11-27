@@ -15,6 +15,7 @@ import { hashPassword } from '../src/auth/crypto.js';
 import { loadRegistry } from '../src/entities/registry.js';
 import { migrate } from '../src/migrate.js';
 import { createPsqlDb } from './psql-db.js';
+import { TEST_PRICES, TEST_STRIPE, createFakeStripe, daysFromNowUnix, signedEvent } from './stripe-fake.js';
 
 const DB_URL = process.env.TEST_DATABASE_URL || 'postgres://fitpro:fitpro@localhost:5432/fitpro_test';
 
@@ -122,8 +123,9 @@ before(async () => {
 
 // A second instance of the API on the same database with some settings changed,
 // for behaviour that sits behind a setting. Returns its address and a way to stop it.
-async function startApp(overrides) {
-  const other = http.createServer(createApp({ db, config: { ...testConfig, ...overrides }, registry }));
+// `stripe` replaces the Stripe client with a fake (test/stripe-fake.js).
+async function startApp(overrides, { stripe } = {}) {
+  const other = http.createServer(createApp({ db, config: { ...testConfig, ...overrides }, registry, ...(stripe ? { stripe } : {}) }));
   await new Promise((r) => other.listen(0, r));
   return {
     origin: `http://127.0.0.1:${other.address().port}`,
@@ -1833,5 +1835,231 @@ describe('your data', () => {
     const [code] = await db.query(`select status, used_by_id from invite_codes where used_by_email = 'alice@example.com'`, []);
     assert.equal(code.status, 'used');
     assert.equal(code.used_by_id ?? null, null, 'invite history keeps the code but forgets the user');
+  });
+});
+
+// ---------------------------------------------------------------- Stripe (stage 2)
+// Every app in these tests gets a fake Stripe (test/stripe-fake.js): nothing here
+// reaches the network. `shop()` is the API as it runs when it is selling.
+const SELLING = { subscriptions: true, selling: true, stripe: TEST_STRIPE };
+const UNAVAILABLE = { status: 503, data: { error: 'Subscriptions are not available right now.' } };
+const PROVIDER_DOWN = { status: 502, data: { error: 'We could not reach the payment provider. Try again in a moment.' } };
+
+async function shop(overrides = {}, fakeOptions = {}) {
+  const fake = createFakeStripe(fakeOptions);
+  const app = await startApp({ ...SELLING, ...overrides }, { stripe: fake });
+  const on = (method, url, options = {}) => call(method, url, { ...options, origin: app.origin });
+  return {
+    ...app,
+    fake,
+    on,
+    subscription: (who, body) => on('POST', '/api/functions/subscription', { token: who.token, body }),
+    access: (who) => on('POST', '/api/functions/inviteAccess', { token: who.token, body: { action: 'status' } }),
+    runs: (who) => on('POST', '/api/entities/Run/query', { token: who.token, body: {} }),
+    // The newest checkout session the fake holds for this account.
+    sessionOf: (who) => [...fake.state.sessions.values()].filter((s) => s.client_reference_id === who.user.id).at(-1),
+    // Checkout and Stripe's page, with no webhook: returns the fake's subscription.
+    async subscribe(who, plan = 'monthly') {
+      const res = await on('POST', '/api/functions/subscription', { token: who.token, body: { action: 'checkout', plan } });
+      assert.equal(res.status, 200, JSON.stringify(res.data));
+      return fake.completeCheckout(this.sessionOf(who).id);
+    },
+  };
+}
+
+describe('subscribing on the website', () => {
+  let store;
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
+
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('status says whether the server is selling', async () => {
+    const pia = await legacyUser('pia.status@example.com');
+    const fresh = { trial_available: true, customer: false, subscription: null, duplicate: false };
+    assert.deepEqual(await call('POST', '/api/functions/subscription', { token: pia.token, body: { action: 'status' } }), {
+      status: 200, data: { selling: false, ...fresh },
+    });
+    const switchOnly = await startApp({ subscriptions: true });
+    try {
+      const res = await call('POST', '/api/functions/subscription', { token: pia.token, body: {}, origin: switchOnly.origin });
+      assert.deepEqual(res, { status: 200, data: { selling: false, ...fresh } });
+    } finally {
+      await switchOnly.close();
+    }
+    assert.deepEqual(await store.subscription(pia, { action: 'status' }), { status: 200, data: { selling: true, ...fresh } });
+    assert.equal(store.fake.calls.length, 0, 'reading the status never calls Stripe');
+    assert.equal((await store.subscription(pia, { action: 'dance' })).status, 400);
+  });
+
+  test('checkout returns the address at Stripe and asks for a 7-day trial once', async () => {
+    const tom = await legacyUser('tom.trial@example.com');
+    const first = await store.subscription(tom, { action: 'checkout', plan: 'monthly' });
+    assert.equal(first.status, 200, JSON.stringify(first.data));
+    const session = store.sessionOf(tom);
+    assert.deepEqual(first.data, { url: session.url });
+    const [made] = store.fake.callsTo('createCheckoutSession').filter((c) => c.args.userId === tom.user.id);
+    assert.equal(made.args.trialDays, 7);
+    assert.equal(made.args.priceId, TEST_STRIPE.prices.monthly);
+    assert.equal(made.args.successUrl, `${testConfig.appUrl}/?checkout=success`);
+    assert.equal(made.args.cancelUrl, `${testConfig.appUrl}/?checkout=cancelled`);
+    assert.equal(session.client_reference_id, tom.user.id);
+    const row = await userRow(tom.user.id);
+    assert.match(row.stripe_customer_id, /^cus_/);
+    assert.equal(row.stripe_customer_id, session.customer);
+    assert.equal(row.trial_used_at, null, 'opening checkout does not use up the trial');
+    assert.equal((await store.subscription(tom, { action: 'status' })).data.customer, true);
+
+    // once the trial has been had, on either platform, the next checkout starts paid
+    await db.query('update users set trial_used_at = now() where id = $1 returning id', [tom.user.id]);
+    assert.equal((await store.subscription(tom, { action: 'status' })).data.trial_available, false);
+    const second = await store.subscription(tom, { action: 'checkout', plan: 'annual' });
+    assert.equal(second.status, 200, JSON.stringify(second.data));
+    const again = store.fake.callsTo('createCheckoutSession').filter((c) => c.args.userId === tom.user.id).at(-1);
+    assert.equal(again.args.trialDays, 0);
+    assert.equal(again.args.priceId, TEST_STRIPE.prices.annual);
+    assert.equal(again.args.customerId, row.stripe_customer_id, 'the same customer is used again');
+  });
+
+  test('the plan must be one of the two', async () => {
+    const pat = await legacyUser('pat.plan@example.com');
+    for (const plan of [undefined, 'weekly', 'price_monthly_test', 42]) {
+      assert.deepEqual(await store.subscription(pat, { action: 'checkout', plan }), {
+        status: 400, data: { error: 'Choose the monthly or the annual plan.' },
+      });
+    }
+    assert.equal(store.sessionOf(pat), undefined);
+  });
+
+  test('checkout is not offered while the switch is off or the keys are missing', async () => {
+    const olga = await legacyUser('olga.off@example.com');
+    const fake = createFakeStripe();
+    // keys present, switch off
+    const switchOff = await startApp({ stripe: TEST_STRIPE }, { stripe: fake });
+    // switch on, keys missing
+    const noKeys = await startApp({ subscriptions: true }, { stripe: fake });
+    try {
+      for (const app of [switchOff, noKeys]) {
+        const res = await call('POST', '/api/functions/subscription', { token: olga.token, body: { action: 'checkout', plan: 'monthly' }, origin: app.origin });
+        assert.deepEqual(res, UNAVAILABLE);
+      }
+      assert.deepEqual(await call('POST', '/api/functions/subscription', { token: olga.token, body: { action: 'checkout', plan: 'monthly' } }), UNAVAILABLE);
+    } finally {
+      await switchOff.close();
+      await noKeys.close();
+    }
+    assert.equal(fake.calls.length, 0, 'Stripe was never called');
+    assert.equal((await userRow(olga.user.id)).stripe_customer_id, null);
+  });
+
+  test('a price at Stripe that does not match the plan stops checkout', async () => {
+    const mia = await legacyUser('mia.mismatch@example.com');
+    const wrongAmount = { ...TEST_PRICES, [TEST_STRIPE.prices.monthly]: { ...TEST_PRICES[TEST_STRIPE.prices.monthly], unit_amount: 599 } };
+    const wrongInterval = { ...TEST_PRICES, [TEST_STRIPE.prices.annual]: { ...TEST_PRICES[TEST_STRIPE.prices.annual], recurring: { interval: 'month', interval_count: 1 } } };
+    const wrongCurrency = { ...TEST_PRICES, [TEST_STRIPE.prices.annual]: { ...TEST_PRICES[TEST_STRIPE.prices.annual], currency: 'eur' } };
+    for (const prices of [wrongAmount, wrongInterval, wrongCurrency]) {
+      const bad = await shop({}, { prices });
+      try {
+        // either plan is refused: nobody is sent to checkout while one price is wrong
+        assert.deepEqual(await bad.subscription(mia, { action: 'checkout', plan: 'annual' }), UNAVAILABLE);
+        assert.deepEqual(await bad.subscription(mia, { action: 'checkout', plan: 'monthly' }), UNAVAILABLE);
+        assert.equal(bad.fake.state.sessions.size, 0);
+        assert.equal(bad.fake.state.customers.size, 0);
+      } finally {
+        await bad.close();
+      }
+    }
+    // the owner is told, in the error reports
+    let reports = [];
+    for (let i = 0; i < 40 && !reports.length; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      reports = await db.query(`select message, context from client_errors where platform = 'server' and message like 'The Stripe price for the%'`, []);
+    }
+    assert.ok(reports.length >= 1, 'a mismatch is written to the error reports');
+    assert.match(reports[0].message, /does not match/);
+    await db.query(`delete from client_errors where platform = 'server' returning id`, []);
+  });
+
+  test('someone with an invite code or a free pass is never sent to checkout', async () => {
+    const ALREADY = { status: 409, data: { error: 'You already have access, so there is nothing to pay.' } };
+    const ivy = await invitedUser('ivy.invited@example.com');
+    const gus = await legacyUser('gus.granted@example.com');
+    await db.tx((tx) => grantFree(tx, { userId: gus.user.id, source: 'admin', grantedBy: 'owner@example.com' }));
+    for (const who of [ivy, gus, admin]) {
+      assert.deepEqual(await store.subscription(who, { action: 'checkout', plan: 'monthly' }), ALREADY);
+      assert.equal((await userRow(who.user.id)).stripe_customer_id, null);
+    }
+    assert.equal(store.fake.callsTo('createCustomer').filter((c) => [ivy, gus, admin].some((w) => w.user.id === c.args.userId)).length, 0);
+  });
+
+  test('two checkouts at once share one Stripe customer and leave one open session', async (t) => {
+    if (db.transactional === false) return t.skip('needs real row locks; the psql test driver does not hold transactions');
+    const twin = await shop();
+    try {
+      const tab = await legacyUser('tab.twice@example.com');
+      const [a, b] = await Promise.all([
+        twin.subscription(tab, { action: 'checkout', plan: 'monthly' }),
+        twin.subscription(tab, { action: 'checkout', plan: 'annual' }),
+      ]);
+      assert.deepEqual([a.status, b.status], [200, 200], JSON.stringify([a.data, b.data]));
+      assert.equal(twin.fake.state.customers.size, 1);
+      const statuses = [...twin.fake.state.sessions.values()].map((s) => s.status).sort();
+      assert.deepEqual(statuses, ['expired', 'open']);
+      // and a third, later, leaves still only one open
+      await twin.subscription(tab, { action: 'checkout', plan: 'monthly' });
+      assert.equal([...twin.fake.state.sessions.values()].filter((s) => s.status === 'open').length, 1);
+      assert.equal(twin.fake.state.customers.size, 1);
+    } finally {
+      await twin.close();
+    }
+  });
+
+  test('checkout is refused once a subscription exists at Stripe, even before its webhook', async () => {
+    const SUBSCRIBED = { status: 409, data: { error: 'You already have a subscription. Manage it in Settings.' } };
+    const paz = await legacyUser('paz.paid@example.com');
+    assert.deepEqual(await store.runs(paz), NO_ACCESS);
+    await store.subscribe(paz, 'monthly');
+    // no webhook has arrived; a second tab tries to pay again
+    assert.deepEqual(await store.subscription(paz, { action: 'checkout', plan: 'monthly' }), SUBSCRIBED);
+    assert.equal((await store.runs(paz)).status, 200, 'and the check let the person in');
+    assert.equal([...store.fake.state.sessions.values()].filter((s) => s.client_reference_id === paz.user.id).length, 1);
+    const [row] = await entitlementsOf(paz.user.id);
+    assert.deepEqual([row.source, row.status, row.plan], ['stripe', 'trial', 'monthly']);
+    // with the row in place the refusal needs no call to Stripe at all
+    const before = store.fake.calls.length;
+    assert.deepEqual(await store.subscription(paz, { action: 'checkout', plan: 'annual' }), SUBSCRIBED);
+    assert.equal(store.fake.calls.length, before);
+  });
+
+  test('a Stripe failure is a clear 502 and nothing is half-made', async () => {
+    const fay = await legacyUser('fay.fail@example.com');
+    for (const method of ['createCustomer', 'listOpenCheckoutSessions', 'createCheckoutSession']) {
+      store.fake.failNext(method);
+      assert.deepEqual(await store.subscription(fay, { action: 'checkout', plan: 'monthly' }), PROVIDER_DOWN, method);
+      assert.equal(store.sessionOf(fay), undefined, `no session after ${method} failed`);
+    }
+    const ok = await store.subscription(fay, { action: 'checkout', plan: 'monthly' });
+    assert.equal(ok.status, 200, JSON.stringify(ok.data));
+    assert.equal([...store.fake.state.customers.values()].filter((c) => c.metadata.user_id === fay.user.id).length, 1);
+    assert.equal((await entitlementsOf(fay.user.id)).length, 0);
+  });
+
+  test('the subscription function is open to an account without access, and closed to nobody signed in', async () => {
+    const lee = await legacyUser('lee.locked@example.com');
+    assert.deepEqual(await store.runs(lee), NO_ACCESS);
+    assert.equal((await store.subscription(lee, { action: 'status' })).status, 200);
+    assert.deepEqual(await store.on('POST', '/api/functions/subscription', { body: { action: 'status' } }), { status: 401, data: { error: 'Unauthorized' } });
+  });
+
+  test('a person is stopped after ten checkouts in an hour', async () => {
+    const rex = await legacyUser('rex.repeat@example.com');
+    let last;
+    for (let i = 0; i < 11; i++) last = await store.subscription(rex, { action: 'checkout', plan: 'monthly' });
+    assert.equal(last.status, 429);
+    assert.equal(store.fake.callsTo('createCheckoutSession').filter((c) => c.args.userId === rex.user.id).length, 10);
   });
 });
