@@ -68,6 +68,9 @@ export function loadConfig(env = process.env) {
     routerUrl: env.ROUTER_URL || 'https://valhalla1.openstreetmap.de/route',
     // For a hosted Valhalla provider that wants a key (sent as api_key). Empty = none.
     routerApiKey: env.ROUTER_API_KEY || '',
+    // Off: sign-up needs an invite code. On: anyone can sign up, and an account
+    // without access is told to subscribe or enter a code (docs/decisions.md).
+    subscriptions: env.SUBSCRIPTIONS === 'on',
     // Outside production, auth responses include the emailed code so you can
     // test sign-up without a mail provider. Never on in production.
     exposeDevCodes: !production && env.EXPOSE_DEV_CODES !== 'false',

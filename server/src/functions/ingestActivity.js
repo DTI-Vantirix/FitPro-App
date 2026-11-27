@@ -1,6 +1,6 @@
 import { HttpError } from '../lib/http.js';
 import { isUuid } from '../lib/serialize.js';
-import { hasAccess } from './inviteAccess.js';
+import { hasAccess } from '../access.js';
 
 // The single write path for synced health data (Apple Health, Health Connect,
 // Garmin, manual). Contract: docs/native-contract.md. Ported unchanged from the

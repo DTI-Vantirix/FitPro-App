@@ -7,8 +7,9 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
+import { GRACE_DAYS, accessOf, grantFree, hasAccess } from '../src/access.js';
 import { createApp } from '../src/app.js';
-import { loadConfig } from '../src/config.js';
+import { SERVER_ROOT, loadConfig } from '../src/config.js';
 import { bootstrapAdmin } from '../src/auth/bootstrap.js';
 import { loadRegistry } from '../src/entities/registry.js';
 import { migrate } from '../src/migrate.js';
@@ -67,8 +68,14 @@ async function signUp(email, password = 'correct-horse-1') {
 async function legacyUser(email) {
   const account = await signUp(email);
   await db.query('delete from access_grants where user_id = $1 returning id', [account.user.id]);
+  await db.query('delete from entitlements where user_id = $1 returning id', [account.user.id]);
   return account;
 }
+
+const userRow = async (id) => (await db.query('select * from users where id = $1', [id]))[0];
+const entitlementsOf = (userId) =>
+  db.query('select * from entitlements where user_id = $1 order by created_date, source', [userId]);
+const daysFromNow = (days) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 
 async function signUpWith(email, inviteCode, password = 'correct-horse-1') {
   const reg = await call('POST', '/api/auth/register', {
@@ -383,6 +390,168 @@ describe('invite access', () => {
     assert.equal(list.data.grants.length - before.grants.length, 1);
     const grant = await call('POST', '/api/entities/AccessGrant/query', { token: nina.token, body: {} });
     assert.equal(grant.data.items.length, 1, 'a user can read their own grant');
+  });
+});
+
+describe('access', () => {
+  test('an account that signed up with a code has access because of the invite', async () => {
+    const code = await mintCode();
+    const ada = await signUpWith('ada.access@example.com', code);
+    const access = await accessOf(db, await userRow(ada.user.id));
+    assert.equal(access.allowed, true);
+    assert.equal(access.admin, false);
+    assert.equal(access.reason, 'invite');
+    assert.equal(access.source, 'invite');
+    assert.equal(access.plan, null);
+    assert.equal(access.expires_at, null);
+    assert.equal(access.cancel_at_period_end, false);
+    assert.equal(await hasAccess(db, await userRow(ada.user.id)), true);
+
+    const rows = await entitlementsOf(ada.user.id);
+    assert.deepEqual(rows.map((r) => [r.source, r.status, r.granted_by]), [['invite', 'active', code]]);
+    const grants = await db.query('select code from access_grants where user_id = $1', [ada.user.id]);
+    assert.deepEqual(grants.map((g) => g.code), [code], 'the invite-code screen still reads access_grants');
+  });
+
+  test('an admin has access by role alone, with no entitlement row', async () => {
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'role-only@example.com', ADMIN_PASSWORD: 'a-long-enough-password' }), 'created');
+    const [row] = await db.query(`select * from users where email = 'role-only@example.com'`, []);
+    assert.equal((await entitlementsOf(row.id)).length, 0);
+    const access = await accessOf(db, row);
+    assert.equal(access.allowed, true);
+    assert.equal(access.admin, true);
+    assert.equal(access.reason, 'admin');
+    assert.equal(access.source, null);
+    assert.equal(await hasAccess(db, row), true);
+  });
+
+  test('a verified account with no grant has no access until it redeems a code', async () => {
+    const lena = await legacyUser('lena.access@example.com');
+    const before = await accessOf(db, await userRow(lena.user.id));
+    assert.equal(before.allowed, false);
+    assert.equal(before.admin, false);
+    assert.equal(before.reason, null);
+    assert.equal(before.source, null);
+    assert.equal(await hasAccess(db, await userRow(lena.user.id)), false);
+
+    const code = await mintCode();
+    const res = await call('POST', '/api/functions/inviteAccess', { token: lena.token, body: { action: 'redeem', code } });
+    assert.equal(res.data.allowed, true);
+    const after = await accessOf(db, await userRow(lena.user.id));
+    assert.equal(after.allowed, true);
+    assert.equal(after.reason, 'invite');
+    assert.deepEqual((await entitlementsOf(lena.user.id)).map((r) => [r.source, r.status, r.granted_by]), [['invite', 'active', code]]);
+  });
+
+  test('an entitlement just past its end is good for the allowance, and not after it', async () => {
+    const paul = await legacyUser('paul.access@example.com');
+    const user = await userRow(paul.user.id);
+    const [row] = await db.query(
+      `insert into entitlements (user_id, source, status, plan, expires_at, external_id)
+       values ($1, 'stripe', 'active', 'monthly', $2, 'sub_paul') returning *`,
+      [user.id, daysFromNow(-(GRACE_DAYS - 1))]
+    );
+    const inGrace = await accessOf(db, user);
+    assert.equal(inGrace.allowed, true);
+    assert.equal(inGrace.reason, 'subscription');
+    assert.equal(inGrace.plan, 'monthly');
+    assert.equal(new Date(inGrace.expires_at).getTime(), new Date(row.expires_at).getTime());
+
+    await db.query('update entitlements set expires_at = $2 where id = $1 returning id', [row.id, daysFromNow(-(GRACE_DAYS + 1))]);
+    const past = await accessOf(db, user);
+    assert.equal(past.allowed, false);
+    assert.equal(past.reason, null);
+    assert.equal(past.plan, null);
+  });
+
+  test('with an invite and a paid entitlement, the paid one is reported and either keeps access', async () => {
+    const tess = await signUp('tess.access@example.com');
+    const user = await userRow(tess.user.id);
+    await db.query(
+      `insert into entitlements (user_id, source, status, plan, expires_at, cancel_at_period_end, external_id)
+       values ($1, 'stripe', 'trial', 'annual', $2, true, 'sub_tess') returning id`,
+      [user.id, daysFromNow(5)]
+    );
+    const both = await accessOf(db, user);
+    assert.equal(both.allowed, true);
+    assert.equal(both.reason, 'trial', 'paid before free');
+    assert.equal(both.source, 'stripe');
+    assert.equal(both.plan, 'annual');
+    assert.equal(both.cancel_at_period_end, true);
+
+    await db.query(`update entitlements set status = 'active' where user_id = $1 and source = 'stripe' returning id`, [user.id]);
+    assert.equal((await accessOf(db, user)).reason, 'subscription');
+
+    // the free pass goes: the paid one still holds
+    await db.query(`update entitlements set status = 'revoked' where user_id = $1 and source = 'invite' returning id`, [user.id]);
+    const paidOnly = await accessOf(db, user);
+    assert.equal(paidOnly.allowed, true);
+    assert.equal(paidOnly.source, 'stripe');
+
+    // the paid one lapses and the free one comes back: access is by invite again
+    await db.query(`update entitlements set status = 'expired' where user_id = $1 and source = 'stripe' returning id`, [user.id]);
+    assert.equal((await accessOf(db, user)).allowed, false);
+    await db.query(`update entitlements set status = 'active' where user_id = $1 and source = 'invite' returning id`, [user.id]);
+    const freeOnly = await accessOf(db, user);
+    assert.equal(freeOnly.allowed, true);
+    assert.equal(freeOnly.reason, 'invite');
+  });
+
+  test('grantFree gives one row per person and source, and brings a revoked one back', async () => {
+    const gus = await legacyUser('gus.access@example.com');
+    const user = await userRow(gus.user.id);
+    const first = await db.tx((tx) => grantFree(tx, { userId: user.id, source: 'admin', grantedBy: 'owner@example.com', note: 'coach' }));
+    assert.deepEqual([first.source, first.status, first.granted_by, first.note], ['admin', 'active', 'owner@example.com', 'coach']);
+    assert.equal((await accessOf(db, user)).reason, 'granted');
+
+    const again = await db.tx((tx) => grantFree(tx, { userId: user.id, source: 'admin', grantedBy: 'other@example.com' }));
+    assert.equal(again.id, first.id, 'granting twice is harmless');
+    assert.deepEqual([again.granted_by, again.note], ['owner@example.com', 'coach'], 'a pass that is still good keeps its history');
+    assert.equal((await entitlementsOf(user.id)).length, 1);
+
+    await db.query(`update entitlements set status = 'revoked' where id = $1 returning id`, [first.id]);
+    assert.equal(await hasAccess(db, user), false);
+    const back = await db.tx((tx) => grantFree(tx, { userId: user.id, source: 'admin', grantedBy: 'other@example.com', note: 'back again' }));
+    assert.deepEqual([back.id, back.status, back.granted_by, back.note], [first.id, 'active', 'other@example.com', 'back again']);
+    assert.equal(await hasAccess(db, user), true);
+
+    await assert.rejects(db.tx((tx) => grantFree(tx, { userId: user.id, source: 'stripe', grantedBy: 'x' })), /free/i);
+  });
+
+  test('the database refuses an unknown source or status, and a second row for one subscription', async () => {
+    const user = await userRow(bob.user.id);
+    const insert = (source, status, externalId) =>
+      db.query('insert into entitlements (user_id, source, status, external_id) values ($1, $2, $3, $4) returning id', [user.id, source, status, externalId]);
+    await assert.rejects(insert('paypal', 'active', null));
+    await assert.rejects(insert('stripe', 'paused', null));
+    await assert.rejects(insert('invite', 'active', null), 'bob already has his invite row');
+    await insert('apple', 'expired', 'orig-tx-1');
+    await assert.rejects(insert('apple', 'active', 'orig-tx-1'));
+    await db.query(`delete from entitlements where user_id = $1 and source = 'apple' returning id`, [user.id]);
+  });
+
+  test('the migration carries redeemed invite codes over, once', async () => {
+    // an account as it stood before the migration: a grant, and no entitlement yet
+    const old = await legacyUser('old.tester@example.com');
+    await db.query(
+      `insert into access_grants (user_id, email, code, granted_at) values ($1, $2, 'FP-OLD0-CODE', '2026-10-01T09:00:00Z') returning id`,
+      [old.user.id, old.user.email]
+    );
+    assert.equal(await hasAccess(db, await userRow(old.user.id)), false);
+
+    const sql = fs.readFileSync(path.join(SERVER_ROOT, 'migrations', '005_entitlements.sql'), 'utf8');
+    const backfill = /insert into entitlements[\s\S]*?from access_grants[\s\S]*?;/i.exec(sql)?.[0];
+    assert.ok(backfill, 'the migration copies access_grants into entitlements');
+    const total = async () => (await db.query('select count(*)::int as n from entitlements', []))[0].n;
+    const before = await total();
+    await db.exec(backfill);
+    assert.equal(await total(), before + 1, 'only the account that had no row gets one');
+    await db.exec(backfill);
+    assert.equal(await total(), before + 1, 'running it again adds nothing');
+
+    const rows = await entitlementsOf(old.user.id);
+    assert.deepEqual(rows.map((r) => [r.source, r.status, r.granted_by]), [['invite', 'active', 'FP-OLD0-CODE']]);
+    assert.equal((await accessOf(db, await userRow(old.user.id))).reason, 'invite');
   });
 });
 
@@ -981,7 +1150,8 @@ describe('your data', () => {
     const [{ n }] = await db.query(
       `select (select count(*) from posts where created_by_id = $1)::int
             + (select count(*) from connections where to_user_id = $1)::int
-            + (select count(*) from access_grants where user_id = $1)::int as n`,
+            + (select count(*) from access_grants where user_id = $1)::int
+            + (select count(*) from entitlements where user_id = $1)::int as n`,
       [alice.user.id]
     );
     assert.equal(n, 0, 'everything the user owned is gone');
