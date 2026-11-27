@@ -324,6 +324,7 @@ export default function Register() {
             "Create account"
           )}
         </Button>
+        {subscriptions && (
         <p className="text-center text-xs text-muted-foreground">
           By creating an account you agree to the{" "}
           <Link to="/terms" className="text-primary hover:underline">
@@ -335,6 +336,7 @@ export default function Register() {
           </Link>
           .
         </p>
+        )}
       </form>
     </AuthLayout>
   );

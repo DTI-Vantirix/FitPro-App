@@ -141,10 +141,16 @@ export default function SubscriptionCard() {
 
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         Monthly payments are not refundable. Annual: full refund within {REFUND_DAYS} days of the charge, on request to{' '}
-        {SUPPORT_EMAIL}.{' '}
-        <Link to="/terms" className="text-primary hover:underline">
-          Terms of use
-        </Link>
+        {SUPPORT_EMAIL}.
+        {/* The terms page only shows the terms while subscriptions are being sold. */}
+        {status.selling && (
+          <>
+            {' '}
+            <Link to="/terms" className="text-primary hover:underline">
+              Terms of use
+            </Link>
+          </>
+        )}
       </p>
     </section>
   );

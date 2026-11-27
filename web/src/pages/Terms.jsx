@@ -3,8 +3,9 @@
 // price, trial, renewal, cancelling and refunds state what the product does and must
 // stay in step with web/src/lib/plans.js and the paywall. "Liability" and "Governing
 // law" are placeholders in plain words: the lawyer names the state and settles the wording.
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { api } from '@/api/client';
 import { TERMS_UPDATED } from '@/lib/consent';
 
 const SECTIONS = [
@@ -113,13 +114,50 @@ const SECTIONS = [
 ];
 
 export default function Terms() {
+  // The terms only mean something once subscriptions are sold. While the server's
+  // SUBSCRIPTIONS switch is off the page says so and shows no price; nothing links here then.
+  const [inEffect, setInEffect] = useState(null);
+
   useEffect(() => {
     const previous = document.title;
     document.title = 'Terms of use · VantraRun';
+    let alive = true;
+    api.auth
+      .options()
+      .then((options) => alive && setInEffect(options?.subscriptions === true))
+      .catch(() => alive && setInEffect(false));
     return () => {
+      alive = false;
       document.title = previous;
     };
   }, []);
+
+  if (inEffect !== true) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-5 px-4 py-10">
+        <div>
+          <Link to="/" className="text-xs text-muted-foreground transition-colors hover:text-foreground">
+            ← Back to VantraRun
+          </Link>
+          <p className="eyebrow mt-6">Terms</p>
+          <h1 className="mt-1 font-heading text-2xl leading-tight">Terms of use</h1>
+          {inEffect === false && (
+            <>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">These terms are not yet in effect.</p>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                VantraRun is in invite-only testing and nothing is for sale. The terms will be published here before
+                subscriptions open. How we handle your data is in the{' '}
+                <Link to="/privacy" className="text-primary hover:underline">
+                  Privacy policy
+                </Link>
+                .
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl space-y-5 px-4 py-10">
