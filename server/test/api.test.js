@@ -704,6 +704,74 @@ describe('social feed', () => {
   });
 });
 
+describe('friend requests cannot be forced', () => {
+  let cara;
+  let dan;
+  const connect = (from, to, status) =>
+    call('POST', '/api/entities/Connection', {
+      token: from.token,
+      body: { from_user_id: from.user.id, to_user_id: to.user.id, ...(status ? { status } : {}) },
+    });
+  const feedTitles = async (who) =>
+    (await call('POST', '/api/functions/socialFeed', { token: who.token, body: {} })).data.posts.map((p) => p.title);
+
+  before(async () => {
+    cara = await signUp('cara.friend@example.com');
+    dan = await signUp('dan.friend@example.com');
+    await call('POST', '/api/entities/SocialProfile', { token: cara.token, body: { handle: 'cara', visibility: 'private' } });
+    await call('POST', '/api/entities/Post', { token: cara.token, body: { kind: 'run', title: 'cara friends only', visibility: 'friends' } });
+  });
+
+  test('a request to a private account starts pending, whatever the sender asks for', async () => {
+    const forced = await connect(dan, cara, 'accepted');
+    assert.equal(forced.status, 201);
+    assert.equal(forced.data.status, 'pending');
+    assert.ok(!(await feedTitles(dan)).includes('cara friends only'));
+
+    // The sender cannot approve their own request.
+    const selfAccept = await call('PUT', '/api/entities/Connection/' + forced.data.id, { token: dan.token, body: { status: 'accepted' } });
+    assert.equal(selfAccept.status, 403);
+    assert.ok(!(await feedTitles(dan)).includes('cara friends only'));
+
+    // Nor can either side point the request at somebody else.
+    const retarget = await call('PUT', '/api/entities/Connection/' + forced.data.id, { token: cara.token, body: { from_user_id: cara.user.id, to_user_id: alice.user.id } });
+    assert.equal(retarget.status, 403);
+
+    // The person who was asked can accept, and only then do friends-only posts show.
+    const accept = await call('PUT', '/api/entities/Connection/' + forced.data.id, { token: cara.token, body: { status: 'accepted' } });
+    assert.equal(accept.status, 200);
+    assert.equal(accept.data.status, 'accepted');
+    assert.ok((await feedTitles(dan)).includes('cara friends only'));
+    await call('DELETE', '/api/entities/Connection/' + forced.data.id, { token: dan.token });
+  });
+
+  test('a public account still accepts straight away', async () => {
+    const profiles = await call('POST', '/api/entities/SocialProfile/query', { token: cara.token, body: { q: { created_by_id: cara.user.id } } });
+    await call('PUT', '/api/entities/SocialProfile/' + profiles.data.items[0].id, { token: cara.token, body: { visibility: 'public' } });
+    const open = await connect(dan, cara, 'accepted');
+    assert.equal(open.status, 201);
+    assert.equal(open.data.status, 'accepted');
+    await call('DELETE', '/api/entities/Connection/' + open.data.id, { token: dan.token });
+  });
+
+  test('you cannot send a request to yourself, and one made in bulk obeys the same rule', async () => {
+    const self = await connect(dan, dan);
+    assert.equal(self.status, 400);
+
+    const fern = await signUp('fern.friend@example.com');
+    const bulk = await call('POST', '/api/entities/Connection/bulk', {
+      token: dan.token,
+      body: [{ from_user_id: dan.user.id, to_user_id: fern.user.id, status: 'accepted' }],
+    });
+    if (bulk.status === 200 || bulk.status === 201) {
+      const rows = Array.isArray(bulk.data) ? bulk.data : bulk.data.items || [];
+      assert.ok(rows.length && rows.every((r) => r.status === 'pending'), 'a bulk-created request is pending too');
+    } else {
+      assert.ok(bulk.status >= 400);
+    }
+  });
+});
+
 describe('uploads', () => {
   test('upload an image and fetch it back', async () => {
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);

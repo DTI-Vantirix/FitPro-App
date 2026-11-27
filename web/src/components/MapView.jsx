@@ -47,6 +47,21 @@ function Follow({ position, enabled }) {
   return null;
 }
 
+// Publishes the current zoom on the map element (data-zoom), so it can be read
+// without waiting for tiles, which come from the network.
+function ZoomMark() {
+  const map = useMap();
+  useEffect(() => {
+    const mark = () => {
+      map.getContainer().dataset.zoom = String(map.getZoom());
+    };
+    mark();
+    map.on('zoomend', mark);
+    return () => map.off('zoomend', mark);
+  }, [map]);
+  return null;
+}
+
 function ClickCatcher({ onAddPoint }) {
   useMapEvents({
     click(e) {
@@ -103,6 +118,7 @@ export default function MapView({
           attribution='&copy; OpenStreetMap'
           maxZoom={19}
         />
+        <ZoomMark />
         <Fit points={fitPoints} fitKey={fitKey} />
         <Follow position={position} enabled={follow} />
         {editable ? <ClickCatcher onAddPoint={onAddPoint} /> : null}

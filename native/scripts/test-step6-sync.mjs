@@ -87,7 +87,7 @@ await history.clearImportHistory();
 assert.equal((await history.loadImportHistory()).length, 0);
 
 const panel = readFileSync(resolve(root, 'src/ingestion/manual-import-panel.tsx'), 'utf8');
-const activities = readFileSync(resolve(root, 'app/activities.tsx'), 'utf8');
+const activities = readFileSync(resolve(root, 'app/(tabs)/activities.tsx'), 'utf8');
 const session = readFileSync(resolve(root, 'src/auth/session.tsx'), 'utf8');
 assert(panel.includes('submitHealthActivity') && panel.includes('Import selected'));
 assert(panel.includes('adapterId === \'apple\' || adapterId === \'health_connect\''));

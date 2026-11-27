@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Redirect, useRouter } from 'expo-router';
-import { Alert, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useKeepAwake } from 'expo-keep-awake';
-import { Action, ErrorNotice } from '../src/components/Ui';
+import { Action, ErrorNotice, Toggle } from '../src/components/Ui';
 import { prepareAlerts } from '../src/run/device/alerts';
 import { saveMute } from '../src/run/device/prefs';
 import { formatDistanceAway, formatDuration, formatMiles, hrLabel, paceLabel, zoneLine } from '../src/run/format';
@@ -13,8 +13,14 @@ import { Gated, Loading, Screen } from '../src/run/ui/Screen';
 import { useHeartRateSensor, useRun } from '../src/run/use-run';
 import { formatPace, hrBounds } from '../src/run/zones';
 import { colors } from '../src/theme';
+import { heading, stat, type } from '../src/typography';
 
 const STATUS_COLOR = { in: colors.accent, out: colors.notice, none: colors.subtle };
+
+/** In zone is Volt; out of zone is Chalk and says which way; no reading is Steel. */
+function valueColor(status: string): string {
+  return status === 'in' ? STATUS_COLOR.in : status === 'unknown' ? STATUS_COLOR.none : STATUS_COLOR.out;
+}
 
 function Marker({ status }: { status: string }) {
   const symbol = status === 'in' ? '●' : status === 'faster' || status === 'above' ? '▲' : status === 'slower' || status === 'below' ? '▼' : '○';
@@ -76,6 +82,8 @@ function RunLive() {
     void saveMute(next);
   }
 
+  const hrText = run.bpm == null ? (sensor.status === 'lost' ? 'sensor lost' : 'no sensor') : run.hrStatus === 'unknown' ? 'no range set' : hrLabel(run.hrStatus);
+
   return <Screen scroll={false}>
     {config.mode === 'route' && <View style={styles.directions}>
       {run.nav.offRoute
@@ -85,7 +93,7 @@ function RunLive() {
               <Text style={styles.turn} numberOfLines={2}>{run.next.maneuver.instruction}</Text>
               <Text style={styles.turnDistance}>{formatDistanceAway(run.next.metersAway)}</Text>
             </View>
-          : <Text style={styles.turnQuiet}>{directionsMissing ? 'Spoken turns unavailable. Follow the blue line.' : config.route?.name ?? 'Route'}</Text>}
+          : <Text style={styles.turnQuiet}>{directionsMissing ? 'Spoken turns unavailable. Follow the line on the map.' : config.route?.name ?? 'Route'}</Text>}
     </View>}
 
     {showMap && <View style={styles.map}>
@@ -95,24 +103,28 @@ function RunLive() {
 
     <View style={[styles.stats, !showMap && styles.statsTall]}>
       <View style={styles.spread}>
-        <Text style={styles.big}>{formatMiles(run.track.meters / METERS_PER_MILE)} <Text style={styles.unit}>mi</Text></Text>
-        <Text style={styles.big}>{formatDuration(run.movingMs / 1000)}</Text>
+        <View style={styles.block}>
+          <Text style={type.label}>Distance</Text>
+          <Text style={stat(showMap ? 48 : 64)}>{formatMiles(run.track.meters / METERS_PER_MILE)} <Text style={styles.unit}>mi</Text></Text>
+        </View>
+        <View style={[styles.block, styles.right]}>
+          <Text style={type.label}>Time</Text>
+          <Text style={stat(showMap ? 48 : 64)}>{formatDuration(run.movingMs / 1000)}</Text>
+        </View>
       </View>
-      {paused && <Text style={styles.paused}>PAUSED</Text>}
+      {paused && <Text style={styles.paused}>Paused</Text>}
 
-      <View style={styles.metric}>
-        <Text style={styles.metricName}>PACE</Text>
-        <Text style={styles.metricValue}>{formatPace(run.pace)} <Text style={styles.unit}>/mi</Text></Text>
-        <View style={styles.status}><Marker status={run.paceStatus} /><Text style={styles.statusText}>{paceLabel(run.paceStatus)}</Text></View>
-      </View>
-      <View style={styles.metric}>
-        <Text style={styles.metricName}>HR</Text>
-        <Text style={styles.metricValue}>{run.bpm != null ? run.bpm : '--'} <Text style={styles.unit}>bpm</Text></Text>
-        <View style={styles.status}>
-          <Marker status={run.hrStatus} />
-          <Text style={styles.statusText}>
-            {run.bpm == null ? (sensor.status === 'lost' ? 'sensor lost' : 'no sensor') : run.hrStatus === 'unknown' ? 'no range set' : hrLabel(run.hrStatus)}
-          </Text>
+      <View style={styles.rule} />
+      <View style={styles.spread}>
+        <View style={styles.block}>
+          <Text style={type.label}>Pace</Text>
+          <Text style={[stat(showMap ? 36 : 44), { color: valueColor(run.paceStatus) }]}>{formatPace(run.pace)} <Text style={styles.unit}>/mi</Text></Text>
+          <View style={styles.status}><Marker status={run.paceStatus} /><Text style={styles.statusText}>{paceLabel(run.paceStatus)}</Text></View>
+        </View>
+        <View style={[styles.block, styles.divided]}>
+          <Text style={type.label}>Heart rate</Text>
+          <Text style={[stat(showMap ? 36 : 44), { color: valueColor(run.hrStatus) }]}>{run.bpm != null ? run.bpm : '--'} <Text style={styles.unit}>bpm</Text></Text>
+          <View style={styles.status}><Marker status={run.hrStatus} /><Text style={styles.statusText}>{hrText}</Text></View>
         </View>
       </View>
       <Text style={styles.zone}>{zoneLine(config.zone, bounds)}</Text>
@@ -120,11 +132,11 @@ function RunLive() {
       <View style={styles.mutes}>
         <View style={styles.mute}>
           <Text style={styles.muteText}>Pace cues</Text>
-          <Switch accessibilityLabel="Pace cues" value={!run.mute.pace} onValueChange={(on) => changeMute({ ...run.mute, pace: !on })} />
+          <Toggle label="Pace cues" value={!run.mute.pace} onValueChange={(on) => changeMute({ ...run.mute, pace: !on })} />
         </View>
         <View style={styles.mute}>
           <Text style={styles.muteText}>HR cues</Text>
-          <Switch accessibilityLabel="Heart-rate cues" value={!run.mute.hr} onValueChange={(on) => changeMute({ ...run.mute, hr: !on })} />
+          <Toggle label="Heart-rate cues" value={!run.mute.hr} onValueChange={(on) => changeMute({ ...run.mute, hr: !on })} />
         </View>
       </View>
     </View>
@@ -133,8 +145,8 @@ function RunLive() {
     <View style={styles.buttons}>
       <View style={styles.button}>
         {paused
-          ? <Action label="Resume" onPress={() => { void runController.resume().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause))); }} disabled={busy} />
-          : <Action label="Pause" onPress={() => runController.pause()} disabled={busy} secondary />}
+          ? <Action label="Resume" icon="play" onPress={() => { void runController.resume().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause))); }} disabled={busy} />
+          : <Action label="Pause" icon="pause" onPress={() => runController.pause()} disabled={busy} secondary />}
       </View>
       <View style={styles.button}><Action label="Finish" onPress={confirmFinish} busy={busy} secondary={!paused} /></View>
     </View>
@@ -142,29 +154,29 @@ function RunLive() {
 }
 
 const styles = StyleSheet.create({
-  directions: { backgroundColor: colors.panel, borderColor: colors.panelBorder, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 10, minHeight: 62, justifyContent: 'center' },
-  spread: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  turn: { color: colors.text, fontSize: 18, fontWeight: '800', flex: 1 },
-  turnDistance: { color: colors.accent, fontSize: 18, fontWeight: '800' },
-  turnQuiet: { color: colors.muted, fontSize: 15 },
-  offRoute: { color: colors.notice, fontSize: 20, fontWeight: '900' },
+  directions: { backgroundColor: colors.panel, borderColor: colors.panelBorder, borderWidth: 1, borderRadius: 20, padding: 14, marginBottom: 10, minHeight: 62, justifyContent: 'center' },
+  spread: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  turn: { ...heading(18), flex: 1 },
+  turnDistance: { ...stat(24), color: colors.accent },
+  turnQuiet: { ...type.body },
+  offRoute: { ...heading(22), color: colors.notice },
   map: { flex: 1, minHeight: 160, marginBottom: 10 },
-  stats: { backgroundColor: colors.panel, borderColor: colors.panelBorder, borderWidth: 1, borderRadius: 14, padding: 16, gap: 10 },
-  statsTall: { flex: 1, justifyContent: 'center' },
-  big: { color: colors.text, fontSize: 38, fontWeight: '900', fontVariant: ['tabular-nums'] },
-  unit: { color: colors.muted, fontSize: 15, fontWeight: '700' },
-  paused: { color: colors.notice, fontWeight: '900', letterSpacing: 2, fontSize: 13 },
-  metric: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  metricName: { color: colors.subtle, fontWeight: '800', letterSpacing: 1.5, fontSize: 12, width: 44 },
-  metricValue: { color: colors.text, fontSize: 26, fontWeight: '800', flex: 1, fontVariant: ['tabular-nums'] },
-  status: { flexDirection: 'row', alignItems: 'center', gap: 6, minWidth: 108 },
-  marker: { fontSize: 16 },
-  statusText: { color: colors.text, fontSize: 15, fontWeight: '700' },
-  zone: { color: colors.muted, fontSize: 14, marginTop: 2 },
-  mutes: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginTop: 4 },
+  stats: { backgroundColor: colors.panel, borderColor: colors.panelBorder, borderWidth: 1, borderRadius: 22, padding: 16, gap: 10 },
+  statsTall: { flex: 1, justifyContent: 'center', gap: 18 },
+  block: { flex: 1, gap: 4 },
+  right: { alignItems: 'flex-end' },
+  divided: { borderLeftWidth: 1, borderLeftColor: colors.panelBorder, paddingLeft: 14 },
+  rule: { height: 1, backgroundColor: colors.panelBorder },
+  unit: { ...type.label, fontSize: 11 },
+  paused: { ...type.label, color: colors.notice, fontSize: 13 },
+  status: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  marker: { fontSize: 14 },
+  statusText: { ...type.bodyStrong, fontSize: 14 },
+  zone: { ...type.body, fontSize: 14 },
+  mutes: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginTop: 2 },
   mute: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  muteText: { color: colors.muted, fontSize: 13 },
-  buttons: { flexDirection: 'row', gap: 12, marginTop: 6 },
+  muteText: { ...type.small },
+  buttons: { flexDirection: 'row', gap: 12, marginTop: 2 },
   button: { flex: 1 },
 });
 

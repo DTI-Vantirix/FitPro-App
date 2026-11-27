@@ -31,12 +31,14 @@ assert(existsSync(join(root, 'server')) && existsSync(join(root, 'web')), 'Expec
 const workout = readFileSync(join(native, 'src/ingestion/spike-workout.ts'), 'utf8');
 for (const name of ['external_id', 'kind', 'source', 'exercises']) assert(workout.includes(name), `Missing ${name}`);
 assert(!workout.includes('total_volume') && !workout.includes('set_count'), 'Server-computed fields are prohibited.');
-for (const f of ['app/index.tsx','app/spike.tsx','app/consent.tsx','app/invite.tsx','app/activities.tsx',
+for (const f of ['app/index.tsx','app/spike.tsx','app/consent.tsx','app/invite.tsx','app/(tabs)/activities.tsx',
   'src/auth/session.tsx','src/auth/auth-api.ts',
   'src/access/invite-api.ts','src/access/access-gate.tsx'])
   assert(existsSync(join(native,f)), `Missing ${f}`);
 const dir = join(native, 'app');
-for (const file of readdirSync(dir)) assert(file.endsWith('.tsx'), 'Unexpected runtime artifact in app/');
+// (tabs) is the Expo Router group holding the signed-in tab screens; it changes no URL.
+for (const file of readdirSync(dir)) assert(file.endsWith('.tsx') || file === '(tabs)', 'Unexpected runtime artifact in app/');
+for (const file of readdirSync(join(dir, '(tabs)'))) assert(file.endsWith('.tsx'), 'Unexpected runtime artifact in app/(tabs)/');
 const invite = readFileSync(join(native, 'src/access/invite-api.ts'), 'utf8');
 const gate = readFileSync(join(native, 'src/access/access-gate.tsx'), 'utf8');
 const session = readFileSync(join(native, 'src/auth/session.tsx'), 'utf8');
@@ -52,7 +54,7 @@ for (const file of ['src/health/types.ts', 'src/health/fake-adapter.ts', 'src/he
 const adapter = readFileSync(join(native, 'src/health/index.ts'), 'utf8');
 const fake = readFileSync(join(native, 'src/health/fake-adapter.ts'), 'utf8');
 const healthTypes = readFileSync(join(native, 'src/health/types.ts'), 'utf8');
-const activities = readFileSync(join(native, 'app/activities.tsx'), 'utf8');
+const activities = readFileSync(join(native, 'app/(tabs)/activities.tsx'), 'utf8');
 assert(adapter.includes('getHealthAdapter') && adapter.includes('fakeHealthAdapter') && adapter.includes('appleHealthAdapter') && adapter.includes('androidHealthAdapter'), 'All three providers must use one adapter selector.');
 assert(healthTypes.includes('interface HealthAdapter') && healthTypes.includes('readActivities()'), 'Single health read interface missing.');
 assert(activities.includes('adapter.readActivities()'), 'Activity screen must read through adapter interface.');
@@ -69,8 +71,8 @@ assert(/^~58\.0\.\d+$/.test(pkg.dependencies['expo-build-properties']), 'Expecte
 assert(!Object.keys(pkg.dependencies).some((name) => /analytics|sentry|posthog|supabase|expo-health-connect/i.test(name)), 'Unexpected data collection or deprecated Android Health dependency.');
 const cfg = JSON.parse(readFileSync(join(native, 'app.json'), 'utf8'));
 const healthPlugin = cfg.expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === '@kingstinct/react-native-healthkit');
-assert(healthPlugin && healthPlugin[1].background === true && healthPlugin[1].NSHealthUpdateUsageDescription === false,
-  'Read-only HealthKit background entitlement must be configured for native scheduler testing.');
+assert(healthPlugin && healthPlugin[1].background === true && /does not save anything to Apple Health/.test(healthPlugin[1].NSHealthUpdateUsageDescription),
+  'Read-only HealthKit: Apple rejects a build without the write purpose string (ITMS-90683), and it must say nothing is written.');
 const apple = readFileSync(join(native, 'src/health/apple-adapter.ts'), 'utf8');
 assert(apple.includes('hk.requestAuthorization') && apple.includes('toRead:'), 'Apple Health read authorization missing.');
 assert(!apple.includes('toShare:') && !apple.includes('saveWorkoutSample') && !apple.includes('enableBackgroundDelivery'), 'No write/background features allowed.');
@@ -88,10 +90,13 @@ assert(buildProp?.[1]?.android?.minSdkVersion === 26 && buildProp?.[1]?.android?
   'Android Health Connect requires min API 26 and compatible target SDK.');
 assert(!activities.includes('sendSyntheticWorkout') && !activities.includes('ingestActivity'), 'Real activities screen cannot upload data in Step 5.');
 // ---- Stage 1B: the run experience ----
-for (const f of ['app/signup.tsx', 'app/setup.tsx', 'app/home.tsx', 'app/settings.tsx', 'app/run-start.tsx', 'app/run-live.tsx', 'app/run-summary.tsx'])
+for (const f of ['app/signup.tsx', 'app/setup.tsx', 'app/(tabs)/home.tsx', 'app/settings.tsx', 'app/run-start.tsx', 'app/run-live.tsx', 'app/run-summary.tsx',
+  'app/(tabs)/routes.tsx', 'app/route-new.tsx', 'app/(tabs)/analytics.tsx', 'app/zones.tsx',
+  'app/(tabs)/feed.tsx', 'app/friends.tsx', 'app/social-profile.tsx', 'app/share-run.tsx', 'app/challenges.tsx', 'app/challenge.tsx'])
   assert(existsSync(join(native, f)), `Missing ${f}`);
 // Every screen past sign-up sits behind the same three checks: sign-in, consent, invite.
-for (const f of ['setup', 'home', 'settings', 'run-start', 'run-live', 'run-summary']) {
+for (const f of ['setup', '(tabs)/home', 'settings', 'run-start', 'run-live', 'run-summary', '(tabs)/routes', 'route-new', '(tabs)/analytics', 'zones',
+  '(tabs)/feed', 'friends', 'social-profile', 'share-run', 'challenges', 'challenge']) {
   const screen = readFileSync(join(native, `app/${f}.tsx`), 'utf8');
   assert(/export default function \w+\(\) \{\s*return <Gated/.test(screen), `app/${f}.tsx must render inside <Gated>.`);
 }
@@ -103,18 +108,39 @@ const signup = readFileSync(join(native, 'app/signup.tsx'), 'utf8');
 assert(!/expo-location|react-native-ble-plx|expo-notifications|health/i.test(signup.replace(/\/\*\*[\s\S]*?\*\//, '')), 'Sign-up must not touch device permissions.');
 // Runs are written through ingestActivity only; never the generic entity routes.
 const runFiles = sourceFiles(join(native, 'src/run'));
-for (const file of [...runFiles, ...sourceFiles(join(native, 'app'))]) {
-  const text = readFileSync(file, 'utf8');
+// One exception, and it is a read: listServerRuns in src/run/api.ts lists the runner's own
+// runs with a single POST .../Run/query. That exact call may appear once, in that file only;
+// any other mention of the Run or Workout entity routes still fails.
+const RUN_READ = "request('POST', entityUrl('Run', '/query'), { token, body: { q: mine(ownerId), sort: '-started_at', limit } })";
+const runApiFile = join(native, 'src/run/api.ts');
+assert(readFileSync(runApiFile, 'utf8').split(RUN_READ).length <= 2, 'Runs may be read by one query only.');
+for (const file of [...runFiles, ...sourceFiles(join(native, 'src/social')), ...sourceFiles(join(native, 'app'))]) {
+  const source = readFileSync(file, 'utf8');
+  const text = file === runApiFile ? source.replace(RUN_READ, '') : source;
   assert(!/entities\/(Run|Workout)\b|entityUrl\('(Run|Workout)'/.test(text), `${file} writes runs outside ingestActivity.`);
   assert(!/HealthKit|health-connect|react-native-healthkit/.test(text) || !file.includes(`${sep}run${sep}`), `${file}: the run code must not request health permissions.`);
 }
 // The run logic is plain TypeScript: no React, React Native or Expo, so it is unit-tested as is.
-const PURE = ['zones', 'geo', 'tracker', 'cues', 'directions', 'engine', 'payload', 'format', 'queue', 'hr-parse', 'controller'];
+const PURE = ['zones', 'geo', 'tracker', 'cues', 'directions', 'engine', 'payload', 'format', 'queue', 'hr-parse', 'controller', 'route-draft', 'dashboard', 'analytics'];
 for (const name of PURE) {
   const text = readFileSync(join(native, `src/run/${name}.ts`), 'utf8');
   for (const [, spec] of text.matchAll(importPattern)) assert(spec.startsWith('./'), `src/run/${name}.ts must stay pure but imports ${spec}.`);
   assert(existsSync(join(native, 'scripts')), 'scripts folder missing');
 }
+// The social rules (audiences, the post record, handles, challenges) are plain TypeScript too.
+for (const name of ['logic', 'challenges']) {
+  const text = readFileSync(join(native, `src/social/${name}.ts`), 'utf8');
+  for (const [, spec] of text.matchAll(importPattern)) assert(spec.startsWith('./'), `src/social/${name}.ts must stay pure but imports ${spec}.`);
+}
+// Social calls go to the VantraRun API only, and posts carry no photo or video from the phone yet.
+for (const file of sourceFiles(join(native, 'src/social'))) {
+  assert(!/https?:\/\//.test(readFileSync(file, 'utf8')), `${file}: social code may only talk to the VantraRun API.`);
+}
+const socialLogic = readFileSync(join(native, 'src/social/logic.ts'), 'utf8');
+assert(socialLogic.includes("return profile?.visibility === 'public' ? 'public' : 'friends';"), 'The default audience of a post must stay the website\'s: friends, public only for a public account.');
+assert(socialLogic.includes("background_type: 'none'") && socialLogic.includes("map((p) => ({ lat: p.lat, lng: p.lng }))"), 'A post sends no media and only lat/lng for its route points.');
+assert(!Object.keys(JSON.parse(readFileSync(join(native, 'package.json'), 'utf8')).dependencies).some((name) => /image-picker|media-library|expo-camera|document-picker/i.test(name)),
+  'No photo, camera or media-library package: posts with media are not built in the app.');
 const autoPolicy = readFileSync(join(native, 'src/ingestion/auto-import-policy.ts'), 'utf8');
 assert(/AUTO_HEALTH_IMPORT_ENABLED = false;/.test(autoPolicy), 'Automatic health import must stay off in Stage 1 (duplicate runs).');
 assert(readFileSync(join(native, 'src/ingestion/manual-import-panel.tsx'), 'utf8').includes('AUTO_HEALTH_IMPORT_ENABLED'), 'The import panel must honour the automatic-import switch.');

@@ -93,6 +93,26 @@ await test('zones list: unusable rows dropped, sorted by number', async () => {
   assert.deepEqual(zones.map((z) => z.id), ['a', 'b']);
   assert.deepEqual([zones[0].fast_sec, zones[0].hr_min_pct], [690, null]);
 });
+await test('zones list: intensity, purpose and feel come through when stored', async () => {
+  reset(() => ({ status: 200, data: { items: [
+    { id: 'a', zone_number: 2, name: 'Zone 2', fast_sec: 690, slow_sec: 768, hr_min_pct: 60, hr_max_pct: 70, intensity: 'Light', purpose: 'Base', feel: 'Easy talk', color: '#A6A6AE' },
+    { id: 'b', zone_number: 3, name: 'Zone 3', fast_sec: 600, slow_sec: 650 }] } }));
+  const zones = await api.listZones('tok', 'u1');
+  assert.deepEqual(zones[0], { id: 'a', name: 'Zone 2', zone_number: 2, fast_sec: 690, slow_sec: 768, hr_min_pct: 60, hr_max_pct: 70, color: '#A6A6AE', intensity: 'Light', purpose: 'Base', feel: 'Easy talk' });
+  assert.ok(!('intensity' in zones[1]) && !('purpose' in zones[1]) && !('feel' in zones[1]));
+});
+await test('updateZone changes one zone\'s name and pace range and nothing else', async () => {
+  reset(() => ({ status: 200, data: { id: 'z 2', zone_number: 2, name: 'Easy', fast_sec: 700, slow_sec: 780, hr_min_pct: 60, hr_max_pct: 70 } }));
+  const zone = await api.updateZone('tok', 'z 2', { name: 'Easy', fast_sec: 700, slow_sec: 780 });
+  assert.equal(calls.length, 1);
+  assert.deepEqual([last().method, last().url, last().body, last().headers.Authorization],
+    ['PUT', `${BASE}/api/entities/PaceZone/z%202`, { name: 'Easy', fast_sec: 700, slow_sec: 780 }, 'Bearer tok']);
+  assert.deepEqual([zone.id, zone.name, zone.fast_sec, zone.slow_sec, zone.zone_number], ['z 2', 'Easy', 700, 780, 2]);
+  reset(() => ({ status: 403, data: { error: "You can't change this PaceZone." } }));
+  await assert.rejects(api.updateZone('tok', 'z9', { name: 'Easy', fast_sec: 700, slow_sec: 780 }), (e) => e.status === 403 && /can't change/.test(e.message));
+  reset(() => ({ status: 200, data: {} }));
+  await assert.rejects(api.updateZone('tok', 'z2', { name: 'Easy', fast_sec: 700, slow_sec: 780 }), /did not confirm/);
+});
 await test('routes: the dense path when there is one, waypoints otherwise, nothing undrawable', async () => {
   const pt = (lat, lng) => ({ lat, lng });
   reset(() => ({ status: 200, data: { items: [

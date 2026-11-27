@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Redirect, useRouter } from 'expo-router';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useSession } from '../src/auth/session';
-import { Action, ErrorNotice, SectionHeading } from '../src/components/Ui';
+import { Action, AuthHero, Card, ErrorNotice, Heading, Screen } from '../src/components/Ui';
 import { colors } from '../src/theme';
+import { type } from '../src/typography';
 
 export default function ConsentScreen() {
   const router = useRouter();
@@ -41,36 +42,29 @@ export default function ConsentScreen() {
     }
   }
 
-  return <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-    <Text style={styles.brand}>VANTRARUN</Text>
-    <SectionHeading kicker="STEP 02 · YOUR CHOICE" title="Your health data. Your choice."
-      subtitle="Review what VantraRun records and sends before you choose to continue." />
-    <View style={styles.panel}>
-      <Text style={styles.title}>Runs you record in VantraRun</Text>
+  return <Screen>
+    <AuthHero title="Your data, your choice" subtitle="Review what VantraRun records and sends before you continue." />
+    <Card>
+      <Heading size={16}>Runs you record in VantraRun</Heading>
       <Text style={styles.body}>When you start a run, VantraRun uses your location to measure distance and pace, and your heart rate if you connect a sensor. The finished run (route, distance, time, splits, heart-rate summary) is saved to your VantraRun account. Location is used only while a run is being recorded.</Text>
-      <Text style={styles.title}>Importing from your phone's health services</Text>
-      <Text style={styles.body}>VantraRun may import your workouts and runs from your phone's health services after you separately grant the operating system's health permissions in a future step.</Text>
-      <Text style={styles.title}>What could be sent</Text>
-      <Text style={styles.body}>Activity details may include workout names, exercises, sets, weights, run distance, duration, heart rate, route coordinates and other fields supported by the VantraRun ingestion contract.</Text>
-      <Text style={styles.title}>Where it would go</Text>
-      <Text style={styles.body}>When you choose to sync, selected activity data will be sent to your existing VantraRun account through the VantraRun API. This shell uses no advertising or analytics SDKs.</Text>
-      <Text style={styles.title}>You remain in control</Text>
-      <Text style={styles.body}>Apple Health permissions are requested separately, only after your consent and invite authorization have passed and you explicitly select Apple Health. You can withdraw this local consent later. Withdrawing does not delete records already uploaded to VantraRun or revoke a server session.</Text>
-    </View>
+      <Heading size={16}>Importing from your phone's health services</Heading>
+      <Text style={styles.body}>VantraRun can import runs from your phone's health services, but only after you separately grant the operating system's health permissions.</Text>
+      <Heading size={16}>What could be sent</Heading>
+      <Text style={styles.body}>Activity details may include workout names, exercises, sets, weights, run distance, duration, heart rate, route coordinates and other fields VantraRun supports.</Text>
+      <Heading size={16}>Where it goes</Heading>
+      <Text style={styles.body}>When you choose to import, the activities you select are sent to your VantraRun account. VantraRun uses no advertising or analytics software.</Text>
+      <Heading size={16}>You remain in control</Heading>
+      <Text style={styles.body}>Apple Health permissions are requested separately, only after you agree here, your invite is confirmed and you choose Apple Health. You can withdraw this consent later. Withdrawing does not delete records already uploaded to VantraRun or end a server session.</Text>
+    </Card>
     <ErrorNotice message={error ?? sessionError} />
-    <Action label="I understand and agree to continue" onPress={accept} busy={busy} />
-    <Action label="Not now — sign out" onPress={decline} busy={busy} secondary />
-    <Text style={styles.note}>Your decision is stored securely on this device for the current signed-in session. Every new login asks again.</Text>
-  </ScrollView>;
+    <Action label="I understand and agree" onPress={accept} busy={busy} />
+    <Action label="Not now, sign out" onPress={decline} busy={busy} secondary />
+    <Text style={[type.small, styles.note]}>Your decision is stored securely on this phone for the current sign-in. Every new sign-in asks again.</Text>
+  </Screen>;
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.background },
-  content: { paddingHorizontal: 24, paddingTop: 42, paddingBottom: 60 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  brand: { color: colors.text, fontWeight: '900', letterSpacing: 3, fontSize: 14, marginBottom: 36 },
-  panel: { backgroundColor: colors.panel, borderColor: colors.panelBorder, borderWidth: 1, borderRadius: 14, padding: 18, gap: 9, marginBottom: 20 },
-  title: { color: colors.accent, fontWeight: '800', fontSize: 14, marginTop: 7 },
-  body: { color: colors.muted, lineHeight: 22, fontSize: 14, marginBottom: 9 },
-  note: { color: colors.subtle, lineHeight: 19, marginTop: 18, fontSize: 12 },
+  body: { ...type.body, marginBottom: 8 },
+  note: { textAlign: 'center', marginTop: 16, paddingHorizontal: 12 },
 });

@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Redirect, useRouter } from 'expo-router';
-import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { useSession } from '../src/auth/session';
-import { Action, ErrorNotice, SectionHeading } from '../src/components/Ui';
+import { Action, ErrorNotice, Icon, Label, SectionHeading, StatRow, Toggle } from '../src/components/Ui';
 import { fetchDirections, listRoutes, type Directions, type SavedRoute } from '../src/run/api';
 import { prepareAlerts } from '../src/run/device/alerts';
 import type { FoundSensor } from '../src/run/device/heart-rate';
@@ -16,6 +16,7 @@ import { Brand, Gated, Note, Panel, Screen, styles as shared } from '../src/run/
 import { useHeartRateSensor, useRun, useRunAccount } from '../src/run/use-run';
 import { defaultZone, formatPace, hrBounds, type Zone } from '../src/run/zones';
 import { colors } from '../src/theme';
+import { type } from '../src/typography';
 
 const MODES: { mode: RunMode; title: string; detail: string }[] = [
   { mode: 'route', title: 'Pre-mapped route', detail: 'Follow one of your saved routes with turn-by-turn directions.' },
@@ -29,7 +30,10 @@ function RunStart() {
   const account = useRunAccount();
   const active = useRun();
   const sensor = useHeartRateSensor();
-  const [mode, setMode] = useState<RunMode>('free');
+  // The Routes tab opens this screen with one of the runner's routes already chosen.
+  const { route: wantedRouteId } = useLocalSearchParams<{ route?: string }>();
+  const wanted = useRef(typeof wantedRouteId === 'string' && wantedRouteId ? wantedRouteId : null);
+  const [mode, setMode] = useState<RunMode>(wanted.current ? 'route' : 'free');
   const [routes, setRoutes] = useState<SavedRoute[] | null>(null);
   const [routesNote, setRoutesNote] = useState<string | null>(null);
   const [route, setRoute] = useState<SavedRoute | null>(null);
@@ -73,6 +77,15 @@ function RunStart() {
       if (directionsFor.current === next.id) setDirections(result);
     });
   }
+
+  // Once the list is in, the route asked for is chosen exactly as a tap on it would. Only once:
+  // after that the runner's own choice stands.
+  useEffect(() => {
+    if (!wanted.current || routes === null) return;
+    const match = routes.find((item) => item.id === wanted.current);
+    wanted.current = null;
+    if (match) chooseRoute(match);
+  }, [routes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const chosenRoute = mode === 'route' ? route : null;
   const zone: Zone | null = useMemo(
@@ -138,23 +151,26 @@ function RunStart() {
   const canStart = Boolean(zone) && (mode !== 'route' || (route !== null && directions !== 'loading'));
 
   return <Screen>
-    <Brand />
-    <SectionHeading kicker="START A RUN" title="How do you want to run?" subtitle="Choose a mode, then the zone to aim for." />
+    <Brand onBack={() => router.back()} nav={false} />
+    <SectionHeading kicker="Start a run" title="How do you want to run?" subtitle="Choose a mode, then the zone to aim for." />
 
     {MODES.map((item) => <Pressable key={item.mode} accessibilityRole="radio" accessibilityState={{ selected: mode === item.mode }}
-      onPress={() => setMode(item.mode)} style={[shared.panel, mode === item.mode && local.selected]}>
-      <Text style={shared.title}>{item.title}</Text>
+      onPress={() => setMode(item.mode)} style={[shared.panel, mode === item.mode && shared.selected]}>
+      <View style={shared.row}>
+        <Text style={shared.title}>{item.title}</Text>
+        <Icon name={mode === item.mode ? 'check-circle' : 'circle'} size={18} color={mode === item.mode ? colors.accent : colors.subtle} />
+      </View>
       <Text style={shared.body}>{item.detail}</Text>
     </Pressable>)}
 
-    {mode === 'route' && <View style={local.section}>
-      <Text style={shared.label}>YOUR ROUTES</Text>
+    {mode === 'route' && <View style={shared.section}>
+      <Label>Your routes</Label>
       {routes === null && <ActivityIndicator color={colors.accent} />}
       {!!routesNote && <Text style={shared.body}>{routesNote}</Text>}
       {routes !== null && routes.length === 0 && !routesNote &&
-        <Text style={shared.body}>You have no saved routes yet. Create one on the website, or choose a free run.</Text>}
+        <Text style={shared.body}>You have no saved routes yet. Draw one in the Routes tab, or choose a free run.</Text>}
       {(routes ?? []).map((item) => <Pressable key={item.id} accessibilityRole="radio" accessibilityState={{ selected: route?.id === item.id }}
-        onPress={() => chooseRoute(item)} style={[shared.panel, route?.id === item.id && local.selected]}>
+        onPress={() => chooseRoute(item)} style={[shared.panel, local.route, route?.id === item.id && shared.selected]}>
         <Text style={shared.title}>{item.name}</Text>
         <Text style={shared.body}>
           {item.distanceMi != null ? `${item.distanceMi.toFixed(1)} mi` : 'Distance not set'}{item.targetZoneName ? ` · ${item.targetZoneName}` : ''}
@@ -166,8 +182,8 @@ function RunStart() {
         : <Text style={shared.body}>Spoken turns are unavailable for this run. The route is still drawn on the map and "off route" is still reported.</Text>)}
     </View>}
 
-    <View style={local.section}>
-      <Text style={shared.label}>ZONE</Text>
+    <View style={shared.section}>
+      <Label>Zone</Label>
       <View style={local.chips}>
         {zones.map((item) => <Pressable key={item.id ?? item.name} accessibilityRole="radio" accessibilityState={{ selected: zone?.id === item.id }}
           onPress={() => setZoneId(item.id ?? null)} style={[local.chip, zone?.id === item.id && local.chipSelected]}>
@@ -176,55 +192,61 @@ function RunStart() {
       </View>
       {zone && <Panel>
         <Text style={shared.title}>{zone.name}</Text>
-        <Text style={shared.body}>Pace {formatPace(zone.fast_sec)}–{formatPace(zone.slow_sec)} per mile</Text>
-        <Text style={shared.body}>{bounds ? `Heart rate ${bounds.min}–${bounds.max} bpm` : 'Heart-rate range unknown: no max heart rate on your profile.'}</Text>
+        <StatRow items={[
+          { label: 'Pace', value: `${formatPace(zone.fast_sec)}–${formatPace(zone.slow_sec)}`, unit: '/mi' },
+          { label: 'Heart rate', value: bounds ? `${bounds.min}–${bounds.max}` : '–', unit: 'bpm' },
+        ]} />
+        {!bounds && <Text style={shared.body}>Heart-rate range unknown: no max heart rate on your profile.</Text>}
       </Panel>}
+      <Action label="Edit zones" icon="sliders" variant="ghost" compact onPress={() => router.push('/zones')} />
     </View>
 
-    <View style={local.section}>
-      <Text style={shared.label}>HEART-RATE SENSOR</Text>
-      <Text style={shared.body}>
-        {sensor.status === 'connected' ? `Connected: ${sensor.name ?? 'sensor'}`
-          : sensor.status === 'connecting' ? 'Connecting…'
-          : sensor.status === 'scanning' ? 'Looking for sensors…'
-          : sensor.status === 'lost' ? 'Connection lost. Trying to reconnect…'
-          : 'None connected. Without one, only pace is coached.'}
-      </Text>
-      <ErrorNotice message={sensorError} />
-      {found.map((item) => <Action key={item.id} label={`Connect ${item.name}`} onPress={() => { void connectSensor(item.id); }} secondary />)}
-      {sensor.status === 'connected' || sensor.status === 'lost'
-        ? <Action label="Disconnect sensor" onPress={() => { void heartRateMonitor.disconnect(); }} secondary />
-        : <Action label="Find a sensor" onPress={() => { void findSensor(); }} busy={sensor.status === 'scanning' || sensor.status === 'connecting'} secondary />}
-      <Note>Works with Bluetooth chest straps and with Garmin watches set to broadcast heart rate. Apple Watch heart rate is not available yet.</Note>
+    <View style={shared.section}>
+      <Label>Heart-rate sensor</Label>
+      <Panel>
+        <Text style={shared.strong}>
+          {sensor.status === 'connected' ? `Connected: ${sensor.name ?? 'sensor'}`
+            : sensor.status === 'connecting' ? 'Connecting…'
+            : sensor.status === 'scanning' ? 'Looking for sensors…'
+            : sensor.status === 'lost' ? 'Connection lost. Trying to reconnect…'
+            : 'None connected. Without one, only pace is coached.'}
+        </Text>
+        <ErrorNotice message={sensorError} />
+        {found.map((item) => <Action key={item.id} label={`Connect ${item.name}`} onPress={() => { void connectSensor(item.id); }} secondary />)}
+        {sensor.status === 'connected' || sensor.status === 'lost'
+          ? <Action label="Disconnect sensor" onPress={() => { void heartRateMonitor.disconnect(); }} secondary />
+          : <Action label="Find a sensor" icon="bluetooth" onPress={() => { void findSensor(); }} busy={sensor.status === 'scanning' || sensor.status === 'connecting'} secondary />}
+        <Note>Works with Bluetooth chest straps and with Garmin watches set to broadcast heart rate. Apple Watch heart rate is not available yet.</Note>
+      </Panel>
     </View>
 
-    <View style={local.section}>
-      <Text style={shared.label}>CUES</Text>
-      <View style={shared.row}>
-        <Text style={shared.body}>Pace cues</Text>
-        <Switch accessibilityLabel="Pace cues" value={!mute.pace} onValueChange={(on) => changeMute({ ...mute, pace: !on })} />
-      </View>
-      <View style={shared.row}>
-        <Text style={shared.body}>Heart-rate cues</Text>
-        <Switch accessibilityLabel="Heart-rate cues" value={!mute.hr} onValueChange={(on) => changeMute({ ...mute, hr: !on })} />
-      </View>
-      <Note>A cue is spoken, vibrates and appears as a notification when pace or heart rate leaves the zone and when it comes back. It tells you what changed, never what to do.</Note>
+    <View style={shared.section}>
+      <Label>Cues</Label>
+      <Panel>
+        <View style={shared.row}>
+          <Text style={shared.strong}>Pace cues</Text>
+          <Toggle label="Pace cues" value={!mute.pace} onValueChange={(on) => changeMute({ ...mute, pace: !on })} />
+        </View>
+        <View style={shared.row}>
+          <Text style={shared.strong}>Heart-rate cues</Text>
+          <Toggle label="Heart-rate cues" value={!mute.hr} onValueChange={(on) => changeMute({ ...mute, hr: !on })} />
+        </View>
+        <Note>A cue is spoken, vibrates and appears as a notification when pace or heart rate leaves the zone and when it comes back. It tells you what changed, never what to do.</Note>
+      </Panel>
     </View>
 
     <ErrorNotice message={error} />
-    <Action label="Start" onPress={() => { void start(); }} busy={starting} disabled={!canStart} />
-    <Action label="Back" onPress={() => router.back()} secondary />
-    <Note>VantraRun asks for your location when you press Start, and keeps recording with the screen locked.</Note>
+    <Action label="Start run" icon="play" onPress={() => { void start(); }} busy={starting} disabled={!canStart} />
+    <Note>VantraRun asks for your location when you press Start run, and keeps recording with the screen locked.</Note>
   </Screen>;
 }
 
 const local = StyleSheet.create({
-  selected: { borderColor: colors.accent, backgroundColor: colors.selectedBg },
-  section: { marginTop: 14, marginBottom: 6, gap: 8 },
+  route: { marginBottom: 0 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: 1, borderColor: colors.panelBorder, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
+  chip: { borderWidth: 1, borderColor: colors.panelBorder, borderRadius: 999, paddingHorizontal: 16, minHeight: 40, justifyContent: 'center' },
   chipSelected: { backgroundColor: colors.accent, borderColor: colors.accent },
-  chipText: { color: colors.text, fontWeight: '700', fontSize: 13 },
+  chipText: { ...type.bodyMedium, fontSize: 14 },
   chipTextSelected: { color: colors.accentText },
 });
 

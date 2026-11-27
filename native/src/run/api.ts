@@ -1,12 +1,14 @@
 /** Everything the run experience asks of the VantraRun API, over HTTP only.
  * Runs are written through ingestActivity and nowhere else (docs/native-contract.md).
- * Profile, zones and routes use the same entity routes the website uses.
+ * Profile, zones and routes use the same entity routes the website uses. Runs are read
+ * (never written) with one entity query, shared by listServerRuns and listRunsToShare.
  */
 import { API_URL, APP_AUTH_URL, ENTITIES_URL, FUNCTIONS_URL, INGEST_URL } from '../config';
 import type { Maneuver } from './directions';
 import { validLatLng, type LatLng } from './geo';
 import { classifyResponse, type SendResult } from './queue';
-import { sortZones, zoneTemplate, type Profile, type Zone } from './zones';
+import type { RouteRecord, SnapResult, Waypoint } from './route-draft';
+import { sortZones, zoneTemplate, type Profile, type Zone, type ZoneEdit } from './zones';
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number, readonly data: unknown = null) {
@@ -25,6 +27,21 @@ export type SavedRoute = {
   targetZoneName: string | null;
 };
 export type Directions = { available: boolean; maneuvers: Maneuver[] };
+/** A run as the server holds it, whichever device or import it came from. */
+export type ServerRun = {
+  id: string;
+  routeId: string | null;
+  routeName: string;
+  distanceMi: number;
+  durationSec: number;
+  avgPaceSec: number;
+  startedAt: string | null;
+  targetZoneName: string | null;
+  inZonePct: number | null;
+  avgHr: number | null;
+  source: string | null;
+  externalId: string | null;
+};
 
 const OFFLINE = "Can't reach VantraRun. Check your connection and try again.";
 
@@ -61,11 +78,11 @@ async function call(method: string, url: string, opts: { token?: string; body?: 
   return { status: response.status, data };
 }
 
-function record(value: unknown): Record<string, unknown> {
+export function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-async function request(method: string, url: string, opts: { token?: string; body?: unknown; timeoutMs?: number } = {}): Promise<unknown> {
+export async function request(method: string, url: string, opts: { token?: string; body?: unknown; timeoutMs?: number } = {}): Promise<unknown> {
   const reply = await call(method, url, opts);
   if (reply.status < 200 || reply.status >= 300) {
     const error = record(reply.data).error;
@@ -74,16 +91,16 @@ async function request(method: string, url: string, opts: { token?: string; body
   return reply.data;
 }
 
-function items(data: unknown): Record<string, unknown>[] {
+export function items(data: unknown): Record<string, unknown>[] {
   const list = Array.isArray(data) ? data : record(data).items;
   return Array.isArray(list) ? list.map(record) : [];
 }
 
-const num = (value: unknown): number | null => {
+export const num = (value: unknown): number | null => {
   const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
   return typeof n === 'number' && Number.isFinite(n) ? n : null;
 };
-const str = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
+export const str = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
 
 // ---- account -------------------------------------------------------------
 
@@ -122,7 +139,7 @@ export async function deleteAccount(token: string, password: string): Promise<vo
 
 // ---- profile and zones ---------------------------------------------------
 
-const entityUrl = (name: string, suffix = '') => `${ENTITIES_URL}/${name}${suffix}`;
+export const entityUrl = (name: string, suffix = '') => `${ENTITIES_URL}/${name}${suffix}`;
 // An admin may read everyone's records, so every list asks for the caller's own.
 const mine = (ownerId: string) => ({ created_by_id: ownerId });
 
@@ -152,6 +169,9 @@ function toZone(row: Record<string, unknown>): Zone | null {
     hr_min_pct: num(row.hr_min_pct),
     hr_max_pct: num(row.hr_max_pct),
     ...(str(row.color) ? { color: str(row.color)! } : {}),
+    ...(str(row.intensity) ? { intensity: str(row.intensity)! } : {}),
+    ...(str(row.purpose) ? { purpose: str(row.purpose)! } : {}),
+    ...(str(row.feel) ? { feel: str(row.feel)! } : {}),
   };
 }
 
@@ -178,9 +198,18 @@ export async function applyZones(token: string, ownerId: string, thresholdSec: n
   return listZones(token, ownerId);
 }
 
+/** Changes one zone's name and pace range, as the website's zone editor does. Nothing else
+ * about the zone is sent, so its number, heart-rate band and text stay as they are. */
+export async function updateZone(token: string, zoneId: string, values: ZoneEdit): Promise<Zone> {
+  const body = { name: values.name, fast_sec: values.fast_sec, slow_sec: values.slow_sec };
+  const zone = toZone(record(await request('PUT', entityUrl('PaceZone', `/${encodeURIComponent(zoneId)}`), { token, body })));
+  if (!zone) throw new ApiError('The server did not confirm the change. Check your zones before saving it again.', 0);
+  return zone;
+}
+
 // ---- routes and directions -----------------------------------------------
 
-function toPath(value: unknown): LatLng[] {
+export function toPath(value: unknown): LatLng[] {
   if (!Array.isArray(value)) return [];
   return value.map((p) => ({ lat: Number(record(p).lat), lng: Number(record(p).lng) })).filter(validLatLng);
 }
@@ -194,6 +223,27 @@ export async function listRoutes(token: string, ownerId: string): Promise<SavedR
     if (!id || path.length < 2) return [];
     return [{ id, name: str(row.name) ?? 'Route', distanceMi: num(row.distance_mi), path, targetZoneId: str(row.target_zone_id), targetZoneName: str(row.target_zone_name) }];
   });
+}
+
+/** Road-following line for the waypoints of a route being drawn. A waypoint with
+ * `offroad: true` is joined to the one before by a straight line. `snapped: false` means
+ * a road section could not be routed and straight lines were used. Throws when the
+ * server cannot be reached or refuses. */
+export async function snapRoute(token: string, points: Waypoint[]): Promise<SnapResult> {
+  const body = { points: points.map((p) => ({ lat: p.lat, lng: p.lng, ...(p.offroad === true ? { offroad: true } : {}) })) };
+  const data = record(await request('POST', `${FUNCTIONS_URL}/snapRoute`, { token, body, timeoutMs: 15000 }));
+  return { snapped: data.snapped === true, path: toPath(data.path), distanceMi: num(data.distance_mi) };
+}
+
+/** Saves a drawn route and returns its id. */
+export async function createRoute(token: string, route: RouteRecord): Promise<string> {
+  const id = str(record(await request('POST', entityUrl('Route'), { token, body: route })).id);
+  if (!id) throw new ApiError('The server did not confirm the route was saved. Check your routes before saving it again.', 0);
+  return id;
+}
+
+export async function deleteRoute(token: string, routeId: string): Promise<void> {
+  await request('DELETE', entityUrl('Route', `/${encodeURIComponent(routeId)}`), { token });
 }
 
 function toManeuver(value: unknown, index: number): Maneuver | null {
@@ -219,6 +269,53 @@ export async function fetchDirections(token: string, routeId: string): Promise<D
   } catch {
     return { available: false, maneuvers: [] };
   }
+}
+
+// ---- reading runs --------------------------------------------------------
+
+function toServerRun(row: Record<string, unknown>): ServerRun | null {
+  const id = str(row.id);
+  const distanceMi = num(row.distance_mi);
+  const durationSec = num(row.duration_sec);
+  if (!id || distanceMi == null || durationSec == null || distanceMi <= 0 || durationSec <= 0) return null;
+  // A run saved without a start time is dated by when it was created, as the website does.
+  const when = [str(row.started_at), str(row.created_date)].find((value) => value && Number.isFinite(Date.parse(value))) ?? null;
+  return {
+    id,
+    routeId: str(row.route_id),
+    routeName: str(row.route_name) ?? 'Free run',
+    distanceMi,
+    durationSec,
+    avgPaceSec: num(row.avg_pace_sec) ?? durationSec / distanceMi,
+    startedAt: when,
+    targetZoneName: str(row.target_zone_name),
+    inZonePct: num(row.in_zone_pct),
+    avgHr: num(row.avg_hr),
+    source: str(row.source),
+    externalId: str(row.external_id),
+  };
+}
+
+/** The one query that reads runs: the caller's own, newest first. */
+async function queryRuns(token: string, ownerId: string, options: { limit?: number }): Promise<Record<string, unknown>[]> {
+  const asked = options.limit;
+  const limit = typeof asked === 'number' && Number.isInteger(asked) && asked > 0 ? Math.min(asked, 200) : 40;
+  return items(await request('POST', entityUrl('Run', '/query'), { token, body: { q: mine(ownerId), sort: '-started_at', limit } }));
+}
+
+/** The runner's runs as the server holds them, newest first: recorded here, on the website
+ * or imported. Read only. Runs are still written through ingestActivity and nowhere else. */
+export async function listServerRuns(token: string, ownerId: string, options: { limit?: number } = {}): Promise<ServerRun[]> {
+  return (await queryRuns(token, ownerId, options)).map(toServerRun).filter((run): run is ServerRun => run !== null);
+}
+
+/** The same runs from the same query, each with its recorded track: what the share composer
+ * offers and draws. Read only. */
+export async function listRunsToShare(token: string, ownerId: string, options: { limit?: number } = {}): Promise<(ServerRun & { points: LatLng[] })[]> {
+  return (await queryRuns(token, ownerId, options)).flatMap((row) => {
+    const run = toServerRun(row);
+    return run ? [{ ...run, points: toPath(row.points) }] : [];
+  });
 }
 
 // ---- saving a run --------------------------------------------------------

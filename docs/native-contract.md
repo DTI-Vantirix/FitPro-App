@@ -70,16 +70,61 @@ routes the website uses; nothing here is new on the server. All need the bearer 
 | Resend the sign-up code | `POST /api/auth/resend-otp { email }` |
 | Delete the account | `DELETE /api/auth/me { password }` -> `{ ok: true, deleted: true }`; `401` when the password is wrong. Removes the user and every record they own |
 | Profile (`hr_max`, `threshold_sec`) | `POST /api/entities/Profile/query`, then `POST /api/entities/Profile` or `PUT /api/entities/Profile/:id` |
-| Pace zones | `POST /api/entities/PaceZone/query`; first-time setup writes the five zones with `PUT` or `POST /api/entities/PaceZone/bulk` (and `DELETE /api/entities/PaceZone/:id` to clear a non-standard set), exactly as the website's onboarding does |
-| Saved routes (read only) | `POST /api/entities/Route/query` |
+| Pace zones | `POST /api/entities/PaceZone/query`; first-time setup writes the five zones with `PUT` or `POST /api/entities/PaceZone/bulk` (and `DELETE /api/entities/PaceZone/:id` to clear a non-standard set), exactly as the website's onboarding does. The Pace zones screen rebuilds them the same way, and changes one zone's name and pace range with `PUT /api/entities/PaceZone/:id { name, fast_sec, slow_sec }` (the website's zone editor; nothing else about the zone is sent). The app also reads `intensity`, `purpose` and `feel` to show them |
+| Saved routes | `POST /api/entities/Route/query` to list them. The route builder saves one with `POST /api/entities/Route { name, distance_mi, points: [{ lat, lng, offroad? }], path: [{ lat, lng }], target_zone_id, target_zone_name }` (`distance_mi` to 2 decimals; `path` is the snapped line, or the points when there is none; no zone is `""`), and the Routes tab removes one with `DELETE /api/entities/Route/:id`. Same records and fields as the website's builder |
+| Road-following line while drawing a route | `POST /api/functions/snapRoute { points: [{ lat, lng, offroad? }] }` -> `{ snapped, path: [{ lat, lng }], distance_mi }`. 2 to 40 waypoints (`400` otherwise). A waypoint with `offroad: true` is joined to the one before by a straight line; the rest follow roads. `snapped: false` means a road section could not be routed and straight lines were used: the route still saves. The app sends one request per change and uses only the answer to the latest |
+| The runner's runs (read only) | `POST /api/entities/Run/query { q, sort: "-started_at", limit }` (default 40, at most 200), the query the website's Home and Analytics pages make. The app reads `id`, `route_id`, `route_name`, `distance_mi`, `duration_sec`, `avg_pace_sec`, `started_at` (`created_date` when a run has no start time), `target_zone_name`, `in_zone_pct`, `avg_hr`, `source`, `external_id`. One query in `native/src/run/api.ts` makes the call, behind two helpers: `listServerRuns` (the Today tab asks for 40 and the Analytics tab for 200) and `listRunsToShare`, which also reads each run's `points` for the post composer (8, or 40 when opened for one run). Today joins them with the runs on the phone that have not uploaded yet, matching on `external_id` (or the `run_id` `ingestActivity` returned) so no run is counted twice |
 | Turn directions for a route | `POST /api/functions/routeDirections { route_id }` -> `{ available, maneuvers: [{ index, instruction, verbal, type, lat, lng, at_mi }] }`; `404` for a route the caller does not own. A waypoint saved with `offroad: true` is reached in a straight line: its leg is not sent to the router and comes back as one maneuver of `type: 0` ("Leave the road and head straight for the next marker."). `available: false` means the route is still drawn but turns are not spoken |
 | Report a crash | `POST /api/client-errors { message, stack?, context?, platform?, app_version? }` -> `201 { ok: true }`. Signed-in users only, 20 an hour each; long fields are cut. Never send a token, location or health data in it |
 
-Every query the app sends carries `q: { "created_by_id": "<the user's id>" }`. An admin's
+Every query above carries `q: { "created_by_id": "<the user's id>" }`. An admin's
 token can read other people's records, and the app must only ever show and change the
-signed-in person's own.
+signed-in person's own. The social queries below are the exceptions, and each says what it
+asks for instead.
 
-Runs and workouts are **never** read or written through `/api/entities` by the app.
+Runs and workouts are **never written** through `/api/entities` by the app: `ingestActivity`
+is the only write path. The one read is the `Run/query` above; workouts are not read at all.
+`native/scripts/check-boundaries.mjs` allows that single call and fails on any other use of
+the `Run` or `Workout` entity routes.
+
+### Social routes the app uses (Feed, Friends, Challenges)
+
+Added 2026-11-27 with the app's social screens. Every call is one the website already
+makes (`web/src/pages/Feed.jsx`, `Friends.jsx`, `Challenges.jsx`, `ChallengeDetail.jsx`,
+`web/src/lib/social.js`), with the same body; nothing is new on the server. All need the
+bearer token. The helpers are in `native/src/social/api.ts`; the rules (handles, audiences,
+the post record) are in `native/src/social/logic.ts` and `challenges.ts`. Gym is hidden:
+the app shows no `kind: "workout"` post, lists no `metric: "workouts"` challenge and
+creates neither.
+
+| What | Route |
+| ---- | ----- |
+| The signed-in user's name | `GET /api/auth/me` -> also reads `full_name`, used once to make the first handle |
+| My social profile | `POST /api/entities/SocialProfile/query { q: { created_by_id }, limit: 1 }`. When there is none, the app creates it as the website does: `POST .../SocialProfile/query { q: { handle }, limit: 1 }` to see whether the handle made from the name is free (four random digits are added when it is not), then `POST /api/entities/SocialProfile { handle, display_name, visibility: "private" }` |
+| Edit my social profile | `POST .../SocialProfile/query { q: { handle }, limit: 1 }` (is the handle someone else's?), then `PUT /api/entities/SocialProfile/:id { handle, display_name, bio, visibility }` (`visibility` is `public` or `private`). `409` means the handle was taken in between; the app says "That handle is already taken." either way |
+| Find people | `POST /api/entities/SocialProfile/query { q: {}, limit: 100 }` (the directory the search filters on the phone, as the website's does) and `POST .../SocialProfile/query { q: { handle }, limit: 1 }` for a full handle typed in. Reads `id`, `created_by_id`, `handle`, `display_name`, `bio`, `avatar_url`, `visibility` |
+| My connections | `POST /api/entities/Connection/query { q: { $or: [{ from_user_id }, { to_user_id }] }, sort: "-created_date", limit: 200 }`, both ids the user's own |
+| Send a friend request | `POST /api/entities/Connection/query { q: { $or: [{ from_user_id: me, to_user_id: them }, { from_user_id: them, to_user_id: me }] }, limit: 1 }`; when nothing comes back, `POST /api/entities/Connection { from_user_id, to_user_id, from_handle, from_name, to_handle, to_name, status }`. `status` is `"accepted"` when the other profile is public and `"pending"` otherwise, exactly as the website sets it |
+| Accept a request | `PUT /api/entities/Connection/:id { status: "accepted" }` |
+| Decline a request, cancel one I sent, remove a friend | `DELETE /api/entities/Connection/:id`. Decline is the website's call; cancel and remove are the same call from the other two lists (the website has no button for them) |
+| Feed, "Your circle" | `POST /api/functions/socialFeed {}` -> `{ posts, friend_ids }`: my posts and my accepted friends' posts that are not private. The app reads `posts` only |
+| Feed, "Discover" | `POST /api/entities/Post/query { q: { visibility: "public" }, sort: "-created_date", limit: 30 }`. The app drops anything that comes back not public |
+| Share a run | `POST /api/entities/Post { kind: "run", ref_id, title, caption, distance_mi, duration_sec, avg_pace_sec, zone_name, in_zone_pct, route_points: [{ lat, lng }], background_type: "none", background_url: "", visibility, author_handle, author_name, author_avatar, shared_to: [] }`. The website composer's record. `ref_id` is the server's id of the run and the numbers are the server's own copy of it. `route_points` is the run's track thinned as the website thins it (every n-th point, at most 160), `lat` and `lng` only. `visibility` is `public`, `friends` or `private`, whichever the runner picked; the starting choice is `friends`, or `public` when their social profile is public. The app sends no photo or video (`/api/uploads` is not called) |
+| Delete my post | `DELETE /api/entities/Post/:id` |
+| Challenges | `POST /api/entities/Challenge/query { q: {}, sort: "-created_date", limit: 30 }` and `POST /api/entities/ChallengeMember/query { q: { user_id }, limit: 100 }` (which ones I joined) |
+| Create a challenge | `POST /api/entities/Challenge { name, description, metric, target_value, month, start_date, end_date, creator_handle }`. `metric` is `distance` or `runs`; `month` is `YYYY-MM`; the dates are the first instant of that month and of the next in the phone's time zone, as ISO strings |
+| Leaderboard | `POST /api/functions/challengeBoard { challenge_id }` -> `{ challenge, rows: [{ user_id, name, handle, value }], member_count, joined }`; `404` when there is no such challenge |
+| Join / leave | `POST /api/entities/ChallengeMember/query { q: { challenge_id, user_id }, limit: 1 }`, then `POST /api/entities/ChallengeMember { challenge_id, user_id, handle, name }` to join (not sent when already a member) or `DELETE /api/entities/ChallengeMember/:id` to leave |
+
+Not called by the app: `PUT /api/entities/Post/:id` (the website's `shared_to` marker),
+`/api/uploads`, and deleting or editing a challenge (the website has no button for either).
+
+The invite link and the link in a shared post are `{API_URL}/friends?add=<handle>` and
+`{API_URL}/feed?post=<id>`: the hosted API serves the website at the same address. They
+are handed to the phone's share sheet and never fetched by the app. The app does not open
+these links itself (no deep link is registered).
+
+Feed and friend data is not stored on the phone. With no connection those screens say so.
 
 ---
 

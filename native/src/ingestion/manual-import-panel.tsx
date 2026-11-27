@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused } from 'expo-router';
 import { useSession } from '../auth/session';
-import { Action } from '../components/Ui';
+import { Action, Icon } from '../components/Ui';
 import type { NormalizedActivity } from '../health/types';
 import { colors } from '../theme';
+import { heading, type } from '../typography';
 import { activitySyncKey, ActivitySyncError, buildActivityPayload, submitHealthActivity } from './activity-sync';
 import { appendImportReceipt, loadImportHistory, type ImportOutcome, type ImportReceipt } from './import-history';
 import { loadAutoSyncState, markActivitySynced, setAutoSyncEnabled, type AutoSyncState } from './auto-sync-state';
@@ -271,14 +272,14 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
 
   if (!realProvider) {
     return <View style={styles.panel}>
-      <Text style={styles.title}>Step 6 · Manual imports</Text>
-      <Text style={styles.description}>Sample activities are never uploaded. Switch to Apple Health or Health Connect and read real device records first.</Text>
+      <Text style={styles.title}>Import by hand</Text>
+      <Text style={styles.description}>Sample activities are never uploaded. Switch to Apple Health or Health Connect and read your runs first.</Text>
     </View>;
   }
   return <View style={styles.panel}>
-    {!AUTO_HEALTH_IMPORT_ENABLED && <Text style={styles.description}>Automatic import is switched off, so a run recorded in FitPro and on your watch is not saved twice. Import a run by hand below.</Text>}
+    {!AUTO_HEALTH_IMPORT_ENABLED && <Text style={styles.description}>Automatic import is switched off, so a run recorded in VantraRun and on your watch is not saved twice. Import a run by hand below.</Text>}
     {AUTO_HEALTH_IMPORT_ENABLED && <>
-    <Text style={styles.kicker}>STEP 07A · FOREGROUND AUTO SYNC (OPT-IN)</Text>
+    <Text style={styles.kicker}>Automatic import (opt-in)</Text>
     <Text style={styles.title}>Automatically import new workouts</Text>
     <Text style={styles.description}>Off by default. Once enabled, newly completed workouts can be uploaded after an authorized Activities read or when you return to this screen. An upload may include distance, duration, heart rate, and GPS route if provided. Nothing runs while VantraRun is closed.</Text>
     {autoPrefs !== null && <Action
@@ -288,19 +289,19 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
     {autoPrefs !== null && <Text style={styles.small}>Setting: {autoPrefs.enabled ? 'ON' : 'OFF'} · Existing workouts remain manual · Maximum 5 new imports per read</Text>}
     {!!autoStatus && <Text accessibilityLiveRegion="polite" selectable style={styles.result}>{autoStatus}</Text>}
     </>}
-    <Text style={styles.kicker}>STEP 06 · MANUAL IMPORT (ALWAYS AVAILABLE)</Text>
+    <Text style={styles.kicker}>Import by hand</Text>
     <Text style={styles.title}>Import selected activities</Text>
-    <Text style={styles.description}>Manual imports always remain available. The existing ingestActivity endpoint receives selected records; fake records are never eligible.</Text>
+    <Text style={styles.description}>Choose the activities to send to your VantraRun account. Sample records can never be imported.</Text>
     {!active ? <Text style={styles.error}>Import is disabled until consent, sign-in, and VantraRun invite authorization are confirmed.</Text> : <>
       <Text style={styles.count}>{selectedActivities.length} selected of {available.length} readable activities</Text>
-      {available.length === 0 && <Text style={styles.description}>No importable activities loaded. Refresh your health adapter above.</Text>}
+      {available.length === 0 && <Text style={styles.description}>Nothing to import yet. Read your activities above first.</Text>}
       {available.map((item) => {
         const key = activitySyncKey(item);
         const checked = selected.includes(key);
         return <Pressable key={key} accessibilityRole="checkbox" accessibilityState={{ checked, disabled: busy }}
           disabled={busy} onPress={() => toggle(item)}
           style={({ pressed }) => [styles.choice, checked && styles.choiceSelected, pressed && styles.pressed]}>
-          <Text style={styles.check}>{checked ? '☑' : '□'}</Text>
+          <View style={styles.check}><Icon name={checked ? 'check-square' : 'square'} size={22} color={checked ? colors.accent : colors.subtle} /></View>
           <View style={styles.choiceText}>
             <Text style={styles.name}>{item.kind === 'run' ? item.routeName : item.name}</Text>
             <Text style={styles.small}>{displayDate(item.kind === 'run' ? item.startedAt : item.performedAt)}{alreadySucceeded.has(key) ? ' · Previously imported' : ''}</Text>
@@ -319,7 +320,7 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
         Batch: {counts.created} created · {counts.updated} updated · {counts.skipped} skipped · {counts.failed} failed
       </Text>}
       {storageError && <Text selectable style={styles.error}>{storageError}</Text>}
-      <Text style={styles.historyTitle}>Recent import history (this device)</Text>
+      <Text style={styles.historyTitle}>Recent imports on this phone</Text>
       {history.length === 0 ? <Text style={styles.small}>No import attempts recorded yet.</Text> : history.slice(0, 12).map((record, idx) =>
         <Text key={`${record.activityKey}:${record.completedAt}:${idx}`} style={styles.history} selectable>
           {record.outcome.toUpperCase()} · {record.source} · {record.kind} · {displayDate(record.completedAt)}
@@ -332,24 +333,24 @@ export function ManualImportPanel({ activities, adapterId, authorized, readWarni
 }
 
 const styles = StyleSheet.create({
-  panel: { borderWidth: 1, borderColor: colors.panelBorder, borderRadius: 14, backgroundColor: colors.panel,
-    padding: 16, marginTop: 16, marginBottom: 20, gap: 8 },
-  kicker: { color: colors.accent, letterSpacing: 1.5, fontWeight: '800', fontSize: 11 },
-  title: { color: colors.text, fontWeight: '800', fontSize: 18 },
-  description: { color: colors.muted, fontSize: 13, lineHeight: 20 },
-  count: { color: colors.text, fontSize: 13, fontWeight: '700', marginTop: 6 },
-  choice: { borderWidth: 1, borderColor: colors.panelBorder, borderRadius: 10, padding: 12, flexDirection: 'row', gap: 12 },
+  panel: { borderWidth: 1, borderColor: colors.panelBorder, borderRadius: 22, backgroundColor: colors.panel,
+    padding: 18, marginTop: 4, marginBottom: 14, gap: 10 },
+  kicker: { ...type.label },
+  title: { ...heading(18) },
+  description: { ...type.body, fontSize: 14, lineHeight: 21 },
+  count: { ...type.bodyStrong, fontSize: 14, marginTop: 4 },
+  choice: { borderWidth: 1, borderColor: colors.panelBorder, borderRadius: 16, padding: 14, flexDirection: 'row', gap: 12 },
   choiceSelected: { borderColor: colors.accent, backgroundColor: colors.selectedBg },
   pressed: { opacity: 0.6 },
-  choiceText: { flex: 1, gap: 5 },
-  check: { color: colors.accent, fontSize: 25, marginTop: 1 },
-  name: { color: colors.text, fontWeight: '700', fontSize: 14 },
-  small: { color: colors.muted, fontSize: 11, lineHeight: 17 },
-  result: { color: colors.accent, fontSize: 12, lineHeight: 19 },
+  choiceText: { flex: 1, gap: 4 },
+  check: { marginTop: 2 },
+  name: { ...type.bodyStrong },
+  small: { ...type.small },
+  result: { ...type.small, color: colors.accent },
   progress: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  summary: { color: colors.accent, fontWeight: '700', fontSize: 13, marginTop: 12, lineHeight: 22 },
-  error: { color: colors.danger, fontSize: 12, lineHeight: 19 },
-  historyTitle: { color: colors.text, fontWeight: '800', fontSize: 14, marginTop: 16 },
-  history: { color: colors.muted, fontSize: 11, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.panelBorder, lineHeight: 18 },
-  footnote: { color: colors.subtle, fontSize: 11, lineHeight: 17, marginTop: 8 },
+  summary: { ...type.bodyStrong, fontSize: 14, color: colors.accent, marginTop: 10 },
+  error: { ...type.small, color: colors.danger },
+  historyTitle: { ...heading(16), marginTop: 14 },
+  history: { ...type.small, fontSize: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.panelBorder },
+  footnote: { ...type.small, fontSize: 12, marginTop: 6 },
 });

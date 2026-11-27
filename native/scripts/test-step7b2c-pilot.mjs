@@ -79,7 +79,7 @@ assert.equal(safe.selectSafeBackgroundPilot([output], 'health_connect','2026-11-
 const pilot=source('src/ingestion/background-sync-pilot.ts');
 const panel=source('src/ingestion/background-sync-pilot-panel.tsx');
 const entry=source('index.js');
-const activityScreen=source('app/activities.tsx');
+const activityScreen=source('app/(tabs)/activities.tsx');
 const session=source('src/auth/session.tsx');
 const adapter=source('src/health/android-adapter.ts');
 const pkg=JSON.parse(source('package.json'));

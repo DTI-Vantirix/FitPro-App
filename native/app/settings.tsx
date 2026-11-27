@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Text } from 'react-native';
 import { useSession } from '../src/auth/session';
-import { Action, ErrorNotice, Field, SectionHeading } from '../src/components/Ui';
+import { Action, ErrorNotice, Field, Heading, Notice, SectionHeading } from '../src/components/Ui';
 import { deleteAccount } from '../src/run/api';
 import { deviceCache, runCheckpoint, runStore } from '../src/run/device/run-files';
 import { removeOwnerRuns } from '../src/run/queue';
@@ -63,13 +63,26 @@ function Settings() {
   }
 
   return <Screen>
-    <Brand />
-    <SectionHeading kicker="SETTINGS" title="Your account." subtitle="Sign out, or delete your account and everything in it." />
+    <Brand onBack={() => (router.canGoBack() ? router.back() : router.replace('/home'))} />
+    <SectionHeading kicker="Settings" title="Your account" subtitle="Your pace zones, your social profile and friends, importing runs, signing out and deleting your account." />
     <ErrorNotice message={error} />
-    {run && <Panel><Text style={styles.body}>A run is in progress. Finish or discard it before signing out or deleting your account.</Text></Panel>}
+    {run && <Notice>A run is in progress. Finish or discard it before signing out or deleting your account.</Notice>}
 
     <Panel>
-      <Text style={styles.label}>SIGN OUT</Text>
+      <Heading>Pace zones</Heading>
+      <Text style={styles.body}>Your five training zones, your max heart rate and your threshold pace.</Text>
+      <Action label="Pace zones" icon="sliders" onPress={() => router.push('/zones')} secondary />
+    </Panel>
+
+    <Panel>
+      <Heading>Social profile</Heading>
+      <Text style={styles.body}>How friends find you and who sees what you post. Nothing is ever posted automatically.</Text>
+      <Action label="Social profile" icon="at-sign" onPress={() => router.push('/social-profile')} secondary />
+      <Action label="Friends" icon="users" onPress={() => router.push('/friends')} secondary />
+    </Panel>
+
+    <Panel>
+      <Heading>Sign out</Heading>
       {unsent > 0 && <Text style={styles.body}>
         {unsent} run{unsent === 1 ? ' is' : 's are'} not on the server yet. {unsent === 1 ? 'It stays' : 'They stay'} on this phone and will be sent when you sign back in to this account.
       </Text>}
@@ -77,31 +90,30 @@ function Settings() {
     </Panel>
 
     <Panel>
-      <Text style={styles.label}>DELETE ACCOUNT</Text>
+      <Heading>Health import</Heading>
+      <Text style={styles.body}>Automatic import from Apple Health and Health Connect is off, so a run recorded here and on your watch is not saved twice. You can still import a run by hand.</Text>
+      <Action label="Import runs" icon="download" onPress={() => router.push('/activities')} secondary />
+    </Panel>
+
+    <Panel>
+      <Heading>Delete account</Heading>
       <Text style={styles.body}>Permanently deletes your VantraRun account and every run, route, zone and post it owns, on the server and on this phone. This cannot be undone.</Text>
       {!deleting
-        ? <Action label="Delete my account…" onPress={() => { setDeleting(true); setError(null); }} disabled={Boolean(run)} secondary />
+        ? <Action label="Delete my account…" onPress={() => { setDeleting(true); setError(null); }} disabled={Boolean(run)} variant="danger" />
         : <>
-          <Field label="YOUR PASSWORD" value={password} onChangeText={setPassword} secure />
-          <Field label='TYPE "DELETE" TO CONFIRM' value={confirm} onChangeText={setConfirm} />
-          <Action label="Delete my account permanently" onPress={() => { void removeAccount(); }} busy={busy}
+          <Field label="Your password" value={password} onChangeText={setPassword} secure />
+          <Field label='Type "DELETE" to confirm' value={confirm} onChangeText={setConfirm} />
+          <Action label="Delete my account permanently" onPress={() => { void removeAccount(); }} busy={busy} variant="danger"
             disabled={Boolean(run) || !password || confirm.trim().toUpperCase() !== 'DELETE'} />
           <Action label="Cancel" onPress={() => { setDeleting(false); setPassword(''); setConfirm(''); }} secondary />
         </>}
     </Panel>
 
     <Panel>
-      <Text style={styles.label}>HEALTH IMPORT</Text>
-      <Text style={styles.body}>Automatic import from Apple Health and Health Connect is off, so a run recorded here and on your watch is not saved twice. You can still import a run by hand.</Text>
-      <Action label="Import a run by hand" onPress={() => router.push('/activities')} secondary />
+      <Heading>For developers</Heading>
+      <Action label="Connection test" onPress={() => router.push('/spike')} variant="ghost" />
     </Panel>
-
-    <Panel>
-      <Text style={styles.label}>FOR DEVELOPERS</Text>
-      <Action label="Connection test" onPress={() => router.push('/spike')} secondary />
-    </Panel>
-    <Action label="Back" onPress={() => router.back()} secondary />
-    <Note>VantraRun uses no advertising or analytics software. Zones and routes are edited on the website for now.</Note>
+    <Note>VantraRun uses no advertising or analytics software.</Note>
   </Screen>;
 }
 

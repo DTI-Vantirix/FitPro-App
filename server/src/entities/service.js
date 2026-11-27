@@ -1,6 +1,7 @@
 import { HttpError } from '../lib/http.js';
 import { isUuid, serialize } from '../lib/serialize.js';
 import { coerce, filterToSql, paging, placeholder, sortToSql } from './query.js';
+import { GUARDS } from './guards.js';
 import { allows, ruleToSql } from './rules.js';
 
 const MAX_BULK = 200;
@@ -102,6 +103,8 @@ export function createEntityService(db, registry) {
     // The record must still pass the rule afterwards: no handing records to someone else.
     if (!allows(entity.rls.update, user, merged)) throw new HttpError(403, `You can't change this ${entity.name} that way.`);
 
+    GUARDS[entity.name]?.update?.(user, existing, changes);
+
     const fields = Object.keys(changes);
     if (!fields.length) return existing;
     const params = [id];
@@ -151,7 +154,9 @@ export function createEntityService(db, registry) {
 
     async create(user, name, data) {
       const entity = entityOf(name);
-      const [row] = await insertRows(entity, [newRow(user, entity, data)]);
+      const fresh = newRow(user, entity, data);
+      await GUARDS[entity.name]?.create?.(db, user, fresh);
+      const [row] = await insertRows(entity, [fresh]);
       return serialize(row);
     },
 
@@ -160,10 +165,9 @@ export function createEntityService(db, registry) {
       if (!Array.isArray(list)) throw new HttpError(400, 'Send a list of records.');
       if (list.length > MAX_BULK) throw new HttpError(400, `At most ${MAX_BULK} records at once.`);
       if (!list.length) return [];
-      const rows = await insertRows(
-        entity,
-        list.map((data) => newRow(user, entity, data))
-      );
+      const fresh = list.map((data) => newRow(user, entity, data));
+      for (const row of fresh) await GUARDS[entity.name]?.create?.(db, user, row);
+      const rows = await insertRows(entity, fresh);
       return rows.map(serialize);
     },
 
