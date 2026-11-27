@@ -31,12 +31,14 @@ assert(existsSync(join(root, 'server')) && existsSync(join(root, 'web')), 'Expec
 const workout = readFileSync(join(native, 'src/ingestion/spike-workout.ts'), 'utf8');
 for (const name of ['external_id', 'kind', 'source', 'exercises']) assert(workout.includes(name), `Missing ${name}`);
 assert(!workout.includes('total_volume') && !workout.includes('set_count'), 'Server-computed fields are prohibited.');
-for (const f of ['app/index.tsx','app/spike.tsx','app/consent.tsx','app/invite.tsx','app/activities.tsx',
+for (const f of ['app/index.tsx','app/spike.tsx','app/consent.tsx','app/invite.tsx','app/(tabs)/activities.tsx',
   'src/auth/session.tsx','src/auth/auth-api.ts',
   'src/access/invite-api.ts','src/access/access-gate.tsx'])
   assert(existsSync(join(native,f)), `Missing ${f}`);
 const dir = join(native, 'app');
-for (const file of readdirSync(dir)) assert(file.endsWith('.tsx'), 'Unexpected runtime artifact in app/');
+// (tabs) is the Expo Router group holding the signed-in tab screens; it changes no URL.
+for (const file of readdirSync(dir)) assert(file.endsWith('.tsx') || file === '(tabs)', 'Unexpected runtime artifact in app/');
+for (const file of readdirSync(join(dir, '(tabs)'))) assert(file.endsWith('.tsx'), 'Unexpected runtime artifact in app/(tabs)/');
 const invite = readFileSync(join(native, 'src/access/invite-api.ts'), 'utf8');
 const gate = readFileSync(join(native, 'src/access/access-gate.tsx'), 'utf8');
 const session = readFileSync(join(native, 'src/auth/session.tsx'), 'utf8');
@@ -52,7 +54,7 @@ for (const file of ['src/health/types.ts', 'src/health/fake-adapter.ts', 'src/he
 const adapter = readFileSync(join(native, 'src/health/index.ts'), 'utf8');
 const fake = readFileSync(join(native, 'src/health/fake-adapter.ts'), 'utf8');
 const healthTypes = readFileSync(join(native, 'src/health/types.ts'), 'utf8');
-const activities = readFileSync(join(native, 'app/activities.tsx'), 'utf8');
+const activities = readFileSync(join(native, 'app/(tabs)/activities.tsx'), 'utf8');
 assert(adapter.includes('getHealthAdapter') && adapter.includes('fakeHealthAdapter') && adapter.includes('appleHealthAdapter') && adapter.includes('androidHealthAdapter'), 'All three providers must use one adapter selector.');
 assert(healthTypes.includes('interface HealthAdapter') && healthTypes.includes('readActivities()'), 'Single health read interface missing.');
 assert(activities.includes('adapter.readActivities()'), 'Activity screen must read through adapter interface.');
@@ -88,10 +90,10 @@ assert(buildProp?.[1]?.android?.minSdkVersion === 26 && buildProp?.[1]?.android?
   'Android Health Connect requires min API 26 and compatible target SDK.');
 assert(!activities.includes('sendSyntheticWorkout') && !activities.includes('ingestActivity'), 'Real activities screen cannot upload data in Step 5.');
 // ---- Stage 1B: the run experience ----
-for (const f of ['app/signup.tsx', 'app/setup.tsx', 'app/home.tsx', 'app/settings.tsx', 'app/run-start.tsx', 'app/run-live.tsx', 'app/run-summary.tsx'])
+for (const f of ['app/signup.tsx', 'app/setup.tsx', 'app/(tabs)/home.tsx', 'app/(tabs)/settings.tsx', 'app/run-start.tsx', 'app/run-live.tsx', 'app/run-summary.tsx'])
   assert(existsSync(join(native, f)), `Missing ${f}`);
 // Every screen past sign-up sits behind the same three checks: sign-in, consent, invite.
-for (const f of ['setup', 'home', 'settings', 'run-start', 'run-live', 'run-summary']) {
+for (const f of ['setup', '(tabs)/home', '(tabs)/settings', 'run-start', 'run-live', 'run-summary']) {
   const screen = readFileSync(join(native, `app/${f}.tsx`), 'utf8');
   assert(/export default function \w+\(\) \{\s*return <Gated/.test(screen), `app/${f}.tsx must render inside <Gated>.`);
 }
@@ -121,7 +123,7 @@ assert(readFileSync(join(native, 'src/ingestion/manual-import-panel.tsx'), 'utf8
 const payloadSource = readFileSync(join(native, 'src/run/payload.ts'), 'utf8');
 assert(payloadSource.includes("source: 'fitpro'") && !/avg_pace_sec\s*:/.test(payloadSource), 'Run payload must be source "fitpro" and never send server-computed pace.');
 assert(readFileSync(join(native, 'app/run-start.tsx'), 'utf8').includes('Crypto.randomUUID()'), 'external_id must be generated when the run starts.');
-assert(readFileSync(join(native, 'app/settings.tsx'), 'utf8').includes('deleteAccount(accessToken, password)'), 'Native account deletion missing.');
+assert(readFileSync(join(native, 'app/(tabs)/settings.tsx'), 'utf8').includes('deleteAccount(accessToken, password)'), 'Native account deletion missing.');
 // Store identity (owner, 2026-11-25). A bundle id can never change once the store apps exist.
 assert(cfg.expo.ios.bundleIdentifier === 'com.vantrarun.app' && cfg.expo.android.package === 'com.vantrarun.app', 'Bundle id and package must be com.vantrarun.app.');
 assert(cfg.expo.name === 'VantraRun', 'The app is called VantraRun.');
