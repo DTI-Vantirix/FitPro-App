@@ -80,6 +80,33 @@ can follow it. It must stay off on the live site until payments are built and te
 turned on today it would let anyone create an account that can do nothing, with no way
 to pay. The website's "Invite only" gate is unchanged; the paywall is stage 2.
 
+**Known gaps before the switch is turned on.** Left out of stage 1 on purpose; each
+needs settling before `SUBSCRIPTIONS=on` on the live site.
+
+1. **Who revoked a pass is not recorded.** A revoked entitlement keeps who granted it
+   but not who took it away, or when beyond `updated_date`.
+2. **`AccessGrant` is still writable by admins through the entity API.** It decides
+   nothing any more, but a row added there becomes an invite entitlement at the next
+   start. It should be read-only.
+3. **The website offers no data wipe or account deletion to someone without access.**
+   The server allows both (`DELETE /api/auth/me`); the screens that hold them sit behind
+   the gate. Apple requires deletion to be reachable by people who have not paid.
+4. **Open sign-up can be used to send mail.** With no invite code needed, anyone can
+   have verification emails sent to an address (6 an hour per address, 30 sign-ups an
+   hour per network). Needs tighter limits or a challenge before the switch is on.
+5. **The phone's "confirm your email" screen reached from sign-in sends no password.**
+   The sign-up screen sends it with the code; the path for an account that signs in
+   before confirming has none in hand, and with the switch on the server requires it.
+   That screen needs to ask for (or be handed) the password.
+
+**2026-11-27 — The emailed code only confirms the password its owner chose.**
+Registering again with an unverified address replaces the password and mails the
+address a new code, so the owner could be led to confirm an account holding someone
+else's password. `verify-otp` now takes the password with the code and checks it first;
+a mismatch answers like a wrong code and leaves the code unused. It is required when
+`SUBSCRIPTIONS` is on and optional while it is off, so phone builds already installed
+keep working. The website and the phone's sign-up screen always send it.
+
 **2026-11-25 — Gym hidden for now.** The owner wants the first release to be a
 run coach, with gym logging built back up later. The website no longer shows the
 gym log, gym stops on routes and runs, workout posts or the `workouts` challenge
