@@ -33,6 +33,12 @@ await test('the emailed code signs the runner in', async () => {
   reset(() => ({ status: 200, data: { access_token: 'tok-1', user: { id: 'u1' } } }));
   assert.equal(await api.verifyEmailCode('a@b.test', ' 123456 '), 'tok-1');
   assert.deepEqual([last().url, last().body], [`${BASE}/api/auth/verify-otp`, { email: 'a@b.test', otp_code: '123456' }]);
+  // The sign-up screen sends the password it was just given, so a code mailed for someone
+  // else's sign-up with this address cannot confirm their password.
+  assert.equal(await api.verifyEmailCode(' a@b.test ', '123456', 'longenough'), 'tok-1');
+  assert.deepEqual(last().body, { email: 'a@b.test', otp_code: '123456', password: 'longenough' });
+  await api.verifyEmailCode('a@b.test', '123456', '');
+  assert.deepEqual(last().body, { email: 'a@b.test', otp_code: '123456' }, 'no password to send: left out, not sent empty');
   reset(() => ({ status: 409, data: { error: 'That invite code was just used by someone else. Ask for a new one.' } }));
   await assert.rejects(api.verifyEmailCode('a@b.test', '123456'), (e) => e.status === 409 && /just used by someone else/.test(e.message));
   reset(() => ({ status: 200, data: { ok: true } }));

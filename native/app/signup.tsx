@@ -41,14 +41,15 @@ export default function SignUp() {
 
   const createAccount = () => attempt(async () => {
     await register({ email, password, fullName, inviteCode });
-    setPassword('');
+    // The password stays in memory until the code is confirmed: it is sent again with the code.
     setCode('');
     setCodeTaken(false);
     setStep('code');
   });
 
   const confirm = () => attempt(async () => {
-    const token = await verifyEmailCode(email, code);
+    const token = await verifyEmailCode(email, code, password);
+    setPassword('');
     await saveSession(token);
     router.replace('/consent');
   });

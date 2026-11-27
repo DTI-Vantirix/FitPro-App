@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { requireUser } from './auth/users.js';
+import { requireAccess } from './access.js';
 import { HttpError, readBody, reply } from './lib/http.js';
 import { createStorage } from './storage.js';
 
@@ -29,7 +29,7 @@ const NAME_RE = /^[0-9a-f-]{36}\.[a-z0-9]{2,5}$/;
 
 export function registerUploadRoutes(router) {
   router.add('POST', '/api/uploads', async (ctx) => {
-    requireUser(ctx);
+    await requireAccess(ctx);
     const type = String(ctx.req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
     const ext = TYPES[type];
     if (!ext) throw new HttpError(415, 'Upload a photo (JPEG, PNG, WebP, GIF, HEIC) or a video (MP4, MOV, WebM).');

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ADMIN, BASE_URL, PORT } from './fixtures.mjs';
+import { ADMIN, BASE_URL, CARRIED, PORT } from './fixtures.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -37,6 +37,7 @@ Object.assign(process.env, {
   TRUST_PROXY: 'false',
   UPLOAD_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'fitpro-e2e-uploads-')),
   MIGRATE_ON_START: 'false',
+  SUBSCRIPTIONS: 'off', // the browser tests cover today's invite-only sign-up
 });
 
 const { createDb } = await import('../server/src/db.js');
@@ -61,6 +62,18 @@ try {
      values ($1, $2, 'E2E Admin', 'admin', now()) returning id`,
     [ADMIN.email, await hashPassword(ADMIN.password)]
   );
+  // Someone who redeemed a code while the previous build was serving: the grant is
+  // there, the entitlement is not. Starting the API below has to put that right.
+  const [carried] = await db.query(
+    `insert into users (email, password_hash, full_name, email_verified_at)
+     values ($1, $2, 'E2E Carried', now()) returning id`,
+    [CARRIED.email, await hashPassword(CARRIED.password)]
+  );
+  await db.query(`insert into access_grants (user_id, email, code, granted_at) values ($1, $2, 'FP-OLD0-BLD0', now()) returning id`, [
+    carried.id,
+    CARRIED.email,
+  ]);
+  await db.query('delete from entitlements where user_id = $1 returning id', [carried.id]);
 } finally {
   await db.close();
 }

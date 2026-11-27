@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from '@/api/client';
 import { signInWithProvider } from "@/lib/authMfaFlow";
@@ -24,6 +24,21 @@ export default function Register() {
   const [showOtp, setShowOtp] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [mfaChallenge, setMfaChallenge] = useState(null);
+  // With subscriptions on, anyone can sign up and the invite code is optional.
+  // Until the server says so, the form stays the invite-only one.
+  const [subscriptions, setSubscriptions] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api.auth
+      .options()
+      .then((options) => {
+        if (alive) setSubscriptions(options?.subscriptions === true);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   const loginPath = "/login" + (safeReturnTo() !== "/" ? "?returnTo=" + encodeURIComponent(safeReturnTo()) : "");
 
   const handleSubmit = async (e) => {
@@ -48,7 +63,7 @@ export default function Register() {
     setError("");
     setLoading(true);
     try {
-      const result = await api.auth.verifyOtp({ email, otpCode });
+      const result = await api.auth.verifyOtp({ email, otpCode, password });
       if (result?.mfa_required) {
         setMfaChallenge(result);
         return;
@@ -135,20 +150,22 @@ export default function Register() {
             Resend
           </button>
         </p>
-        <p className="text-center text-sm text-muted-foreground mt-2">
-          <button
-            type="button"
-            onClick={() => {
-              setError("");
-              setOtpCode("");
-              setInviteCode("");
-              setShowOtp(false);
-            }}
-            className="text-primary font-medium hover:underline"
-          >
-            Use a different invite code
-          </button>
-        </p>
+        {(!subscriptions || inviteCode.trim()) && (
+          <p className="text-center text-sm text-muted-foreground mt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setError("");
+                setOtpCode("");
+                setInviteCode("");
+                setShowOtp(false);
+              }}
+              className="text-primary font-medium hover:underline"
+            >
+              Use a different invite code
+            </button>
+          </p>
+        )}
       </AuthLayout>
     );
   }
@@ -209,10 +226,14 @@ export default function Register() {
               value={inviteCode}
               onChange={(e) => setInviteCode(e.target.value)}
               className="pl-10 h-12"
-              required
+              required={!subscriptions}
             />
           </div>
-          <p className="text-xs text-muted-foreground">VantraRun is invite-only. Use the code you were sent.</p>
+          <p className="text-xs text-muted-foreground">
+            {subscriptions
+              ? "Have an invite code? Enter it here. Otherwise leave this empty."
+              : "VantraRun is invite-only. Use the code you were sent."}
+          </p>
         </div>
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>

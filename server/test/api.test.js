@@ -7,9 +7,11 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
+import { GRACE_DAYS, accessOf, grantFree, hasAccess, syncInviteEntitlements } from '../src/access.js';
 import { createApp } from '../src/app.js';
-import { loadConfig } from '../src/config.js';
+import { SERVER_ROOT, loadConfig } from '../src/config.js';
 import { bootstrapAdmin } from '../src/auth/bootstrap.js';
+import { hashPassword } from '../src/auth/crypto.js';
 import { loadRegistry } from '../src/entities/registry.js';
 import { migrate } from '../src/migrate.js';
 import { createPsqlDb } from './psql-db.js';
@@ -28,10 +30,13 @@ async function openDb() {
 let db;
 let server;
 let base;
+let testConfig;
+let registry;
 const uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fitpro-uploads-'));
 
-async function call(method, url, { body, token, headers = {}, raw } = {}) {
-  const res = await fetch(base + url, {
+// `origin` sends the request to another instance of the API (see startApp).
+async function call(method, url, { body, token, headers = {}, raw, origin = base } = {}) {
+  const res = await fetch(origin + url, {
     method,
     headers: {
       ...(body !== undefined && !raw ? { 'Content-Type': 'application/json' } : {}),
@@ -63,12 +68,35 @@ async function signUp(email, password = 'correct-horse-1') {
   return signUpWith(email, await mintCode(), password);
 }
 
-// An account from before sign-up needed a code: verified, but no accepted invite.
-async function legacyUser(email) {
-  const account = await signUp(email);
-  await db.query('delete from access_grants where user_id = $1 returning id', [account.user.id]);
+// An account from before sign-up needed a code: verified, but no accepted invite
+// and so no access. Written straight into the database, as such accounts were
+// never made by today's sign-up (and so that it does not count as a sign-up).
+let passwordHash;
+async function legacyUser(email, password = 'correct-horse-1') {
+  passwordHash ||= await hashPassword('correct-horse-1');
+  await db.query(
+    `insert into users (email, password_hash, full_name, email_verified_at) values ($1, $2, $3, now()) returning id`,
+    [email, password === 'correct-horse-1' ? passwordHash : await hashPassword(password), email.split('@')[0]]
+  );
+  const login = await call('POST', '/api/auth/login', { body: { email, password } });
+  assert.equal(login.status, 200, JSON.stringify(login.data));
+  return { token: login.data.access_token, user: login.data.user };
+}
+
+// An account that has access through an invite code, without going through sign-up
+// (the API allows 30 sign-ups an hour from one address, and the suite is near that).
+async function invitedUser(email, code) {
+  const account = await legacyUser(email);
+  code ||= await mintCode();
+  const res = await call('POST', '/api/functions/inviteAccess', { token: account.token, body: { action: 'redeem', code } });
+  assert.deepEqual(res.data, { allowed: true });
   return account;
 }
+
+const userRow = async (id) => (await db.query('select * from users where id = $1', [id]))[0];
+const entitlementsOf = (userId) =>
+  db.query('select * from entitlements where user_id = $1 order by created_date, source', [userId]);
+const daysFromNow = (days) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 
 async function signUpWith(email, inviteCode, password = 'correct-horse-1') {
   const reg = await call('POST', '/api/auth/register', {
@@ -84,13 +112,24 @@ before(async () => {
   db = await openDb();
   await db.exec('drop schema if exists public cascade; create schema public;');
   await migrate(db, { log: () => {} });
-  const config = { ...loadConfig({ NODE_ENV: 'test' }), uploadDir, routerUrl: 'off' };
-  const registry = await loadRegistry(db);
-  server = http.createServer(createApp({ db, config, registry }));
+  testConfig = { ...loadConfig({ NODE_ENV: 'test' }), uploadDir, routerUrl: 'off' };
+  registry = await loadRegistry(db);
+  server = http.createServer(createApp({ db, config: testConfig, registry }));
   await new Promise((r) => server.listen(0, r));
   base = `http://127.0.0.1:${server.address().port}`;
   console.log = () => {}; // silence request logs
 });
+
+// A second instance of the API on the same database with some settings changed,
+// for behaviour that sits behind a setting. Returns its address and a way to stop it.
+async function startApp(overrides) {
+  const other = http.createServer(createApp({ db, config: { ...testConfig, ...overrides }, registry }));
+  await new Promise((r) => other.listen(0, r));
+  return {
+    origin: `http://127.0.0.1:${other.address().port}`,
+    close: () => new Promise((r) => other.close(r)),
+  };
+}
 
 after(async () => {
   if (server) await new Promise((r) => server.close(r));
@@ -353,7 +392,9 @@ describe('invite access', () => {
     assert.equal(codes.length, 3);
     assert.match(codes[0].code, /^FP-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
 
-    assert.deepEqual((await call('POST', '/api/functions/inviteAccess', { token: nina.token, body: { action: 'status' } })).data, { allowed: false });
+    assert.deepEqual((await call('POST', '/api/functions/inviteAccess', { token: nina.token, body: { action: 'status' } })).data, {
+      allowed: false, reason: null, source: null, plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: false,
+    });
     const wrong = await call('POST', '/api/functions/inviteAccess', { token: nina.token, body: { action: 'redeem', code: 'FP-NOPE-NOPE' } });
     assert.equal(wrong.data.allowed, false);
     const redeem = await call('POST', '/api/functions/inviteAccess', {
@@ -367,7 +408,9 @@ describe('invite access', () => {
     assert.equal(reuse.data.allowed, false);
     assert.match(reuse.data.error, /already been used/);
 
-    assert.deepEqual((await call('POST', '/api/functions/inviteAccess', { token: admin.token, body: {} })).data, { allowed: true, admin: true });
+    assert.deepEqual((await call('POST', '/api/functions/inviteAccess', { token: admin.token, body: {} })).data, {
+      allowed: true, admin: true, reason: 'admin', source: null, plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: false,
+    });
   });
 
   test('revoke only unused codes', async () => {
@@ -383,6 +426,454 @@ describe('invite access', () => {
     assert.equal(list.data.grants.length - before.grants.length, 1);
     const grant = await call('POST', '/api/entities/AccessGrant/query', { token: nina.token, body: {} });
     assert.equal(grant.data.items.length, 1, 'a user can read their own grant');
+  });
+});
+
+describe('access', () => {
+  test('an account that signed up with a code has access because of the invite', async () => {
+    const code = await mintCode();
+    const ada = await signUpWith('ada.access@example.com', code);
+    const access = await accessOf(db, await userRow(ada.user.id));
+    assert.equal(access.allowed, true);
+    assert.equal(access.admin, false);
+    assert.equal(access.reason, 'invite');
+    assert.equal(access.source, 'invite');
+    assert.equal(access.plan, null);
+    assert.equal(access.expires_at, null);
+    assert.equal(access.cancel_at_period_end, false);
+    assert.equal(await hasAccess(db, await userRow(ada.user.id)), true);
+
+    const rows = await entitlementsOf(ada.user.id);
+    assert.deepEqual(rows.map((r) => [r.source, r.status, r.granted_by]), [['invite', 'active', code]]);
+    const grants = await db.query('select code from access_grants where user_id = $1', [ada.user.id]);
+    assert.deepEqual(grants.map((g) => g.code), [code], 'the invite-code screen still reads access_grants');
+  });
+
+  test('an admin has access by role alone, with no entitlement row', async () => {
+    assert.equal(await bootstrapAdmin(db, { ADMIN_EMAIL: 'role-only@example.com', ADMIN_PASSWORD: 'a-long-enough-password' }), 'created');
+    const [row] = await db.query(`select * from users where email = 'role-only@example.com'`, []);
+    assert.equal((await entitlementsOf(row.id)).length, 0);
+    const access = await accessOf(db, row);
+    assert.equal(access.allowed, true);
+    assert.equal(access.admin, true);
+    assert.equal(access.reason, 'admin');
+    assert.equal(access.source, null);
+    assert.equal(await hasAccess(db, row), true);
+  });
+
+  test('a verified account with no grant has no access until it redeems a code', async () => {
+    const lena = await legacyUser('lena.access@example.com');
+    const before = await accessOf(db, await userRow(lena.user.id));
+    assert.equal(before.allowed, false);
+    assert.equal(before.admin, false);
+    assert.equal(before.reason, null);
+    assert.equal(before.source, null);
+    assert.equal(await hasAccess(db, await userRow(lena.user.id)), false);
+
+    const code = await mintCode();
+    const res = await call('POST', '/api/functions/inviteAccess', { token: lena.token, body: { action: 'redeem', code } });
+    assert.equal(res.data.allowed, true);
+    const after = await accessOf(db, await userRow(lena.user.id));
+    assert.equal(after.allowed, true);
+    assert.equal(after.reason, 'invite');
+    assert.deepEqual((await entitlementsOf(lena.user.id)).map((r) => [r.source, r.status, r.granted_by]), [['invite', 'active', code]]);
+  });
+
+  test('an entitlement just past its end is good for the allowance, and not after it', async () => {
+    const paul = await legacyUser('paul.access@example.com');
+    const user = await userRow(paul.user.id);
+    const [row] = await db.query(
+      `insert into entitlements (user_id, source, status, plan, expires_at, external_id)
+       values ($1, 'stripe', 'active', 'monthly', $2, 'sub_paul') returning *`,
+      [user.id, daysFromNow(-(GRACE_DAYS - 1))]
+    );
+    const inGrace = await accessOf(db, user);
+    assert.equal(inGrace.allowed, true);
+    assert.equal(inGrace.reason, 'subscription');
+    assert.equal(inGrace.plan, 'monthly');
+    assert.equal(new Date(inGrace.expires_at).getTime(), new Date(row.expires_at).getTime());
+
+    await db.query('update entitlements set expires_at = $2 where id = $1 returning id', [row.id, daysFromNow(-(GRACE_DAYS + 1))]);
+    const past = await accessOf(db, user);
+    assert.equal(past.allowed, false);
+    assert.equal(past.reason, null);
+    assert.equal(past.plan, null);
+  });
+
+  test('with an invite and a paid entitlement, the paid one is reported and either keeps access', async () => {
+    const tess = await invitedUser('tess.access@example.com');
+    const user = await userRow(tess.user.id);
+    await db.query(
+      `insert into entitlements (user_id, source, status, plan, expires_at, cancel_at_period_end, external_id)
+       values ($1, 'stripe', 'trial', 'annual', $2, true, 'sub_tess') returning id`,
+      [user.id, daysFromNow(5)]
+    );
+    const both = await accessOf(db, user);
+    assert.equal(both.allowed, true);
+    assert.equal(both.reason, 'trial', 'paid before free');
+    assert.equal(both.source, 'stripe');
+    assert.equal(both.plan, 'annual');
+    assert.equal(both.cancel_at_period_end, true);
+
+    await db.query(`update entitlements set status = 'active' where user_id = $1 and source = 'stripe' returning id`, [user.id]);
+    assert.equal((await accessOf(db, user)).reason, 'subscription');
+
+    // the free pass goes: the paid one still holds
+    await db.query(`update entitlements set status = 'revoked' where user_id = $1 and source = 'invite' returning id`, [user.id]);
+    const paidOnly = await accessOf(db, user);
+    assert.equal(paidOnly.allowed, true);
+    assert.equal(paidOnly.source, 'stripe');
+
+    // the paid one lapses and the free one comes back: access is by invite again
+    await db.query(`update entitlements set status = 'expired' where user_id = $1 and source = 'stripe' returning id`, [user.id]);
+    assert.equal((await accessOf(db, user)).allowed, false);
+    await db.query(`update entitlements set status = 'active' where user_id = $1 and source = 'invite' returning id`, [user.id]);
+    const freeOnly = await accessOf(db, user);
+    assert.equal(freeOnly.allowed, true);
+    assert.equal(freeOnly.reason, 'invite');
+  });
+
+  test('grantFree gives one row per person and source, and brings a revoked one back', async () => {
+    const gus = await legacyUser('gus.access@example.com');
+    const user = await userRow(gus.user.id);
+    const first = await db.tx((tx) => grantFree(tx, { userId: user.id, source: 'admin', grantedBy: 'owner@example.com', note: 'coach' }));
+    assert.deepEqual([first.source, first.status, first.granted_by, first.note], ['admin', 'active', 'owner@example.com', 'coach']);
+    assert.equal((await accessOf(db, user)).reason, 'granted');
+
+    const again = await db.tx((tx) => grantFree(tx, { userId: user.id, source: 'admin', grantedBy: 'other@example.com' }));
+    assert.equal(again.id, first.id, 'granting twice is harmless');
+    assert.deepEqual([again.granted_by, again.note], ['owner@example.com', 'coach'], 'a pass that is still good keeps its history');
+    assert.equal((await entitlementsOf(user.id)).length, 1);
+
+    await db.query(`update entitlements set status = 'revoked' where id = $1 returning id`, [first.id]);
+    assert.equal(await hasAccess(db, user), false);
+    const back = await db.tx((tx) => grantFree(tx, { userId: user.id, source: 'admin', grantedBy: 'other@example.com', note: 'back again' }));
+    assert.deepEqual([back.id, back.status, back.granted_by, back.note], [first.id, 'active', 'other@example.com', 'back again']);
+    assert.equal(await hasAccess(db, user), true);
+
+    await assert.rejects(db.tx((tx) => grantFree(tx, { userId: user.id, source: 'stripe', grantedBy: 'x' })), /free/i);
+  });
+
+  test('the database refuses an unknown source or status, and a second row for one subscription', async () => {
+    const user = await userRow(bob.user.id);
+    const insert = (source, status, externalId, expiresAt = daysFromNow(30)) =>
+      db.query('insert into entitlements (user_id, source, status, external_id, expires_at) values ($1, $2, $3, $4, $5) returning id', [
+        user.id, source, status, externalId, expiresAt,
+      ]);
+    await assert.rejects(insert('paypal', 'active', null));
+    await assert.rejects(insert('stripe', 'paused', null));
+    await assert.rejects(insert('invite', 'active', null, null), 'bob already has his invite row');
+    await insert('apple', 'expired', 'orig-tx-1');
+    await assert.rejects(insert('apple', 'active', 'orig-tx-1'));
+    await db.query(`delete from entitlements where user_id = $1 and source = 'apple' returning id`, [user.id]);
+  });
+
+  test('a paid entitlement must say when it ends; only a free pass may be open-ended', async () => {
+    const pia = await legacyUser('pia.paid@example.com');
+    const user = await userRow(pia.user.id);
+    const insert = (source, status, expiresAt) =>
+      db.query('insert into entitlements (user_id, source, status, external_id, expires_at) values ($1, $2, $3, $4, $5) returning id', [
+        user.id, source, status, source === 'stripe' || source === 'apple' ? `${source}-pia` : null, expiresAt,
+      ]);
+    for (const source of ['stripe', 'apple']) {
+      for (const status of ['trial', 'active', 'grace', 'expired', 'revoked']) {
+        await assert.rejects(insert(source, status, null), /check constraint|not allowed/i, `${source} ${status} with no end date`);
+      }
+    }
+    assert.equal(await hasAccess(db, user), false);
+    const [paid] = await insert('stripe', 'active', daysFromNow(30));
+    assert.equal(await hasAccess(db, user), true);
+    await assert.rejects(db.query('update entitlements set expires_at = null where id = $1 returning id', [paid.id]), 'nor can the end date be taken away later');
+    await db.query('delete from entitlements where id = $1 returning id', [paid.id]);
+
+    await insert('admin', 'active', null);
+    await insert('invite', 'active', null);
+    assert.equal(await hasAccess(db, user), true);
+  });
+
+  test('the migration carries redeemed invite codes over, once', async () => {
+    // an account as it stood before the migration: a grant, and no entitlement yet
+    const old = await legacyUser('old.tester@example.com');
+    await db.query(
+      `insert into access_grants (user_id, email, code, granted_at) values ($1, $2, 'FP-OLD0-CODE', '2026-10-01T09:00:00Z') returning id`,
+      [old.user.id, old.user.email]
+    );
+    assert.equal(await hasAccess(db, await userRow(old.user.id)), false);
+
+    const sql = fs.readFileSync(path.join(SERVER_ROOT, 'migrations', '005_entitlements.sql'), 'utf8');
+    const backfill = /insert into entitlements[\s\S]*?from access_grants[\s\S]*?;/i.exec(sql)?.[0];
+    assert.ok(backfill, 'the migration copies access_grants into entitlements');
+    const total = async () => (await db.query('select count(*)::int as n from entitlements', []))[0].n;
+    const before = await total();
+    await db.exec(backfill);
+    assert.equal(await total(), before + 1, 'only the account that had no row gets one');
+    await db.exec(backfill);
+    assert.equal(await total(), before + 1, 'running it again adds nothing');
+
+    const rows = await entitlementsOf(old.user.id);
+    assert.deepEqual(rows.map((r) => [r.source, r.status, r.granted_by]), [['invite', 'active', 'FP-OLD0-CODE']]);
+    assert.equal((await accessOf(db, await userRow(old.user.id))).reason, 'invite');
+  });
+});
+
+describe('invite grants written by an older build are picked up at start-up', () => {
+  // What the previous build does when someone redeems a code: a row in access_grants and nothing else.
+  const oldBuildGrant = (who, code) =>
+    db.query(
+      `insert into access_grants (user_id, email, code, granted_at) values ($1, $2, $3, '2026-11-26T09:00:00Z') returning id`,
+      [who.user.id, who.user.email, code]
+    );
+  const runs = (who) => call('POST', '/api/entities/Run/query', { token: who.token, body: {} });
+
+  test('a grant with no entitlement gets one, once', async () => {
+    const rolf = await legacyUser('rolf.rollback@example.com');
+    await oldBuildGrant(rolf, 'FP-ROLL-BACK');
+    assert.equal((await runs(rolf)).status, 403, 'locked out until the sync runs');
+
+    assert.equal(await syncInviteEntitlements(db), 1);
+    assert.equal((await runs(rolf)).status, 200);
+    const rows = await entitlementsOf(rolf.user.id);
+    assert.deepEqual(rows.map((r) => [r.source, r.status, r.granted_by]), [['invite', 'active', 'FP-ROLL-BACK']]);
+    assert.equal(new Date(rows[0].created_date).toISOString(), '2026-11-26T09:00:00.000Z');
+
+    assert.equal(await syncInviteEntitlements(db), 0, 'a second run finds nothing to do');
+    assert.equal((await entitlementsOf(rolf.user.id)).length, 1);
+  });
+
+  test('it never touches a row that is already there: a revoked pass stays revoked', async () => {
+    const rita = await invitedUser('rita.revoked@example.com');
+    const [before] = await db.query(
+      `update entitlements set status = 'revoked', note = 'asked to leave' where user_id = $1 and source = 'invite' returning *`,
+      [rita.user.id]
+    );
+    assert.equal((await db.query('select id from access_grants where user_id = $1', [rita.user.id])).length, 1);
+
+    assert.equal(await syncInviteEntitlements(db), 0);
+    const [after] = await entitlementsOf(rita.user.id);
+    assert.deepEqual(
+      [after.id, after.status, after.granted_by, after.note, String(after.updated_date)],
+      [before.id, 'revoked', before.granted_by, 'asked to leave', String(before.updated_date)]
+    );
+    assert.equal((await runs(rita)).status, 403);
+  });
+
+  test('a free pass from the owner or a subscription is not mistaken for the invite', async () => {
+    const hugo = await legacyUser('hugo.handgrant@example.com');
+    await db.tx((tx) => grantFree(tx, { userId: hugo.user.id, source: 'admin', grantedBy: 'owner@example.com' }));
+    await oldBuildGrant(hugo, 'FP-HUGO-CODE');
+    assert.equal(await syncInviteEntitlements(db), 1);
+    assert.deepEqual((await entitlementsOf(hugo.user.id)).map((r) => r.source).sort(), ['admin', 'invite']);
+  });
+});
+
+describe('the server refuses product calls without access', () => {
+  const NO_ACCESS = { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } };
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 9, 9, 9]);
+  const aRun = { distance_mi: 2, duration_sec: 1200, route_name: 'Before the lapse', started_at: '2026-11-21T12:00:00Z' };
+  const upload = {
+    kind: 'run', source: 'fitpro', external_id: 'fp-lapse-0001',
+    distance_mi: 4, duration_sec: 2000, started_at: '2026-11-22T12:00:00Z',
+  };
+  const fn = (who, name, body = {}) => call('POST', `/api/functions/${name}`, { token: who.token, body });
+  const setFree = (who, status) =>
+    db.query(`update entitlements set status = $2 where user_id = $1 and source = 'invite' returning id`, [who.user.id, status]);
+  let mia;
+  let run;
+  let zone;
+
+  // Every product call, by name. `own` are the ids of records the person made while they had access.
+  const productCalls = (who, own) => ({
+    'entity list': () => call('GET', '/api/entities/Run', { token: who.token }),
+    'entity query': () => call('POST', '/api/entities/Run/query', { token: who.token, body: {} }),
+    'entity get': () => call('GET', `/api/entities/Run/${own.run}`, { token: who.token }),
+    'entity create': () => call('POST', '/api/entities/Run', { token: who.token, body: { ...aRun, route_name: 'Sneaked in' } }),
+    'entity update': () => call('PUT', `/api/entities/Run/${own.run}`, { token: who.token, body: { notes: 'changed' } }),
+    'entity bulk create': () =>
+      call('POST', '/api/entities/PaceZone/bulk', { token: who.token, body: [{ name: 'Sneaked zone', zone_number: 9, fast_sec: 300, slow_sec: 330 }] }),
+    'entity bulk update': () => call('PUT', '/api/entities/PaceZone/bulk', { token: who.token, body: [{ id: own.zone, color: '#00ff00' }] }),
+    'entity update-many': () =>
+      call('POST', '/api/entities/PaceZone/update-many', { token: who.token, body: { q: { created_by_id: who.user.id }, data: { color: '#0000ff' } } }),
+    'entity delete-many': () =>
+      call('POST', '/api/entities/PaceZone/delete-many', { token: who.token, body: { q: { created_by_id: who.user.id } } }),
+    'entity delete': () => call('DELETE', `/api/entities/Run/${own.run}`, { token: who.token }),
+    upload: () => call('POST', '/api/uploads', { token: who.token, raw: png, headers: { 'Content-Type': 'image/png' } }),
+    snapRoute: () => fn(who, 'snapRoute', { points: [{ lat: 40.7, lng: -74.0, offroad: true }, { lat: 40.71, lng: -74.0, offroad: true }] }),
+    socialFeed: () => fn(who, 'socialFeed'),
+    challengeBoard: () => fn(who, 'challengeBoard', { challenge_id: own.run }),
+    routeDirections: () => fn(who, 'routeDirections', { route_id: own.run }),
+    ingestActivity: () => fn(who, 'ingestActivity', { ...upload, external_id: 'fp-sneak-0001' }),
+    adminInviteCodes: () => fn(who, 'adminInviteCodes', { action: 'list' }),
+    adminClientErrors: () => fn(who, 'adminClientErrors', { action: 'list' }),
+  });
+
+  const snapshot = async (who) => ({
+    runs: (await db.query('select id, route_name, notes from runs where created_by_id = $1 order by id', [who.user.id])).map((r) => ({ ...r })),
+    zones: (await db.query('select id, name, color from pace_zones where created_by_id = $1 order by id', [who.user.id])).map((r) => ({ ...r })),
+    posts: (await db.query('select count(*)::int as n from posts where created_by_id = $1', [who.user.id]))[0].n,
+  });
+
+  test('every product call is a 403 once access is gone, and nothing is read or changed', async () => {
+    mia = await invitedUser('mia.lapsed@example.com');
+    run = (await call('POST', '/api/entities/Run', { token: mia.token, body: aRun })).data;
+    zone = (await call('POST', '/api/entities/PaceZone', { token: mia.token, body: { name: 'Easy', zone_number: 1, fast_sec: 540, slow_sec: 600 } })).data;
+    assert.ok(run.id && zone.id);
+    const filesBefore = fs.readdirSync(uploadDir).length;
+    const before = await snapshot(mia);
+
+    await setFree(mia, 'revoked');
+    const calls = productCalls(mia, { run: run.id, zone: zone.id });
+    assert.equal(Object.keys(calls).length, 18);
+    for (const [name, send] of Object.entries(calls)) {
+      assert.deepEqual(await send(), NO_ACCESS, name);
+    }
+    assert.deepEqual(await snapshot(mia), before, 'nothing was created, changed or deleted');
+    assert.equal(fs.readdirSync(uploadDir).length, filesBefore, 'no file was stored');
+  });
+
+  test('function names cannot be probed without signing in', async () => {
+    const UNAUTHORIZED = { status: 401, data: { error: 'Unauthorized' } };
+    for (const name of ['socialFeed', 'inviteAccess', 'adminAccess', 'noSuchFunction', 'constructor', 'toString']) {
+      assert.deepEqual(await call('POST', `/api/functions/${name}`, { body: {} }), UNAUTHORIZED, name);
+      assert.deepEqual(await call('POST', `/api/functions/${name}`, { body: {}, token: 'x.y.z' }), UNAUTHORIZED, `${name}, bad token`);
+    }
+    // signed in, a name that does not exist is still a plain 404
+    for (const name of ['noSuchFunction', 'constructor']) {
+      assert.deepEqual(await call('POST', `/api/functions/${name}`, { token: bob.token, body: {} }), {
+        status: 404,
+        data: { error: `Unknown function "${name}".` },
+      });
+    }
+  });
+
+  test('no token is still a 401, never a 403', async () => {
+    assert.equal((await call('GET', '/api/entities/Run')).status, 401);
+    assert.equal((await call('POST', '/api/functions/socialFeed', { body: {} })).status, 401);
+    assert.equal((await call('POST', '/api/uploads', { raw: png, headers: { 'Content-Type': 'image/png' } })).status, 401);
+  });
+
+  test('a person without access can still see their account, their access status and sign out', async () => {
+    const me = await call('GET', '/api/auth/me', { token: mia.token });
+    assert.equal(me.status, 200);
+    assert.equal(me.data.email, 'mia.lapsed@example.com');
+    const consent = await call('PUT', '/api/auth/me', { token: mia.token, body: { consent_version: '2026-11' } });
+    assert.equal(consent.status, 200);
+    assert.equal((await call('POST', '/api/auth/logout', { token: mia.token, body: {} })).status, 200);
+    assert.equal((await call('GET', '/api/auth/options')).status, 200);
+    assert.equal((await call('GET', '/api/health')).status, 200);
+    assert.equal((await call('GET', '/.well-known/apple-app-site-association')).status, 200);
+    assert.equal((await call('GET', '/.well-known/assetlinks.json')).status, 200);
+
+    const status = await fn(mia, 'inviteAccess', { action: 'status' });
+    assert.deepEqual(status, {
+      status: 200,
+      data: { allowed: false, reason: null, source: null, plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: false },
+    });
+  });
+
+  test('redeeming an invite code opens every product call again', async () => {
+    const wrong = await fn(mia, 'inviteAccess', { action: 'redeem', code: 'FP-NOPE-NOPE' });
+    assert.deepEqual(wrong, { status: 200, data: { allowed: false, error: 'That code is not recognised.' } });
+    const redeem = await fn(mia, 'inviteAccess', { action: 'redeem', code: await mintCode() });
+    assert.deepEqual(redeem, { status: 200, data: { allowed: true } });
+    const status = await fn(mia, 'inviteAccess', { action: 'status' });
+    assert.deepEqual(status.data, {
+      allowed: true, reason: 'invite', source: 'invite', plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: false,
+    });
+
+    const calls = productCalls(mia, { run: run.id, zone: zone.id });
+    const refusedAnyway = { challengeBoard: 404, routeDirections: 404, adminInviteCodes: 403, adminClientErrors: 403 };
+    for (const [name, send] of Object.entries(calls)) {
+      const res = await send();
+      if (refusedAnyway[name]) {
+        assert.equal(res.status, refusedAnyway[name], name);
+        assert.notEqual(res.data.error, NO_ACCESS.data.error, `${name} is refused for its own reason now`);
+      } else {
+        assert.ok(res.status === 200 || res.status === 201, `${name}: ${res.status} ${JSON.stringify(res.data)}`);
+      }
+    }
+  });
+
+  test('an entitlement that ended four days ago is refused; two days ago is inside the allowance', async () => {
+    const quin = await legacyUser('quin.expired@example.com');
+    await db.query(
+      `insert into entitlements (user_id, source, status, plan, expires_at, external_id)
+       values ($1, 'stripe', 'active', 'monthly', $2, 'sub_quin') returning id`,
+      [quin.user.id, daysFromNow(-4)]
+    );
+    assert.deepEqual(await call('POST', '/api/entities/Run/query', { token: quin.token, body: {} }), NO_ACCESS);
+    assert.deepEqual(await fn(quin, 'socialFeed'), NO_ACCESS);
+    assert.equal((await fn(quin, 'inviteAccess', { action: 'status' })).data.allowed, false);
+
+    await db.query(`update entitlements set expires_at = $2 where user_id = $1 returning id`, [quin.user.id, daysFromNow(-2)]);
+    const inside = await call('POST', '/api/entities/Run/query', { token: quin.token, body: {} });
+    assert.equal(inside.status, 200);
+    const status = (await fn(quin, 'inviteAccess', { action: 'status' })).data;
+    assert.deepEqual(
+      [status.allowed, status.reason, status.source, status.plan, status.cancel_at_period_end],
+      [true, 'subscription', 'stripe', 'monthly', false]
+    );
+    assert.equal(Math.round((Date.now() - new Date(status.expires_at).getTime()) / 86400000), 2);
+  });
+
+  test('a run the phone retries after access lapses gets a clear 403, and saves once access is back', async () => {
+    const ravi = await invitedUser('ravi.retry@example.com');
+    const first = await fn(ravi, 'ingestActivity', upload);
+    assert.equal(first.data.action, 'created');
+
+    await setFree(ravi, 'revoked');
+    const queued = { ...upload, external_id: 'fp-lapse-0002', started_at: '2026-11-23T12:00:00Z' };
+    for (const body of [queued, { ...upload, distance_mi: 9 }]) {
+      const refused = await fn(ravi, 'ingestActivity', body);
+      // 403 with a readable `error` is what makes the phone keep the run and try again (native/src/run/queue.ts)
+      assert.equal(refused.status, 403);
+      assert.equal(refused.data.error, 'Enter an invite code to use VantraRun.');
+    }
+    const stored = await db.query('select external_id, distance_mi from runs where created_by_id = $1', [ravi.user.id]);
+    assert.deepEqual(stored.map((r) => [r.external_id, Number(r.distance_mi)]), [['fp-lapse-0001', 4]], 'nothing stored or changed while refused');
+
+    await setFree(ravi, 'active');
+    const retried = await fn(ravi, 'ingestActivity', queued);
+    assert.equal(retried.status, 200);
+    assert.equal(retried.data.action, 'created', 'the queued run is saved by the retry');
+  });
+
+  test('an admin with no entitlement row passes everywhere by role', async () => {
+    const login = await call('POST', '/api/auth/login', { body: { email: 'role-only@example.com', password: 'a-long-enough-password' } });
+    const boss = { token: login.data.access_token, user: login.data.user };
+    assert.equal((await entitlementsOf(boss.user.id)).length, 0);
+    assert.equal((await call('POST', '/api/entities/Run/query', { token: boss.token, body: {} })).status, 200);
+    assert.equal((await call('POST', '/api/entities/Run', { token: boss.token, body: aRun })).status, 201);
+    assert.equal((await call('POST', '/api/uploads', { token: boss.token, raw: png, headers: { 'Content-Type': 'image/png' } })).status, 201);
+    assert.equal((await fn(boss, 'socialFeed')).status, 200);
+    assert.equal((await fn(boss, 'adminInviteCodes', { action: 'list' })).status, 200);
+    assert.equal((await fn(boss, 'ingestActivity', { ...upload, external_id: 'fp-boss-0001' })).status, 200);
+    assert.deepEqual((await fn(boss, 'inviteAccess', { action: 'status' })).data, {
+      allowed: true, admin: true, reason: 'admin', source: null, plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: false,
+    });
+  });
+
+  test('a person without access can change or reset their password and delete their account', async () => {
+    const zed = await legacyUser('zed.leaving@example.com');
+    assert.deepEqual(await call('POST', '/api/entities/Run/query', { token: zed.token, body: {} }), NO_ACCESS);
+
+    const changed = await call('POST', '/api/auth/change-password', {
+      token: zed.token,
+      body: { currentPassword: 'correct-horse-1', newPassword: 'another-horse-2' },
+    });
+    assert.equal(changed.status, 200, JSON.stringify(changed.data));
+
+    const ask = await call('POST', '/api/auth/reset-password-request', { body: { email: 'zed.leaving@example.com' } });
+    const reset = await call('POST', '/api/auth/reset-password', { body: { resetToken: ask.data.dev_token, newPassword: 'third-horse-3' } });
+    assert.equal(reset.status, 200);
+    const login = await call('POST', '/api/auth/login', { body: { email: 'zed.leaving@example.com', password: 'third-horse-3' } });
+    assert.equal(login.status, 200);
+
+    const report = await call('POST', '/api/client-errors', { token: login.data.access_token, body: { message: 'the paywall crashed' } });
+    assert.equal(report.status, 201, 'a crash on the way in can still be reported');
+
+    const gone = await call('DELETE', '/api/auth/me', { token: login.data.access_token, body: { password: 'third-horse-3' } });
+    assert.deepEqual(gone, { status: 200, data: { ok: true, deleted: true } });
+    assert.equal((await db.query('select id from users where id = $1', [zed.user.id])).length, 0);
   });
 });
 
@@ -405,7 +896,9 @@ describe('sign-up needs a code', () => {
     const code = await mintCode();
     const gina = await signUpWith('gina@example.com', `  ${code.toLowerCase()} `);
     const status = await call('POST', '/api/functions/inviteAccess', { token: gina.token, body: { action: 'status' } });
-    assert.deepEqual(status.data, { allowed: true });
+    assert.deepEqual(status.data, {
+      allowed: true, reason: 'invite', source: 'invite', plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: false,
+    });
     const [row] = await db.query('select status, used_by_email from invite_codes where code = $1', [code]);
     assert.deepEqual({ ...row }, { status: 'used', used_by_email: 'gina@example.com' });
   });
@@ -454,6 +947,354 @@ describe('sign-up needs a code', () => {
     assert.equal((await call('POST', '/api/auth/login', { body: { email: 'kim@example.com', password: 'correct-horse-1' } })).status, 200);
     const res = await call('POST', '/api/functions/inviteAccess', { token: kim.token, body: { action: 'redeem', code: await mintCode() } });
     assert.deepEqual(res.data, { allowed: true });
+  });
+});
+
+describe('sign-up when subscriptions are on', () => {
+  // The refusal names what is on offer: a subscription only where one can be bought.
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
+  const NO_ACCESS_OFF = { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } };
+  let open; // the API with SUBSCRIPTIONS=on
+  const on = (method, url, options = {}) => call(method, url, { ...options, origin: open.origin });
+  const register = (body) => on('POST', '/api/auth/register', { body });
+  // These tests already send the password with the emailed code, as the website and the phone do.
+  const verify = (email, code, password = 'longenough1') =>
+    on('POST', '/api/auth/verify-otp', { body: { email, otp_code: code, ...(password === null ? {} : { password }) } });
+  const WRONG_CODE = { status: 400, data: { error: 'That code is wrong or has expired.' } };
+  // Sign-ups are limited per address; these tests come from their own (see TRUST_PROXY in src/lib/http.js).
+  const from = (address) => ({ 'X-Forwarded-For': address });
+  const withProxy = async (work) => {
+    process.env.TRUST_PROXY = 'true';
+    try {
+      await work();
+    } finally {
+      delete process.env.TRUST_PROXY;
+    }
+  };
+
+  before(async () => {
+    open = await startApp({ subscriptions: true });
+  });
+  after(async () => {
+    await open?.close();
+  });
+
+  test('the switch is off unless SUBSCRIPTIONS is exactly "on"', () => {
+    assert.equal(loadConfig({ NODE_ENV: 'test' }).subscriptions, false);
+    assert.equal(loadConfig({ NODE_ENV: 'test', SUBSCRIPTIONS: 'off' }).subscriptions, false);
+    assert.equal(loadConfig({ NODE_ENV: 'test', SUBSCRIPTIONS: '' }).subscriptions, false);
+    assert.equal(loadConfig({ NODE_ENV: 'test', SUBSCRIPTIONS: 'true' }).subscriptions, false);
+    assert.equal(loadConfig({ NODE_ENV: 'test', SUBSCRIPTIONS: 'on' }).subscriptions, true);
+    assert.equal(testConfig.subscriptions, false, 'the suite itself runs with it off');
+  });
+
+  test('the sign-in options say whether subscriptions are on', async () => {
+    const off = await call('GET', '/api/auth/options');
+    assert.deepEqual(off, { status: 200, data: { name: 'VantraRun', auth_config: { mfa_policy: 'off', providers: [] }, subscriptions: false } });
+    const yes = await on('GET', '/api/auth/options');
+    assert.deepEqual(yes, { status: 200, data: { name: 'VantraRun', auth_config: { mfa_policy: 'off', providers: [] }, subscriptions: true } });
+  });
+
+  test('with the switch off, sign-up without a code is refused exactly as before', async () => {
+    const body = { email: 'nocode.off@example.com', password: 'longenough1' };
+    // (a sign-up with the field left out altogether is in 'sign-up needs a code' above)
+    assert.deepEqual(await call('POST', '/api/auth/register', { body: { ...body, invite_code: '   ' } }), { status: 400, data: { error: 'Enter your invite code.' } });
+    assert.equal((await db.query(`select id from users where email = 'nocode.off@example.com'`, [])).length, 0);
+  });
+
+  test('sign-up with no code makes an account that signs in and has no access', async () => {
+    const email = 'nocode.on@example.com';
+    const reg = await register({ email, password: 'longenough1', full_name: 'No Code' });
+    assert.equal(reg.status, 200, JSON.stringify(reg.data));
+    assert.equal(reg.data.ok, true);
+    const [held] = await db.query('select pending_invite_code, email_verified_at from users where email = $1', [email]);
+    assert.equal(held.pending_invite_code ?? null, null);
+    assert.equal(held.email_verified_at ?? null, null);
+
+    const ver = await verify(email, reg.data.dev_code);
+    assert.equal(ver.status, 200, JSON.stringify(ver.data));
+    assert.ok(ver.data.access_token);
+    assert.equal(ver.data.user.email, email);
+    const token = ver.data.access_token;
+    assert.equal((await on('GET', '/api/auth/me', { token })).status, 200);
+    assert.equal((await entitlementsOf(ver.data.user.id)).length, 0);
+    assert.equal((await db.query('select id from access_grants where user_id = $1', [ver.data.user.id])).length, 0);
+
+    const status = await on('POST', '/api/functions/inviteAccess', { token, body: { action: 'status' } });
+    assert.deepEqual(status.data, {
+      allowed: false, reason: null, source: null, plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: true,
+    });
+    assert.deepEqual(await on('POST', '/api/entities/Run/query', { token, body: {} }), NO_ACCESS);
+    assert.deepEqual(await on('POST', '/api/entities/Run', { token, body: { distance_mi: 1, duration_sec: 600 } }), NO_ACCESS);
+    assert.deepEqual(await on('POST', '/api/functions/socialFeed', { token, body: {} }), NO_ACCESS);
+    // the same account is just as closed on an instance with the switch off
+    assert.deepEqual(await call('POST', '/api/entities/Run/query', { token, body: {} }), NO_ACCESS_OFF);
+    assert.deepEqual(await call('POST', '/api/uploads', { token, raw: 'x', headers: { 'Content-Type': 'image/png' } }), NO_ACCESS_OFF);
+    assert.deepEqual(await on('POST', '/api/uploads', { token, raw: 'x', headers: { 'Content-Type': 'image/png' } }), NO_ACCESS);
+    assert.deepEqual(await call('POST', '/api/functions/ingestActivity', { token, body: {} }), NO_ACCESS_OFF);
+    assert.deepEqual(await on('POST', '/api/functions/ingestActivity', { token, body: {} }), NO_ACCESS);
+
+    const redeem = await on('POST', '/api/functions/inviteAccess', { token, body: { action: 'redeem', code: await mintCode() } });
+    assert.deepEqual(redeem.data, { allowed: true });
+    assert.equal((await on('POST', '/api/entities/Run/query', { token, body: {} })).status, 200);
+    assert.equal((await on('POST', '/api/entities/Run', { token, body: { distance_mi: 1, duration_sec: 600 } })).status, 201);
+    const after = await on('POST', '/api/functions/inviteAccess', { token, body: { action: 'status' } });
+    assert.deepEqual([after.data.allowed, after.data.reason, after.data.subscriptions], [true, 'invite', true]);
+  });
+
+  test('a code given at sign-up is still checked, held and claimed as today', async () => {
+    const body = { email: 'withcode.on@example.com', password: 'longenough1' };
+    assert.deepEqual(await register({ ...body, invite_code: 'FP-NOPE-NOPE' }), { status: 400, data: { error: 'That code is not recognised.' } });
+    const used = await mintCode();
+    await invitedUser('first.on@example.com', used);
+    assert.deepEqual(await register({ ...body, invite_code: used }), { status: 400, data: { error: 'That code has already been used.' } });
+    assert.equal((await db.query('select id from users where email = $1', [body.email])).length, 0, 'a refused code makes no account');
+
+    const code = await mintCode();
+    const reg = await register({ ...body, invite_code: ` ${code.toLowerCase()} ` });
+    assert.equal(reg.status, 200);
+    const [held] = await db.query('select pending_invite_code from users where email = $1', [body.email]);
+    assert.equal(held.pending_invite_code, code);
+    assert.equal((await db.query('select status from invite_codes where code = $1', [code]))[0].status, 'available', 'not claimed before verifying');
+    const ver = await verify(body.email, reg.data.dev_code);
+    assert.equal(ver.status, 200);
+    assert.equal((await db.query('select status from invite_codes where code = $1', [code]))[0].status, 'used');
+    assert.equal((await on('POST', '/api/entities/Run/query', { token: ver.data.access_token, body: {} })).status, 200);
+  });
+
+  test('someone who re-registers your email cannot get you verified on their password', () => withProxy(async () => {
+    const email = 'vic.tim@example.com';
+    const signUp = (password, address) => on('POST', '/api/auth/register', { body: { email, password }, headers: from(address) });
+    const login = (password) => on('POST', '/api/auth/login', { body: { email, password } });
+    const verified = async () => Boolean((await db.query('select email_verified_at from users where email = $1', [email]))[0].email_verified_at);
+
+    assert.equal((await signUp('victim-pass-V1', '198.51.100.1')).status, 200);
+    // Before the victim types their code, someone else signs up with the same address
+    // and their own password. The new code goes to the victim's inbox, not to them.
+    const hijack = await signUp('attacker-pass-A1', '198.51.100.2');
+    assert.equal(hijack.status, 200);
+
+    // The victim types the code that arrived, with the password they chose: refused,
+    // because the account now holds someone else's password.
+    assert.deepEqual(await verify(email, hijack.data.dev_code, 'victim-pass-V1'), WRONG_CODE);
+    assert.equal(await verified(), false);
+
+    // The other person never sees the code: they cannot guess it in, and signing in only
+    // sends the victim another code.
+    const guess = hijack.data.dev_code === '000000' ? '111111' : '000000';
+    assert.deepEqual(await verify(email, guess, 'attacker-pass-A1'), WRONG_CODE);
+    const theirLogin = await login('attacker-pass-A1');
+    assert.equal(theirLogin.status, 403);
+    assert.equal(theirLogin.data.access_token, undefined);
+    assert.equal(await verified(), false);
+
+    // The victim starts again with their own password and gets in.
+    const again = await signUp('victim-pass-V1', '198.51.100.1');
+    assert.equal(again.status, 200);
+    const code = again.data.dev_code;
+    assert.deepEqual(await verify(email, code, null), WRONG_CODE, 'with subscriptions on the password is required');
+    assert.deepEqual(await verify(email, code, ''), WRONG_CODE);
+    assert.deepEqual(await verify(email, code, 'attacker-pass-A1'), WRONG_CODE);
+    assert.equal(await verified(), false);
+    // none of those refusals used the code up
+    const ok = await verify(email, code, 'victim-pass-V1');
+    assert.equal(ok.status, 200, JSON.stringify(ok.data));
+    assert.ok(ok.data.access_token);
+
+    assert.equal((await login('attacker-pass-A1')).status, 401);
+    assert.equal((await login('victim-pass-V1')).status, 200);
+  }));
+
+  test('with the switch off the password is optional at verification, and a wrong one does not burn the code', () => withProxy(async () => {
+    const email = 'old.phone@example.com';
+    const verifyOff = (body) => call('POST', '/api/auth/verify-otp', { body: { email, ...body } });
+    const reg = await call('POST', '/api/auth/register', {
+      body: { email, password: 'longenough1', invite_code: await mintCode() },
+      headers: from('198.51.100.3'),
+    });
+    assert.equal(reg.status, 200, JSON.stringify(reg.data));
+    assert.deepEqual(await verifyOff({ otp_code: reg.data.dev_code, password: 'not-the-password' }), WRONG_CODE);
+    assert.deepEqual(await verifyOff({ otp_code: reg.data.dev_code, password: 'not-the-password' }), WRONG_CODE);
+    // an installed phone build sends no password: still accepted, with the same code
+    const ok = await verifyOff({ otp_code: reg.data.dev_code });
+    assert.equal(ok.status, 200, JSON.stringify(ok.data));
+    assert.ok(ok.data.access_token);
+  }));
+
+  test('with the switch off, the right password with the code is accepted too', () => withProxy(async () => {
+    const email = 'new.phone@example.com';
+    const reg = await call('POST', '/api/auth/register', {
+      body: { email, password: 'longenough1', invite_code: await mintCode() },
+      headers: from('198.51.100.3'),
+    });
+    const ok = await call('POST', '/api/auth/verify-otp', { body: { email, otp_code: reg.data.dev_code, password: 'longenough1' } });
+    assert.equal(ok.status, 200, JSON.stringify(ok.data));
+    // an address with no account gets the same answer as a wrong code
+    const nobody = await call('POST', '/api/auth/verify-otp', { body: { email: 'nobody.at.all@example.com', otp_code: '123456', password: 'longenough1' } });
+    assert.deepEqual(nobody, WRONG_CODE);
+  }));
+
+  test('starting again without the code lets go of the code that was held', async () => {
+    const email = 'changed.mind@example.com';
+    const code = await mintCode();
+    await register({ email, password: 'longenough1', invite_code: code });
+    const again = await register({ email, password: 'longenough1', invite_code: '  ' });
+    assert.equal(again.status, 200, JSON.stringify(again.data));
+    const ver = await verify(email, again.data.dev_code);
+    assert.equal(ver.status, 200);
+    assert.equal((await db.query('select status from invite_codes where code = $1', [code]))[0].status, 'available');
+    assert.deepEqual(await on('POST', '/api/entities/Run/query', { token: ver.data.access_token, body: {} }), NO_ACCESS);
+  });
+});
+
+describe('the owner sees and controls access', () => {
+  const NO_ACCESS = { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } };
+  const access = (who, body) => call('POST', '/api/functions/adminAccess', { token: who.token, body });
+  const runs = (who) => call('POST', '/api/entities/Run/query', { token: who.token, body: {} });
+  const find = async (email) => (await access(admin, { action: 'list', search: email })).data.people.find((p) => p.email === email);
+  let invited;
+  let legacy;
+  let inviteCode;
+
+  before(async () => {
+    inviteCode = await mintCode();
+    invited = await invitedUser('ines.invited@example.com', inviteCode);
+    legacy = await legacyUser('lars.legacy@example.com');
+  });
+
+  test('only admins may use it', async () => {
+    for (const body of [{ action: 'list' }, { action: 'grant', email: 'lars.legacy@example.com' }, { action: 'revoke', entitlement_id: 'x' }, {}]) {
+      assert.deepEqual(await access(invited, body), { status: 403, data: { error: 'Admins only' } });
+      assert.deepEqual(await access(legacy, body), NO_ACCESS);
+    }
+    assert.equal((await call('POST', '/api/functions/adminAccess', { body: { action: 'list' } })).status, 401);
+    assert.equal(await hasAccess(db, await userRow(legacy.user.id)), false, 'the refused grant gave nothing');
+  });
+
+  test('the list shows each person, whether they have access and why', async () => {
+    const list = await access(admin, { action: 'list' });
+    assert.equal(list.status, 200, JSON.stringify(list.data));
+    const people = list.data.people;
+    assert.ok(people.length >= 10 && people.length <= 200);
+    const created = (await db.query('select id from users order by created_date desc, id desc limit 200', [])).map((u) => u.id);
+    assert.deepEqual(people.map((p) => p.user_id), created, 'newest accounts first');
+    assert.ok(!JSON.stringify(people).includes('password_hash'));
+    assert.ok(!JSON.stringify(people).includes('token_version'));
+
+    const ines = people.find((p) => p.email === 'ines.invited@example.com');
+    assert.deepEqual(
+      { ...ines, entitlements: ines.entitlements.map(({ id, created_date, ...rest }) => rest) },
+      {
+        user_id: invited.user.id, email: 'ines.invited@example.com', full_name: 'ines.invited', role: 'user',
+        allowed: true, reason: 'invite', source: 'invite', plan: null, expires_at: null, cancel_at_period_end: false,
+        entitlements: [{ source: 'invite', status: 'active', plan: null, expires_at: null, granted_by: inviteCode, note: null }],
+      }
+    );
+    assert.match(ines.entitlements[0].id, /^[0-9a-f-]{36}$/);
+    assert.ok(!Number.isNaN(new Date(ines.entitlements[0].created_date).getTime()));
+
+    const lars = people.find((p) => p.email === 'lars.legacy@example.com');
+    assert.deepEqual(
+      [lars.allowed, lars.reason, lars.source, lars.plan, lars.expires_at, lars.entitlements],
+      [false, null, null, null, null, []]
+    );
+    const boss = people.find((p) => p.email === 'admin@example.com');
+    assert.deepEqual([boss.role, boss.allowed, boss.reason], ['admin', true, 'admin']);
+  });
+
+  test('search matches part of the email and nothing else', async () => {
+    const some = await access(admin, { action: 'list', search: '  LEGACY@exam ' });
+    assert.deepEqual(some.data.people.map((p) => p.email), ['lars.legacy@example.com']);
+    assert.deepEqual((await access(admin, { action: 'list', search: 'nobody-by-this-name' })).data.people, []);
+    // % and _ are ordinary characters in a search, not wildcards
+    assert.deepEqual((await access(admin, { action: 'list', search: '%' })).data.people, []);
+    assert.deepEqual((await access(admin, { action: 'list', search: 'lars_legacy' })).data.people, []);
+  });
+
+  test('a free grant by email opens a closed account, and granting twice is harmless', async () => {
+    assert.deepEqual(await runs(legacy), NO_ACCESS);
+    const grant = await access(admin, { action: 'grant', email: ' Lars.Legacy@Example.com ', note: 'club coach' });
+    assert.equal(grant.status, 200, JSON.stringify(grant.data));
+    assert.equal(grant.data.ok, true);
+    const { id, created_date: createdDate, ...rest } = grant.data.entitlement;
+    assert.deepEqual(rest, { source: 'admin', status: 'active', plan: null, expires_at: null, granted_by: 'admin@example.com', note: 'club coach' });
+    assert.ok(id && createdDate);
+    assert.equal((await runs(legacy)).status, 200);
+
+    const again = await access(admin, { action: 'grant', email: 'lars.legacy@example.com' });
+    assert.equal(again.status, 200);
+    assert.equal(again.data.entitlement.id, id);
+    assert.equal((await entitlementsOf(legacy.user.id)).length, 1);
+
+    const lars = await find('lars.legacy@example.com');
+    assert.deepEqual([lars.allowed, lars.reason, lars.source, lars.entitlements.length], [true, 'granted', 'admin', 1]);
+  });
+
+  test('an email with no account is a 404 that says what to do instead', async () => {
+    assert.deepEqual(await access(admin, { action: 'grant', email: 'not.here.yet@example.com' }), {
+      status: 404,
+      data: { error: 'No account with that email yet. Send them an invite code instead.' },
+    });
+    assert.equal((await access(admin, { action: 'grant' })).status, 404);
+    assert.equal((await db.query(`select id from users where email = 'not.here.yet@example.com'`, [])).length, 0);
+  });
+
+  test('removing the free pass closes the account again; granting brings it back', async () => {
+    const [pass] = await entitlementsOf(legacy.user.id);
+    assert.deepEqual(await access(admin, { action: 'revoke', entitlement_id: pass.id }), { status: 200, data: { ok: true } });
+    assert.deepEqual(await runs(legacy), NO_ACCESS);
+    const lars = await find('lars.legacy@example.com');
+    assert.deepEqual([lars.allowed, lars.reason, lars.entitlements.map((e) => e.status)], [false, null, ['revoked']]);
+    assert.deepEqual(await access(admin, { action: 'revoke', entitlement_id: pass.id }), { status: 200, data: { ok: true } }, 'twice is harmless');
+
+    const back = await access(admin, { action: 'grant', email: 'lars.legacy@example.com', note: 'second time' });
+    assert.deepEqual([back.data.entitlement.id, back.data.entitlement.status, back.data.entitlement.note], [pass.id, 'active', 'second time']);
+    assert.equal((await runs(legacy)).status, 200);
+  });
+
+  test('an invite-code pass can be removed too, and a new code brings the person back', async () => {
+    const [pass] = await entitlementsOf(invited.user.id);
+    assert.equal(pass.source, 'invite');
+    assert.equal((await access(admin, { action: 'revoke', entitlement_id: pass.id })).status, 200);
+    assert.deepEqual(await runs(invited), NO_ACCESS);
+    const code = await mintCode();
+    const redeem = await call('POST', '/api/functions/inviteAccess', { token: invited.token, body: { action: 'redeem', code } });
+    assert.deepEqual(redeem.data, { allowed: true });
+    assert.equal((await runs(invited)).status, 200);
+    assert.deepEqual((await entitlementsOf(invited.user.id)).map((r) => [r.source, r.status, r.granted_by]), [['invite', 'active', code]]);
+  });
+
+  test('removing a free pass leaves a paid subscription on the same account alone', async () => {
+    const [paid] = await db.query(
+      `insert into entitlements (user_id, source, status, plan, expires_at, external_id)
+       values ($1, 'stripe', 'active', 'annual', $2, 'sub_ines') returning *`,
+      [invited.user.id, daysFromNow(200)]
+    );
+    const [free] = (await entitlementsOf(invited.user.id)).filter((r) => r.source === 'invite');
+    assert.equal((await find('ines.invited@example.com')).reason, 'subscription');
+
+    assert.equal((await access(admin, { action: 'revoke', entitlement_id: free.id })).status, 200);
+    assert.equal((await runs(invited)).status, 200, 'the paid entitlement still opens the product');
+    const ines = await find('ines.invited@example.com');
+    assert.deepEqual([ines.allowed, ines.reason, ines.source, ines.plan], [true, 'subscription', 'stripe', 'annual']);
+    assert.deepEqual(
+      ines.entitlements.map((e) => [e.source, e.status]).sort(),
+      [['invite', 'revoked'], ['stripe', 'active']]
+    );
+
+    // a paid one cannot be removed from here
+    assert.deepEqual(await access(admin, { action: 'revoke', entitlement_id: paid.id }), {
+      status: 400,
+      data: { error: 'Paid subscriptions are cancelled with the payment provider.' },
+    });
+    assert.equal((await db.query('select status from entitlements where id = $1', [paid.id]))[0].status, 'active');
+  });
+
+  test('revoke needs a real entitlement', async () => {
+    assert.equal((await access(admin, { action: 'revoke' })).status, 400);
+    assert.equal((await access(admin, { action: 'revoke', entitlement_id: 'nope' })).status, 404);
+    assert.equal((await access(admin, { action: 'revoke', entitlement_id: '00000000-0000-4000-8000-000000000000' })).status, 404);
+    assert.equal((await access(admin, { action: 'dance' })).status, 400);
   });
 });
 
@@ -532,13 +1373,16 @@ describe('ingestActivity (native contract)', () => {
   test('no accepted invite code -> 403, nothing stored', async () => {
     const lee = await legacyUser('lee@example.com');
     const res = await call('POST', '/api/functions/ingestActivity', { token: lee.token, body: run });
-    assert.deepEqual(res, { status: 403, data: { error: 'Redeem your invite code before syncing activities.' } });
+    assert.deepEqual(res, { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } });
+    assert.equal((await db.query('select id from runs where created_by_id = $1', [lee.user.id])).length, 0);
+    // and they cannot read runs either: the whole product is closed, not only the upload
     const mine = await call('POST', '/api/entities/Run/query', { token: lee.token, body: {} });
-    assert.equal(mine.data.items.length, 0);
+    assert.deepEqual(mine, { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } });
   });
 
   test('admins upload without a code', async () => {
     await db.query('delete from access_grants where user_id = $1 returning id', [admin.user.id]);
+    await db.query('delete from entitlements where user_id = $1 returning id', [admin.user.id]);
     const res = await call('POST', '/api/functions/ingestActivity', { token: admin.token, body: { ...run, external_id: 'HK-ADMIN-1' } });
     assert.equal(res.status, 200, JSON.stringify(res.data));
   });
@@ -981,7 +1825,8 @@ describe('your data', () => {
     const [{ n }] = await db.query(
       `select (select count(*) from posts where created_by_id = $1)::int
             + (select count(*) from connections where to_user_id = $1)::int
-            + (select count(*) from access_grants where user_id = $1)::int as n`,
+            + (select count(*) from access_grants where user_id = $1)::int
+            + (select count(*) from entitlements where user_id = $1)::int as n`,
       [alice.user.id]
     );
     assert.equal(n, 0, 'everything the user owned is gone');
