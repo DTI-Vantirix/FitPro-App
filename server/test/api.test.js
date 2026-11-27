@@ -83,10 +83,11 @@ async function legacyUser(email, password = 'correct-horse-1') {
   return { token: login.data.access_token, user: login.data.user };
 }
 
-// An account that has access through an invite code, without going through sign-up.
-async function invitedUser(email) {
+// An account that has access through an invite code, without going through sign-up
+// (the API allows 30 sign-ups an hour from one address, and the suite is near that).
+async function invitedUser(email, code) {
   const account = await legacyUser(email);
-  const code = await mintCode();
+  code ||= await mintCode();
   const res = await call('POST', '/api/functions/inviteAccess', { token: account.token, body: { action: 'redeem', code } });
   assert.deepEqual(res.data, { allowed: true });
   return account;
@@ -891,7 +892,7 @@ describe('sign-up when subscriptions are on', () => {
 
   test('with the switch off, sign-up without a code is refused exactly as before', async () => {
     const body = { email: 'nocode.off@example.com', password: 'longenough1' };
-    assert.deepEqual(await call('POST', '/api/auth/register', { body }), { status: 400, data: { error: 'Enter your invite code.' } });
+    // (a sign-up with the field left out altogether is in 'sign-up needs a code' above)
     assert.deepEqual(await call('POST', '/api/auth/register', { body: { ...body, invite_code: '   ' } }), { status: 400, data: { error: 'Enter your invite code.' } });
     assert.equal((await db.query(`select id from users where email = 'nocode.off@example.com'`, [])).length, 0);
   });
@@ -936,7 +937,7 @@ describe('sign-up when subscriptions are on', () => {
     const body = { email: 'withcode.on@example.com', password: 'longenough1' };
     assert.deepEqual(await register({ ...body, invite_code: 'FP-NOPE-NOPE' }), { status: 400, data: { error: 'That code is not recognised.' } });
     const used = await mintCode();
-    await signUpWith('first.on@example.com', used);
+    await invitedUser('first.on@example.com', used);
     assert.deepEqual(await register({ ...body, invite_code: used }), { status: 400, data: { error: 'That code has already been used.' } });
     assert.equal((await db.query('select id from users where email = $1', [body.email])).length, 0, 'a refused code makes no account');
 
@@ -962,6 +963,157 @@ describe('sign-up when subscriptions are on', () => {
     assert.equal(ver.status, 200);
     assert.equal((await db.query('select status from invite_codes where code = $1', [code]))[0].status, 'available');
     assert.deepEqual(await on('POST', '/api/entities/Run/query', { token: ver.data.access_token, body: {} }), NO_ACCESS);
+  });
+});
+
+describe('the owner sees and controls access', () => {
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
+  const access = (who, body) => call('POST', '/api/functions/adminAccess', { token: who.token, body });
+  const runs = (who) => call('POST', '/api/entities/Run/query', { token: who.token, body: {} });
+  const find = async (email) => (await access(admin, { action: 'list', search: email })).data.people.find((p) => p.email === email);
+  let invited;
+  let legacy;
+  let inviteCode;
+
+  before(async () => {
+    inviteCode = await mintCode();
+    invited = await invitedUser('ines.invited@example.com', inviteCode);
+    legacy = await legacyUser('lars.legacy@example.com');
+  });
+
+  test('only admins may use it', async () => {
+    for (const body of [{ action: 'list' }, { action: 'grant', email: 'lars.legacy@example.com' }, { action: 'revoke', entitlement_id: 'x' }, {}]) {
+      assert.deepEqual(await access(invited, body), { status: 403, data: { error: 'Admins only' } });
+      assert.deepEqual(await access(legacy, body), NO_ACCESS);
+    }
+    assert.equal((await call('POST', '/api/functions/adminAccess', { body: { action: 'list' } })).status, 401);
+    assert.equal(await hasAccess(db, await userRow(legacy.user.id)), false, 'the refused grant gave nothing');
+  });
+
+  test('the list shows each person, whether they have access and why', async () => {
+    const list = await access(admin, { action: 'list' });
+    assert.equal(list.status, 200, JSON.stringify(list.data));
+    const people = list.data.people;
+    assert.ok(people.length >= 10 && people.length <= 200);
+    const created = (await db.query('select id from users order by created_date desc, id desc limit 200', [])).map((u) => u.id);
+    assert.deepEqual(people.map((p) => p.user_id), created, 'newest accounts first');
+    assert.ok(!JSON.stringify(people).includes('password_hash'));
+    assert.ok(!JSON.stringify(people).includes('token_version'));
+
+    const ines = people.find((p) => p.email === 'ines.invited@example.com');
+    assert.deepEqual(
+      { ...ines, entitlements: ines.entitlements.map(({ id, created_date, ...rest }) => rest) },
+      {
+        user_id: invited.user.id, email: 'ines.invited@example.com', full_name: 'ines.invited', role: 'user',
+        allowed: true, reason: 'invite', source: 'invite', plan: null, expires_at: null, cancel_at_period_end: false,
+        entitlements: [{ source: 'invite', status: 'active', plan: null, expires_at: null, granted_by: inviteCode, note: null }],
+      }
+    );
+    assert.match(ines.entitlements[0].id, /^[0-9a-f-]{36}$/);
+    assert.ok(!Number.isNaN(new Date(ines.entitlements[0].created_date).getTime()));
+
+    const lars = people.find((p) => p.email === 'lars.legacy@example.com');
+    assert.deepEqual(
+      [lars.allowed, lars.reason, lars.source, lars.plan, lars.expires_at, lars.entitlements],
+      [false, null, null, null, null, []]
+    );
+    const boss = people.find((p) => p.email === 'admin@example.com');
+    assert.deepEqual([boss.role, boss.allowed, boss.reason], ['admin', true, 'admin']);
+  });
+
+  test('search matches part of the email and nothing else', async () => {
+    const some = await access(admin, { action: 'list', search: '  LEGACY@exam ' });
+    assert.deepEqual(some.data.people.map((p) => p.email), ['lars.legacy@example.com']);
+    assert.deepEqual((await access(admin, { action: 'list', search: 'nobody-by-this-name' })).data.people, []);
+    // % and _ are ordinary characters in a search, not wildcards
+    assert.deepEqual((await access(admin, { action: 'list', search: '%' })).data.people, []);
+    assert.deepEqual((await access(admin, { action: 'list', search: 'lars_legacy' })).data.people, []);
+  });
+
+  test('a free grant by email opens a closed account, and granting twice is harmless', async () => {
+    assert.deepEqual(await runs(legacy), NO_ACCESS);
+    const grant = await access(admin, { action: 'grant', email: ' Lars.Legacy@Example.com ', note: 'club coach' });
+    assert.equal(grant.status, 200, JSON.stringify(grant.data));
+    assert.equal(grant.data.ok, true);
+    const { id, created_date: createdDate, ...rest } = grant.data.entitlement;
+    assert.deepEqual(rest, { source: 'admin', status: 'active', plan: null, expires_at: null, granted_by: 'admin@example.com', note: 'club coach' });
+    assert.ok(id && createdDate);
+    assert.equal((await runs(legacy)).status, 200);
+
+    const again = await access(admin, { action: 'grant', email: 'lars.legacy@example.com' });
+    assert.equal(again.status, 200);
+    assert.equal(again.data.entitlement.id, id);
+    assert.equal((await entitlementsOf(legacy.user.id)).length, 1);
+
+    const lars = await find('lars.legacy@example.com');
+    assert.deepEqual([lars.allowed, lars.reason, lars.source, lars.entitlements.length], [true, 'granted', 'admin', 1]);
+  });
+
+  test('an email with no account is a 404 that says what to do instead', async () => {
+    assert.deepEqual(await access(admin, { action: 'grant', email: 'not.here.yet@example.com' }), {
+      status: 404,
+      data: { error: 'No account with that email yet. Send them an invite code instead.' },
+    });
+    assert.equal((await access(admin, { action: 'grant' })).status, 404);
+    assert.equal((await db.query(`select id from users where email = 'not.here.yet@example.com'`, [])).length, 0);
+  });
+
+  test('removing the free pass closes the account again; granting brings it back', async () => {
+    const [pass] = await entitlementsOf(legacy.user.id);
+    assert.deepEqual(await access(admin, { action: 'revoke', entitlement_id: pass.id }), { status: 200, data: { ok: true } });
+    assert.deepEqual(await runs(legacy), NO_ACCESS);
+    const lars = await find('lars.legacy@example.com');
+    assert.deepEqual([lars.allowed, lars.reason, lars.entitlements.map((e) => e.status)], [false, null, ['revoked']]);
+    assert.deepEqual(await access(admin, { action: 'revoke', entitlement_id: pass.id }), { status: 200, data: { ok: true } }, 'twice is harmless');
+
+    const back = await access(admin, { action: 'grant', email: 'lars.legacy@example.com', note: 'second time' });
+    assert.deepEqual([back.data.entitlement.id, back.data.entitlement.status, back.data.entitlement.note], [pass.id, 'active', 'second time']);
+    assert.equal((await runs(legacy)).status, 200);
+  });
+
+  test('an invite-code pass can be removed too, and a new code brings the person back', async () => {
+    const [pass] = await entitlementsOf(invited.user.id);
+    assert.equal(pass.source, 'invite');
+    assert.equal((await access(admin, { action: 'revoke', entitlement_id: pass.id })).status, 200);
+    assert.deepEqual(await runs(invited), NO_ACCESS);
+    const code = await mintCode();
+    const redeem = await call('POST', '/api/functions/inviteAccess', { token: invited.token, body: { action: 'redeem', code } });
+    assert.deepEqual(redeem.data, { allowed: true });
+    assert.equal((await runs(invited)).status, 200);
+    assert.deepEqual((await entitlementsOf(invited.user.id)).map((r) => [r.source, r.status, r.granted_by]), [['invite', 'active', code]]);
+  });
+
+  test('removing a free pass leaves a paid subscription on the same account alone', async () => {
+    const [paid] = await db.query(
+      `insert into entitlements (user_id, source, status, plan, expires_at, external_id)
+       values ($1, 'stripe', 'active', 'annual', $2, 'sub_ines') returning *`,
+      [invited.user.id, daysFromNow(200)]
+    );
+    const [free] = (await entitlementsOf(invited.user.id)).filter((r) => r.source === 'invite');
+    assert.equal((await find('ines.invited@example.com')).reason, 'subscription');
+
+    assert.equal((await access(admin, { action: 'revoke', entitlement_id: free.id })).status, 200);
+    assert.equal((await runs(invited)).status, 200, 'the paid entitlement still opens the product');
+    const ines = await find('ines.invited@example.com');
+    assert.deepEqual([ines.allowed, ines.reason, ines.source, ines.plan], [true, 'subscription', 'stripe', 'annual']);
+    assert.deepEqual(
+      ines.entitlements.map((e) => [e.source, e.status]).sort(),
+      [['invite', 'revoked'], ['stripe', 'active']]
+    );
+
+    // a paid one cannot be removed from here
+    assert.deepEqual(await access(admin, { action: 'revoke', entitlement_id: paid.id }), {
+      status: 400,
+      data: { error: 'Paid subscriptions are cancelled with the payment provider.' },
+    });
+    assert.equal((await db.query('select status from entitlements where id = $1', [paid.id]))[0].status, 'active');
+  });
+
+  test('revoke needs a real entitlement', async () => {
+    assert.equal((await access(admin, { action: 'revoke' })).status, 400);
+    assert.equal((await access(admin, { action: 'revoke', entitlement_id: 'nope' })).status, 404);
+    assert.equal((await access(admin, { action: 'revoke', entitlement_id: '00000000-0000-4000-8000-000000000000' })).status, 404);
+    assert.equal((await access(admin, { action: 'dance' })).status, 400);
   });
 });
 

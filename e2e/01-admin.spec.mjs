@@ -69,6 +69,45 @@ test('a revoked code cannot be used to sign up', async ({ browser }) => {
   await visitor.close();
 });
 
+test('the admin sees who has access, and can give and take back a free pass', async ({ request }) => {
+  // someone who signed up with a code, so there is a person to look at
+  const code = (await page.locator('section', { has: page.getByRole('heading', { name: 'Invite codes' }) })
+    .getByRole('listitem').filter({ hasText: CODE_RE }).first().textContent()).match(CODE_RE)[0];
+  const tester = { email: 'tester@e2e.test', password: 'e2e-tester-pass-1' };
+  const reg = await request.post('/api/auth/register', { data: { ...tester, invite_code: code } });
+  const ver = await request.post('/api/auth/verify-otp', { data: { email: tester.email, otp_code: (await reg.json()).dev_code } });
+  expect(ver.ok()).toBeTruthy();
+  const { access_token: token } = await ver.json();
+  const runs = () => request.post('/api/entities/Run/query', { headers: { Authorization: `Bearer ${token}` }, data: {} });
+  expect((await runs()).status()).toBe(200);
+
+  await page.reload();
+  const card = page.locator('section', { has: page.getByRole('heading', { name: 'Who has access' }) });
+  await expect(card).toBeVisible();
+  const row = card.getByRole('row').filter({ hasText: tester.email });
+  await expect(row).toContainText('Invite code');
+  await expect(card.getByRole('row').filter({ hasText: ADMIN.email })).toContainText('Admin');
+
+  // take the invite pass away: asks first, then the person is closed out on the server
+  await row.getByRole('button', { name: `Remove invite code access from ${tester.email}` }).click();
+  await expect(row).toContainText('Invite code', { timeout: 1000 });
+  await row.getByRole('button', { name: 'Yes, remove' }).click();
+  await expect(row).toContainText('No access');
+  expect((await runs()).status()).toBe(403);
+
+  // give it back by hand
+  await card.getByLabel('Email to give free access').fill(tester.email);
+  await card.getByLabel('Note (optional)').fill('e2e pass');
+  await card.getByRole('button', { name: 'Grant free access' }).click();
+  await expect(row).toContainText('Granted by you');
+  expect((await runs()).status()).toBe(200);
+
+  // an email with no account says what to do instead
+  await card.getByLabel('Email to give free access').fill('nobody@e2e.test');
+  await card.getByRole('button', { name: 'Grant free access' }).click();
+  await expect(card.getByText('No account with that email yet. Send them an invite code instead.')).toBeVisible();
+});
+
 test('the admin screens raised no errors', async () => {
   expect(trouble).toEqual([]);
 });

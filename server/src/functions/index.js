@@ -1,6 +1,7 @@
 import { requireAccess } from '../access.js';
 import { requireUser } from '../auth/users.js';
 import { HttpError } from '../lib/http.js';
+import adminAccess from './adminAccess.js';
 import adminClientErrors from './adminClientErrors.js';
 import adminInviteCodes from './adminInviteCodes.js';
 import challengeBoard from './challengeBoard.js';
@@ -13,7 +14,7 @@ import socialFeed from './socialFeed.js';
 // POST /api/functions/:name — same names and bodies the app sent to Base44
 // (base44.functions.invoke). Every function needs a signed-in user, and every one
 // except those in OPEN needs access to the product.
-const FUNCTIONS = { adminClientErrors, adminInviteCodes, challengeBoard, ingestActivity, inviteAccess, routeDirections, snapRoute, socialFeed };
+const FUNCTIONS = { adminAccess, adminClientErrors, adminInviteCodes, challengeBoard, ingestActivity, inviteAccess, routeDirections, snapRoute, socialFeed };
 
 // What a person without access can still call: read their access status and redeem a code.
 const OPEN = new Set(['inviteAccess']);

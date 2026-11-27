@@ -1,6 +1,6 @@
 // A tester's flow: sign up with the owner's code, get in, look around, sign out.
 import { expect, test } from '@playwright/test';
-import { RUNNER } from './fixtures.mjs';
+import { ADMIN, RUNNER } from './fixtures.mjs';
 import { acceptConsent, expectSignedIn, mintCode, signIn, submitSignUp, watchForTrouble } from './helpers.mjs';
 
 test.describe.configure({ mode: 'serial' });
@@ -139,6 +139,30 @@ test('a runner does not see the invite-code controls', async () => {
   await expectSignedIn(page);
   await page.waitForLoadState('networkidle');
   await expect(page.getByRole('heading', { name: 'Invite codes' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Who has access' })).toHaveCount(0);
+});
+
+test('the owner sees the runner listed with an invite code, and a runner cannot ask for the list', async ({ browser, request }) => {
+  const owner = await browser.newPage();
+  const ownerTrouble = watchForTrouble(owner);
+  await signIn(owner, ADMIN);
+  await expectSignedIn(owner);
+  await owner.goto('/settings');
+  const card = owner.locator('section', { has: owner.getByRole('heading', { name: 'Who has access' }) });
+  await expect(card).toBeVisible();
+  await expect(card.getByRole('row').filter({ hasText: RUNNER.email })).toContainText('Invite code');
+  await expect(card.getByRole('row').filter({ hasText: ADMIN.email })).toContainText('Admin');
+
+  await card.getByLabel('Search by email').fill('runner@');
+  await expect(card.getByRole('row').filter({ hasText: ADMIN.email })).toHaveCount(0);
+  await expect(card.getByRole('row').filter({ hasText: RUNNER.email })).toHaveCount(1);
+  expect(ownerTrouble).toEqual([]);
+  await owner.close();
+
+  const login = await request.post('/api/auth/login', { data: RUNNER });
+  const { access_token: token } = await login.json();
+  const res = await request.post('/api/functions/adminAccess', { headers: { Authorization: `Bearer ${token}` }, data: { action: 'list' } });
+  expect(res.status()).toBe(403);
 });
 
 test('signing out closes the app, and signing back in reopens it', async () => {
