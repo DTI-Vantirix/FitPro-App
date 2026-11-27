@@ -109,7 +109,9 @@ creates neither.
 | Decline a request, cancel one I sent, remove a friend | `DELETE /api/entities/Connection/:id`. Decline is the website's call; cancel and remove are the same call from the other two lists (the website has no button for them) |
 | Feed, "Your circle" | `POST /api/functions/socialFeed {}` -> `{ posts, friend_ids }`: my posts and my accepted friends' posts that are not private. The app reads `posts` only |
 | Feed, "Discover" | `POST /api/entities/Post/query { q: { visibility: "public" }, sort: "-created_date", limit: 30 }`. The app drops anything that comes back not public |
-| Share a run | `POST /api/entities/Post { kind: "run", ref_id, title, caption, distance_mi, duration_sec, avg_pace_sec, zone_name, in_zone_pct, route_points: [{ lat, lng }], background_type: "none", background_url: "", visibility, author_handle, author_name, author_avatar, shared_to: [] }`. The website composer's record. `ref_id` is the server's id of the run and the numbers are the server's own copy of it. `route_points` is the run's track thinned as the website thins it (every n-th point, at most 160), `lat` and `lng` only. `visibility` is `public`, `friends` or `private`, whichever the runner picked; the starting choice is `friends`, or `public` when their social profile is public. The app sends no photo or video (`/api/uploads` is not called) |
+| Share a run | `POST /api/entities/Post { kind: "run", ref_id, title, caption, distance_mi, duration_sec, avg_pace_sec, zone_name, in_zone_pct, route_points: [{ lat, lng }], background_type, background_url, visibility, author_handle, author_name, author_avatar, shared_to: [] }`. The website composer's record. `background_type` is `none`, `photo` or `video` and `background_url` is `""`, a stock background's path (`/backgrounds/trees.jpg`, `river.jpg`, `trail.jpg`) or the `file_url` the upload returned, unchanged; of the media the post carries nothing else. `ref_id` is the server's id of the run and the numbers are the server's own copy of it. `route_points` is the run's track thinned as the website thins it (every n-th point, at most 160), `lat` and `lng` only. `visibility` is `public`, `friends` or `private`, whichever the runner picked; the starting choice is `friends`, or `public` when their social profile is public. |
+| Upload a post's photo or video | `POST /api/uploads` with the file's bytes as the body (not multipart), `Content-Type` the file's type and the bearer token -> `201 { file_url }`. The website's call. Sent only by the composer, only after the runner taps Post, and before the `Post` is created; a retry of a failed post does not send the file again. The app checks the server's rules first: `image/jpeg`, `image/png`, `image/webp`, `image/gif`, `image/heic`, `video/mp4`, `video/quicktime`, `video/webm`, at most 50 MB (the server's default `MAX_UPLOAD_MB`; `413` and `415` are still shown in the server's words). `file_url` must be `/uploads/<name>` on this server (written short or with `API_URL` in front), else the post is not made |
+| Show a post's background | `GET {API_URL}/uploads/<name>` or `GET {API_URL}/backgrounds/<name>.jpg`, no sign-in (the route is public). The app builds the address from `background_url` only when it is one of those two paths on `API_URL`; any other address is treated as no background and never fetched, so a post cannot make the phone call another host. A video is fetched only while its post is on screen |
 | Delete my post | `DELETE /api/entities/Post/:id` |
 | Challenges | `POST /api/entities/Challenge/query { q: {}, sort: "-created_date", limit: 30 }` and `POST /api/entities/ChallengeMember/query { q: { user_id }, limit: 100 }` (which ones I joined) |
 | Create a challenge | `POST /api/entities/Challenge { name, description, metric, target_value, month, start_date, end_date, creator_handle }`. `metric` is `distance` or `runs`; `month` is `YYYY-MM`; the dates are the first instant of that month and of the next in the phone's time zone, as ISO strings |
@@ -117,7 +119,33 @@ creates neither.
 | Join / leave | `POST /api/entities/ChallengeMember/query { q: { challenge_id, user_id }, limit: 1 }`, then `POST /api/entities/ChallengeMember { challenge_id, user_id, handle, name }` to join (not sent when already a member) or `DELETE /api/entities/ChallengeMember/:id` to leave |
 
 Not called by the app: `PUT /api/entities/Post/:id` (the website's `shared_to` marker),
-`/api/uploads`, and deleting or editing a challenge (the website has no button for either).
+and deleting or editing a challenge (the website has no button for either).
+
+Photo and video backgrounds, what the phone does and does not do:
+
+- The picker is the system's own (PHPicker on iOS, the Android photo picker), which hands
+  over the one item chosen and needs no photo-library permission; the app never asks for
+  one. The camera permission is asked when "Take a photo" is tapped, never earlier. The
+  camera takes photos only, so the microphone is not used (Android: `RECORD_AUDIO`,
+  `READ_EXTERNAL_STORAGE` and `WRITE_EXTERNAL_STORAGE` are blocked in `app.json`; on
+  Android 8 and 9 "Take a photo" is not offered because it would need the last one).
+- A chosen file stays in the app's cache until Post is tapped. Only its bytes and type are
+  sent: no file name, album, EXIF read-out or location field.
+- **Metadata inside the file is not stripped.** `expo-image-picker` has no option for it
+  (`exif: false` only keeps EXIF out of what JavaScript receives). On iOS a JPEG is
+  re-encoded at quality 0.85, which drops its EXIF; HEIC, GIF and every video are sent as
+  the picker delivers them. On Android files are copied as they are. A photo or video may
+  therefore still carry where and when it was taken. Removing it reliably is a server job
+  (`/api/uploads`), not done today.
+- **Uploads are public by address.** `GET /uploads/<name>` needs no sign-in, so anyone who
+  has the link can open the file whatever the post's `visibility`. The composer says so,
+  as the website's does. A file whose post was never made, or was deleted, stays on the
+  server: there is no delete route.
+- The feed shows a post with a background as the website's share card (the media under a
+  flat Ink veil with the stats). The website itself shows that card only when a post is
+  saved or shared as an image; its feed shows the plain stats block. A video plays muted
+  and looped while its post is on screen and never takes the audio from music or cues.
+  Media that fails to load falls back to the plain stats block.
 
 The invite link and the link in a shared post are `{API_URL}/friends?add=<handle>` and
 `{API_URL}/feed?post=<id>`: the hosted API serves the website at the same address. They
