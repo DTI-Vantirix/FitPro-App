@@ -667,7 +667,7 @@ describe('invite grants written by an older build are picked up at start-up', ()
 });
 
 describe('the server refuses product calls without access', () => {
-  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
+  const NO_ACCESS = { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } };
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 9, 9, 9]);
   const aRun = { distance_mi: 2, duration_sec: 1200, route_name: 'Before the lapse', started_at: '2026-11-21T12:00:00Z' };
   const upload = {
@@ -811,7 +811,7 @@ describe('the server refuses product calls without access', () => {
       const refused = await fn(ravi, 'ingestActivity', body);
       // 403 with a readable `error` is what makes the phone keep the run and try again (native/src/run/queue.ts)
       assert.equal(refused.status, 403);
-      assert.equal(refused.data.error, 'Subscribe or enter an invite code to use VantraRun.');
+      assert.equal(refused.data.error, 'Enter an invite code to use VantraRun.');
     }
     const stored = await db.query('select external_id, distance_mi from runs where created_by_id = $1', [ravi.user.id]);
     assert.deepEqual(stored.map((r) => [r.external_id, Number(r.distance_mi)]), [['fp-lapse-0001', 4]], 'nothing stored or changed while refused');
@@ -936,7 +936,9 @@ describe('sign-up needs a code', () => {
 });
 
 describe('sign-up when subscriptions are on', () => {
+  // The refusal names what is on offer: a subscription only where one can be bought.
   const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
+  const NO_ACCESS_OFF = { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } };
   let open; // the API with SUBSCRIPTIONS=on
   const on = (method, url, options = {}) => call(method, url, { ...options, origin: open.origin });
   const register = (body) => on('POST', '/api/auth/register', { body });
@@ -1011,7 +1013,11 @@ describe('sign-up when subscriptions are on', () => {
     assert.deepEqual(await on('POST', '/api/entities/Run', { token, body: { distance_mi: 1, duration_sec: 600 } }), NO_ACCESS);
     assert.deepEqual(await on('POST', '/api/functions/socialFeed', { token, body: {} }), NO_ACCESS);
     // the same account is just as closed on an instance with the switch off
-    assert.deepEqual(await call('POST', '/api/entities/Run/query', { token, body: {} }), NO_ACCESS);
+    assert.deepEqual(await call('POST', '/api/entities/Run/query', { token, body: {} }), NO_ACCESS_OFF);
+    assert.deepEqual(await call('POST', '/api/uploads', { token, raw: 'x', headers: { 'Content-Type': 'image/png' } }), NO_ACCESS_OFF);
+    assert.deepEqual(await on('POST', '/api/uploads', { token, raw: 'x', headers: { 'Content-Type': 'image/png' } }), NO_ACCESS);
+    assert.deepEqual(await call('POST', '/api/functions/ingestActivity', { token, body: {} }), NO_ACCESS_OFF);
+    assert.deepEqual(await on('POST', '/api/functions/ingestActivity', { token, body: {} }), NO_ACCESS);
 
     const redeem = await on('POST', '/api/functions/inviteAccess', { token, body: { action: 'redeem', code: await mintCode() } });
     assert.deepEqual(redeem.data, { allowed: true });
@@ -1127,7 +1133,7 @@ describe('sign-up when subscriptions are on', () => {
 });
 
 describe('the owner sees and controls access', () => {
-  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
+  const NO_ACCESS = { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } };
   const access = (who, body) => call('POST', '/api/functions/adminAccess', { token: who.token, body });
   const runs = (who) => call('POST', '/api/entities/Run/query', { token: who.token, body: {} });
   const find = async (email) => (await access(admin, { action: 'list', search: email })).data.people.find((p) => p.email === email);
@@ -1352,11 +1358,11 @@ describe('ingestActivity (native contract)', () => {
   test('no accepted invite code -> 403, nothing stored', async () => {
     const lee = await legacyUser('lee@example.com');
     const res = await call('POST', '/api/functions/ingestActivity', { token: lee.token, body: run });
-    assert.deepEqual(res, { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } });
+    assert.deepEqual(res, { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } });
     assert.equal((await db.query('select id from runs where created_by_id = $1', [lee.user.id])).length, 0);
     // and they cannot read runs either: the whole product is closed, not only the upload
     const mine = await call('POST', '/api/entities/Run/query', { token: lee.token, body: {} });
-    assert.deepEqual(mine, { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } });
+    assert.deepEqual(mine, { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } });
   });
 
   test('admins upload without a code', async () => {

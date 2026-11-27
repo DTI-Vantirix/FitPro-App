@@ -94,7 +94,9 @@ have access) can still sign in and out, read and update `/api/auth/me`, change o
 its password, delete itself, report a crash, and call `inviteAccess`. **Every other
 call** (all of `/api/entities/*`, `POST /api/uploads`, and every other function,
 `ingestActivity` included) answers
-`403 { "error": "Subscribe or enter an invite code to use VantraRun." }`. Before
+`403 { "error": "Enter an invite code to use VantraRun." }` while the server's
+`SUBSCRIPTIONS` setting is off (today), and
+`403 { "error": "Subscribe or enter an invite code to use VantraRun." }` when it is on. Before
 2026-11-27 only `ingestActivity` refused, with a different message.
 - Consent: the user object's `consent_version` / `consent_accepted_at`. Record acceptance
   with `PUT /api/auth/me { "consent_version": "...", "consent_accepted_at": "<ISO>" }`.
@@ -371,7 +373,7 @@ All errors are `{ "error": "<message>" }` with the message written for a human:
 | ------ | ---------------------------------------------------------------- |
 | 400    | missing `external_id`, bad `distance_mi`/`duration_sec`, invalid `started_at`/`performed_at`, no usable exercises, unknown `kind` |
 | 401    | no app-user session                                              |
-| 403    | signed in, but the account has no access (admins are exempt): `"Subscribe or enter an invite code to use VantraRun."` Until 2026-11-27 the message was `"Redeem your invite code before syncing activities."`; the status is the same. Keep the activity queued and retry later: access can come back. Never match on the message text. |
+| 403    | signed in, but the account has no access (admins are exempt): `"Enter an invite code to use VantraRun."`, or `"Subscribe or enter an invite code to use VantraRun."` when the server's `SUBSCRIPTIONS` setting is on. Until 2026-11-27 the message was `"Redeem your invite code before syncing activities."`; the status is the same. Keep the activity queued and retry later: access can come back. Never match on the message text. |
 | 500    | unexpected — surface the message, do not retry in a loop          |
 
 The shell should surface 400s verbatim next to the affected activity. A 400 means the

@@ -50,7 +50,9 @@ the screens hiding things. Now:
   pass from the owner, and later Stripe and Apple), and one function decides
   (`server/src/access.js`). Admins pass by role and need no row.
 - Every product call (entities, uploads, every function except `inviteAccess`) answers
-  `403 "Subscribe or enter an invite code to use VantraRun."` without access. The
+  `403 "Enter an invite code to use VantraRun."` without access (with `SUBSCRIPTIONS`
+  on: `"Subscribe or enter an invite code to use VantraRun."`; the message only names
+  what is on offer). The
   account itself stays reachable: sign in and out, `/api/auth/me`, password change and
   reset, account deletion (the app stores require it for people who have not paid),
   redeeming a code and reading the access status.

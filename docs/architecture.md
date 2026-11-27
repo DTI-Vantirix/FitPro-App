@@ -95,7 +95,8 @@ one reported. Admins need no row.
 `src/access.js` holds all of it: `accessOf` (the full answer), `hasAccess`,
 `requireAccess` (for routes) and `grantFree`. The server enforces it, not only the screens:
 
-- **Closed without access** (`403 "Subscribe or enter an invite code to use VantraRun."`):
+- **Closed without access** (`403 "Enter an invite code to use VantraRun."`, or
+  `"Subscribe or enter an invite code to use VantraRun."` when `SUBSCRIPTIONS` is on):
   everything under `/api/entities/*`, `POST /api/uploads`, and every function except
   `inviteAccess`.
 - **Open to any signed-in account**: everything under `/api/auth/*` (the account, sign-out,

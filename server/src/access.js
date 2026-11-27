@@ -69,7 +69,12 @@ export async function accessOf(db, user) {
 
 export const hasAccess = async (db, user) => (await accessOf(db, user)).allowed;
 
-export const NO_ACCESS_MESSAGE = 'Subscribe or enter an invite code to use VantraRun.';
+// What an account without access is told. It names only what is on offer: while
+// SUBSCRIPTIONS is off nothing is for sale, so the way in is an invite code.
+export const noAccessMessage = (config) =>
+  config?.subscriptions
+    ? 'Subscribe or enter an invite code to use VantraRun.'
+    : 'Enter an invite code to use VantraRun.';
 
 /**
  * For every route that is part of the product: the signed-in user, or 401 when
@@ -79,7 +84,7 @@ export const NO_ACCESS_MESSAGE = 'Subscribe or enter an invite code to use Vantr
  */
 export async function requireAccess(ctx) {
   const user = requireUser(ctx);
-  if (!(await hasAccess(ctx.db, user))) throw new HttpError(403, NO_ACCESS_MESSAGE);
+  if (!(await hasAccess(ctx.db, user))) throw new HttpError(403, noAccessMessage(ctx.config));
   return user;
 }
 
