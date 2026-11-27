@@ -47,3 +47,14 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      # Stripe, for subscriptions bought on the website (docs/launch-checklist.md, step 9).
+      # All four or none. An existing service is not asked for new values: add them by hand
+      # under Environment. SUBSCRIPTIONS is deliberately not in this file.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_MONTHLY
+        sync: false
+      - key: STRIPE_PRICE_ANNUAL
+        sync: false

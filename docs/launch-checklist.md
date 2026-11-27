@@ -17,6 +17,7 @@ Nothing in this list has been done yet.
 | 6 | iPhone build | Apple developer account | 45 min |
 | 7 | Google Maps key (Android map) | Google Cloud | 10 min |
 | 8 | Optional: routing key, media bucket | | later |
+| 9 | Payments (Stripe), test mode first | a Stripe account for the company | 1 to 2 hours, then the test list |
 
 ---
 
@@ -65,8 +66,9 @@ also serves the website) and one Postgres database, both in Virginia.
    One setting is deliberately **not** asked for: `SUBSCRIPTIONS`. Leave it unset. Unset
    (or `off`) keeps sign-up invite-only, which is how testing runs. Setting it to `on`
    lets anyone create an account without a code, and such an account can do nothing
-   until payments exist, so do not turn it on until the subscription stages are built
-   and tested. To check what a running site is using, open
+   until it pays, so do not turn it on until step 9 (Payments) is finished and its test
+   list has been run. The four `STRIPE_*` values are not asked for here either; step 9
+   adds them. To check what a running site is using, open
    `<site address>/api/auth/options`: it should show `"subscriptions":false`.
 
 4. Review the cost Render shows and apply. The plans in the file are the smallest paid
@@ -225,6 +227,93 @@ build carries a Google Maps key.
   checks the bucket at start-up. Files already on the disk are not copied across, so
   do this before testers have uploaded anything.
 
+## 9. Payments (Stripe)
+
+Subscriptions bought on the website: $4.99 a month or $49.99 a year, 7 days free once.
+The code is built and tested against a stand-in for Stripe; none of it has touched a
+real Stripe account. Do everything below in Stripe's **test mode** (a sandbox) first.
+Nothing here needs the site to be public.
+
+1. Create the Stripe account for the company and finish its business details and bank
+   account.
+2. Stay in **test mode**. Product catalogue: one product named `VantraRun`, with two
+   recurring prices in USD: **$4.99 monthly** and **$49.99 yearly**. Copy both price ids
+   (`price_...`). The server checks these amounts before it sends anyone to checkout; if
+   either is different, nobody can subscribe and Settings → Error reports says why.
+3. Developers → API keys: copy the secret key (`sk_test_...`).
+4. Developers → Webhooks: add an endpoint `https://<site>/api/stripe/webhook` with these
+   events: `checkout.session.completed`, `customer.subscription.created`,
+   `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`,
+   `invoice.payment_failed`, `charge.refunded`. Copy its signing secret (`whsec_...`).
+5. Settings → Billing → Customer portal: allow updating the payment method and viewing
+   invoices; allow cancelling, **at the end of the billing period**; switch plan changes
+   **off**; set the links to `https://<site>/terms` and `https://<site>/privacy`.
+6. Settings → Billing → Subscriptions and emails: leave Stripe's free-trial reminder
+   email **off** (VantraRun sends its own two days before the trial ends; with both on,
+   people get two, and Stripe's would arrive the moment a 7-day trial starts).
+7. Billing → Revenue recovery (failed payments):
+   - **Retries.** Smart Retries, or a custom schedule. VantraRun keeps access for 3 days
+     after a payment fails, so the retry window should not be longer than that, or a
+     person could be charged after losing access. Choose the shortest window offered;
+     if the shortest is longer than 3 days, use a custom schedule whose last try is
+     within 3 days of the first failure. Not checked from here: which windows that page
+     offers today.
+   - **If all retries fail:** cancel the subscription.
+   - **Failed-payment emails:** on, so Stripe tells the person their card failed and
+     links to a page to update it. VantraRun sends no email of its own for this.
+8. Tax: switch on Stripe Tax **threshold monitoring** (free), so you are warned when
+   sales in a state approach the point where sales tax must be collected. Leave
+   collection off; VantraRun does not charge tax (see "Decisions still yours").
+9. Render → the service → Environment: add the four values by hand (an existing service
+   is not asked for new ones):
+
+   | Name | Value |
+   | --- | --- |
+   | `STRIPE_SECRET_KEY` | the secret key from 3 |
+   | `STRIPE_WEBHOOK_SECRET` | the signing secret from 4 |
+   | `STRIPE_PRICE_MONTHLY` | the monthly price id from 2 |
+   | `STRIPE_PRICE_ANNUAL` | the yearly price id from 2 |
+
+   Leave `SUBSCRIPTIONS` unset for now. After the restart the log shows
+   `[billing] Stripe keys are for TEST mode.` With any of the four missing it works as
+   before and, once `SUBSCRIPTIONS` is on, says which setting is missing.
+10. Set `SUBSCRIPTIONS=on` **on a site that is not yet public**, and run the test list:
+    - sign up without an invite code: you land on the subscription screen, not in the app;
+    - subscribe with Stripe's test card `4242 4242 4242 4242` (any future date, any CVC):
+      the app opens within seconds;
+    - Settings → Subscription shows the trial and the date it ends; "Cancel subscription"
+      opens Stripe's confirmation, and afterwards the card says "Ends on" with "Resume";
+      Resume puts it back;
+    - Settings → Who has access shows the account as "Trial (monthly)" (or annual) with
+      its subscription id;
+    - in Stripe, refund an annual charge in full: the account is closed at once and shows
+      "Refunded";
+    - delete a subscribed account in Settings → Your data: its customer is gone in Stripe;
+    - Stripe → Developers → Webhooks → the endpoint: deliveries are marked succeeded;
+    - two days before a trial ends the reminder email arrives (Stripe's test clocks can
+      move a test subscription forward; otherwise wait).
+    - an account that has an invite code or a free pass is never shown the subscription
+      screen.
+11. Going live: repeat 2 to 8 in **live mode** (live prices, the live key `sk_live_...`,
+    a live webhook endpoint with its own signing secret), replace the four values in
+    Render, check the log says `LIVE mode`, and only then set `SUBSCRIPTIONS=on` on the
+    public site.
+
+Two things to remember afterwards:
+
+- **Never turn `SUBSCRIPTIONS` off as a way to stop billing.** It stops new sales only.
+  People who already subscribed keep being charged by Stripe and keep their access. To
+  stop charging someone, cancel or refund them in Stripe.
+- **Never remove the `STRIPE_*` values while anyone is subscribed.** Without them the
+  server cannot hear from Stripe, and a subscriber cannot manage, cancel or delete.
+
+Trying it on your own computer instead of a hosted site: put the same four values and
+`SUBSCRIPTIONS=on` in `server/.env` (never commit that file), and use the Stripe CLI to
+bring webhooks to your machine: `stripe listen --forward-to localhost:4000/api/stripe/webhook`
+prints a signing secret to use as `STRIPE_WEBHOOK_SECRET`. `APP_URL` must be the address
+you open the website at (`http://localhost:5173` with `npm run dev`), because that is
+where Stripe sends people back.
+
 ---
 
 ## Decisions still yours
@@ -232,7 +321,20 @@ build carries a Google Maps key.
 - **Legal review of the privacy policy.** The page at `/privacy` is a full policy and
   names Dynamic Technology Integration and info@dtisys.com (given by the owner; use the
   same address as the support contact in both stores). It has not been reviewed by a
-  lawyer, and it names Render and Resend, so edit it if you pick other providers.
+  lawyer, and it names Render, Resend, Stripe and Apple, so edit it if you pick other
+  providers.
+- **Legal review of the terms of use.** The page at `/terms` states the price, the
+  trial, automatic renewal, cancelling and the refund rules as the product applies them.
+  It was written without a lawyer. Two sections are placeholders in plain words and
+  must be settled by one before `SUBSCRIPTIONS` is on for the public: **Liability**, and
+  **Governing law** (which names no state yet). Several US states have their own rules
+  for automatic renewals; ask about those too.
+- **Sales tax.** Not collected. Step 9.8 turns on Stripe's warning for when a state's
+  threshold is near; what to do then is a decision for you and an accountant.
+- **Stripe's own trial-reminder email.** Off by choice (step 9.6). You can turn it on
+  as well, but for a 7-day trial it arrives at sign-up, not before the charge.
+- **Card disputes.** Nothing in VantraRun reacts to a chargeback. Stripe emails you;
+  cancel or refund in Stripe and the account follows.
 
 ## After each step, what to check
 
@@ -242,4 +344,5 @@ build carries a Google Maps key.
 | 4 | a test sign-up receives its 6-digit email |
 | 5 / 6 | the app opens, signs in, and "Start a run" appears; then the phone test list on the build board |
 | 7 | the map appears in "Free run with map" on Android |
+| 9 | the service log shows `[billing] Stripe keys are for TEST mode.` (or `LIVE mode.`); after `SUBSCRIPTIONS=on`, `<site>/api/auth/options` shows `"subscriptions":true`; after a test purchase, Stripe shows the webhook delivery as succeeded |
 | 5 / 6, with the site deployed | a friend's invite link tapped in Messages or Notes opens the app on the Friends screen and says whose request was sent (Android: only after `ANDROID_CERT_SHA256` is set and the app reinstalled) |

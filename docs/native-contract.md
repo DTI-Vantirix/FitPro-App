@@ -86,6 +86,14 @@ token and returns the user.
   `allowed` and `admin` are unchanged and are all the app reads today. The other
   fields were added on 2026-11-27 for the subscription screens; with no access every
   one of them is `null` (`cancel_at_period_end` is `false`). Ignore fields you do not know.
+
+  Since subscriptions stage 2 the server may ask Stripe before answering: when the
+  account has a website subscription on record and is about to be told `"allowed": false`,
+  it checks with Stripe first (at most once in five minutes per account), so a renewal
+  whose notice was lost is repaired by this call. The answer has the same shape and can
+  take a little longer (a few hundred milliseconds; up to 10 seconds if Stripe is slow, and
+  then the stored answer is returned). `reason` can now be `"trial"` or `"subscription"`
+  with `source` `"stripe"` for someone who subscribed on the website. Nothing was removed.
 - Redeem with `{ "action": "redeem", "code": "FP-XXXX-XXXX" }` -> `{ "allowed": true }` or
   `{ "allowed": false, "error": "..." }` (still HTTP 200). Unchanged.
 
