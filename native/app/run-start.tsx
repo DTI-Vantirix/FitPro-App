@@ -151,7 +151,7 @@ function RunStart() {
   const canStart = Boolean(zone) && (mode !== 'route' || (route !== null && directions !== 'loading'));
 
   return <Screen>
-    <Brand onBack={() => router.back()} />
+    <Brand onBack={() => router.back()} nav={false} />
     <SectionHeading kicker="Start a run" title="How do you want to run?" subtitle="Choose a mode, then the zone to aim for." />
 
     {MODES.map((item) => <Pressable key={item.mode} accessibilityRole="radio" accessibilityState={{ selected: mode === item.mode }}

@@ -1,7 +1,7 @@
 /** Everything the run experience asks of the VantraRun API, over HTTP only.
  * Runs are written through ingestActivity and nowhere else (docs/native-contract.md).
  * Profile, zones and routes use the same entity routes the website uses. Runs are read
- * (never written) with one entity query, listServerRuns.
+ * (never written) with one entity query, shared by listServerRuns and listRunsToShare.
  */
 import { API_URL, APP_AUTH_URL, ENTITIES_URL, FUNCTIONS_URL, INGEST_URL } from '../config';
 import type { Maneuver } from './directions';
@@ -78,11 +78,11 @@ async function call(method: string, url: string, opts: { token?: string; body?: 
   return { status: response.status, data };
 }
 
-function record(value: unknown): Record<string, unknown> {
+export function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-async function request(method: string, url: string, opts: { token?: string; body?: unknown; timeoutMs?: number } = {}): Promise<unknown> {
+export async function request(method: string, url: string, opts: { token?: string; body?: unknown; timeoutMs?: number } = {}): Promise<unknown> {
   const reply = await call(method, url, opts);
   if (reply.status < 200 || reply.status >= 300) {
     const error = record(reply.data).error;
@@ -91,16 +91,16 @@ async function request(method: string, url: string, opts: { token?: string; body
   return reply.data;
 }
 
-function items(data: unknown): Record<string, unknown>[] {
+export function items(data: unknown): Record<string, unknown>[] {
   const list = Array.isArray(data) ? data : record(data).items;
   return Array.isArray(list) ? list.map(record) : [];
 }
 
-const num = (value: unknown): number | null => {
+export const num = (value: unknown): number | null => {
   const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
   return typeof n === 'number' && Number.isFinite(n) ? n : null;
 };
-const str = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
+export const str = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
 
 // ---- account -------------------------------------------------------------
 
@@ -139,7 +139,7 @@ export async function deleteAccount(token: string, password: string): Promise<vo
 
 // ---- profile and zones ---------------------------------------------------
 
-const entityUrl = (name: string, suffix = '') => `${ENTITIES_URL}/${name}${suffix}`;
+export const entityUrl = (name: string, suffix = '') => `${ENTITIES_URL}/${name}${suffix}`;
 // An admin may read everyone's records, so every list asks for the caller's own.
 const mine = (ownerId: string) => ({ created_by_id: ownerId });
 
@@ -209,7 +209,7 @@ export async function updateZone(token: string, zoneId: string, values: ZoneEdit
 
 // ---- routes and directions -----------------------------------------------
 
-function toPath(value: unknown): LatLng[] {
+export function toPath(value: unknown): LatLng[] {
   if (!Array.isArray(value)) return [];
   return value.map((p) => ({ lat: Number(record(p).lat), lng: Number(record(p).lng) })).filter(validLatLng);
 }
@@ -296,13 +296,26 @@ function toServerRun(row: Record<string, unknown>): ServerRun | null {
   };
 }
 
+/** The one query that reads runs: the caller's own, newest first. */
+async function queryRuns(token: string, ownerId: string, options: { limit?: number }): Promise<Record<string, unknown>[]> {
+  const asked = options.limit;
+  const limit = typeof asked === 'number' && Number.isInteger(asked) && asked > 0 ? Math.min(asked, 200) : 40;
+  return items(await request('POST', entityUrl('Run', '/query'), { token, body: { q: mine(ownerId), sort: '-started_at', limit } }));
+}
+
 /** The runner's runs as the server holds them, newest first: recorded here, on the website
  * or imported. Read only. Runs are still written through ingestActivity and nowhere else. */
 export async function listServerRuns(token: string, ownerId: string, options: { limit?: number } = {}): Promise<ServerRun[]> {
-  const asked = options.limit;
-  const limit = typeof asked === 'number' && Number.isInteger(asked) && asked > 0 ? Math.min(asked, 200) : 40;
-  const rows = items(await request('POST', entityUrl('Run', '/query'), { token, body: { q: mine(ownerId), sort: '-started_at', limit } }));
-  return rows.map(toServerRun).filter((run): run is ServerRun => run !== null);
+  return (await queryRuns(token, ownerId, options)).map(toServerRun).filter((run): run is ServerRun => run !== null);
+}
+
+/** The same runs from the same query, each with its recorded track: what the share composer
+ * offers and draws. Read only. */
+export async function listRunsToShare(token: string, ownerId: string, options: { limit?: number } = {}): Promise<(ServerRun & { points: LatLng[] })[]> {
+  return (await queryRuns(token, ownerId, options)).flatMap((row) => {
+    const run = toServerRun(row);
+    return run ? [{ ...run, points: toPath(row.points) }] : [];
+  });
 }
 
 // ---- saving a run --------------------------------------------------------

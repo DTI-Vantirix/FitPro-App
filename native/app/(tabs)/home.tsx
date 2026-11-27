@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSession } from '../../src/auth/session';
-import { Action, Card, ErrorNotice, Heading, Icon, Label, Notice, StatBlock } from '../../src/components/Ui';
+import { Action, Card, ErrorNotice, Heading, Icon, IconButton, Label, Notice, StatBlock } from '../../src/components/Ui';
 import { listServerRuns, type ServerRun } from '../../src/run/api';
 import { mergeRuns, weekStats, type DashRun } from '../../src/run/dashboard';
 import { runStore } from '../../src/run/device/run-files';
@@ -160,6 +160,7 @@ function Home() {
       </View>
       {runs.length === 0 && <Text style={styles.body}>{loaded.offline ? 'No runs stored on this phone.' : 'No runs yet. Start one with the button below.'}</Text>}
       {runs.slice(0, 10).map((item, index) => {
+        const serverId = item.serverId;
         const row = <>
           <View style={local.itemText}>
             <Text style={type.bodyStrong} numberOfLines={1}>{item.routeName}</Text>
@@ -172,6 +173,10 @@ function Home() {
             <Text style={stat(24)}>{formatDuration(item.durationSec)}</Text>
             <Label>Time</Label>
           </View>
+          {/* A run the server has can be posted to the feed; one still on the phone only cannot yet. */}
+          {serverId
+            ? <IconButton icon="share-2" label={`Share ${item.routeName} to the feed`} onPress={() => router.push({ pathname: '/share-run', params: { run: serverId } })} />
+            : <View style={local.noShare} />}
         </>;
         // Only a run still kept on this phone has a summary to open.
         const localId = item.localId;
@@ -212,6 +217,7 @@ const local = StyleSheet.create({
   recentHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   link: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   noChevron: { width: 18 },
+  noShare: { width: 40 },
   item: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
   itemDivider: { borderTopWidth: 1, borderTopColor: colors.panelBorder },
   itemText: { flex: 1, gap: 3 },

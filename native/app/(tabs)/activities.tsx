@@ -9,6 +9,7 @@ import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from '
 import { useSession } from '../../src/auth/session';
 import { useAccessGate } from '../../src/access/access-gate';
 import { Action, Card, ErrorNotice, Heading, Label, Screen, ScreenHeader, SectionHeading } from '../../src/components/Ui';
+import { HeaderNav } from '../../src/run/ui/Screen';
 import { getHealthAdapter, isAppleHealthBuildAvailable, isAndroidHealthBuildAvailable,
   type NormalizedActivity, type NormalizedRun, type NormalizedWorkout } from '../../src/health';
 import { AUTO_HEALTH_IMPORT_ENABLED } from '../../src/ingestion/auto-import-policy';
@@ -157,7 +158,7 @@ export default function ActivitiesScreen() {
   if (accessStatus === 'needs_invite' || accessStatus === 'blocked') return <Redirect href="/invite" />;
 
   return <Screen>
-    <ScreenHeader />
+    <ScreenHeader right={<HeaderNav />} />
     {accessStatus !== 'allowed' ? <>
       <SectionHeading kicker="Activities" title="Access not confirmed"
         subtitle="Health reads stay off until VantraRun confirms your invite." />

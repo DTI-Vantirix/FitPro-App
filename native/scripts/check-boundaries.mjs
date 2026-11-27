@@ -90,11 +90,13 @@ assert(buildProp?.[1]?.android?.minSdkVersion === 26 && buildProp?.[1]?.android?
   'Android Health Connect requires min API 26 and compatible target SDK.');
 assert(!activities.includes('sendSyntheticWorkout') && !activities.includes('ingestActivity'), 'Real activities screen cannot upload data in Step 5.');
 // ---- Stage 1B: the run experience ----
-for (const f of ['app/signup.tsx', 'app/setup.tsx', 'app/(tabs)/home.tsx', 'app/(tabs)/settings.tsx', 'app/run-start.tsx', 'app/run-live.tsx', 'app/run-summary.tsx',
-  'app/(tabs)/routes.tsx', 'app/route-new.tsx', 'app/(tabs)/analytics.tsx', 'app/zones.tsx'])
+for (const f of ['app/signup.tsx', 'app/setup.tsx', 'app/(tabs)/home.tsx', 'app/settings.tsx', 'app/run-start.tsx', 'app/run-live.tsx', 'app/run-summary.tsx',
+  'app/(tabs)/routes.tsx', 'app/route-new.tsx', 'app/(tabs)/analytics.tsx', 'app/zones.tsx',
+  'app/(tabs)/feed.tsx', 'app/friends.tsx', 'app/social-profile.tsx', 'app/share-run.tsx', 'app/challenges.tsx', 'app/challenge.tsx'])
   assert(existsSync(join(native, f)), `Missing ${f}`);
 // Every screen past sign-up sits behind the same three checks: sign-in, consent, invite.
-for (const f of ['setup', '(tabs)/home', '(tabs)/settings', 'run-start', 'run-live', 'run-summary', '(tabs)/routes', 'route-new', '(tabs)/analytics', 'zones']) {
+for (const f of ['setup', '(tabs)/home', 'settings', 'run-start', 'run-live', 'run-summary', '(tabs)/routes', 'route-new', '(tabs)/analytics', 'zones',
+  '(tabs)/feed', 'friends', 'social-profile', 'share-run', 'challenges', 'challenge']) {
   const screen = readFileSync(join(native, `app/${f}.tsx`), 'utf8');
   assert(/export default function \w+\(\) \{\s*return <Gated/.test(screen), `app/${f}.tsx must render inside <Gated>.`);
 }
@@ -112,7 +114,7 @@ const runFiles = sourceFiles(join(native, 'src/run'));
 const RUN_READ = "request('POST', entityUrl('Run', '/query'), { token, body: { q: mine(ownerId), sort: '-started_at', limit } })";
 const runApiFile = join(native, 'src/run/api.ts');
 assert(readFileSync(runApiFile, 'utf8').split(RUN_READ).length <= 2, 'Runs may be read by one query only.');
-for (const file of [...runFiles, ...sourceFiles(join(native, 'app'))]) {
+for (const file of [...runFiles, ...sourceFiles(join(native, 'src/social')), ...sourceFiles(join(native, 'app'))]) {
   const source = readFileSync(file, 'utf8');
   const text = file === runApiFile ? source.replace(RUN_READ, '') : source;
   assert(!/entities\/(Run|Workout)\b|entityUrl\('(Run|Workout)'/.test(text), `${file} writes runs outside ingestActivity.`);
@@ -125,13 +127,27 @@ for (const name of PURE) {
   for (const [, spec] of text.matchAll(importPattern)) assert(spec.startsWith('./'), `src/run/${name}.ts must stay pure but imports ${spec}.`);
   assert(existsSync(join(native, 'scripts')), 'scripts folder missing');
 }
+// The social rules (audiences, the post record, handles, challenges) are plain TypeScript too.
+for (const name of ['logic', 'challenges']) {
+  const text = readFileSync(join(native, `src/social/${name}.ts`), 'utf8');
+  for (const [, spec] of text.matchAll(importPattern)) assert(spec.startsWith('./'), `src/social/${name}.ts must stay pure but imports ${spec}.`);
+}
+// Social calls go to the VantraRun API only, and posts carry no photo or video from the phone yet.
+for (const file of sourceFiles(join(native, 'src/social'))) {
+  assert(!/https?:\/\//.test(readFileSync(file, 'utf8')), `${file}: social code may only talk to the VantraRun API.`);
+}
+const socialLogic = readFileSync(join(native, 'src/social/logic.ts'), 'utf8');
+assert(socialLogic.includes("return profile?.visibility === 'public' ? 'public' : 'friends';"), 'The default audience of a post must stay the website\'s: friends, public only for a public account.');
+assert(socialLogic.includes("background_type: 'none'") && socialLogic.includes("map((p) => ({ lat: p.lat, lng: p.lng }))"), 'A post sends no media and only lat/lng for its route points.');
+assert(!Object.keys(JSON.parse(readFileSync(join(native, 'package.json'), 'utf8')).dependencies).some((name) => /image-picker|media-library|expo-camera|document-picker/i.test(name)),
+  'No photo, camera or media-library package: posts with media are not built in the app.');
 const autoPolicy = readFileSync(join(native, 'src/ingestion/auto-import-policy.ts'), 'utf8');
 assert(/AUTO_HEALTH_IMPORT_ENABLED = false;/.test(autoPolicy), 'Automatic health import must stay off in Stage 1 (duplicate runs).');
 assert(readFileSync(join(native, 'src/ingestion/manual-import-panel.tsx'), 'utf8').includes('AUTO_HEALTH_IMPORT_ENABLED'), 'The import panel must honour the automatic-import switch.');
 const payloadSource = readFileSync(join(native, 'src/run/payload.ts'), 'utf8');
 assert(payloadSource.includes("source: 'fitpro'") && !/avg_pace_sec\s*:/.test(payloadSource), 'Run payload must be source "fitpro" and never send server-computed pace.');
 assert(readFileSync(join(native, 'app/run-start.tsx'), 'utf8').includes('Crypto.randomUUID()'), 'external_id must be generated when the run starts.');
-assert(readFileSync(join(native, 'app/(tabs)/settings.tsx'), 'utf8').includes('deleteAccount(accessToken, password)'), 'Native account deletion missing.');
+assert(readFileSync(join(native, 'app/settings.tsx'), 'utf8').includes('deleteAccount(accessToken, password)'), 'Native account deletion missing.');
 // Store identity (owner, 2026-11-25). A bundle id can never change once the store apps exist.
 assert(cfg.expo.ios.bundleIdentifier === 'com.vantrarun.app' && cfg.expo.android.package === 'com.vantrarun.app', 'Bundle id and package must be com.vantrarun.app.');
 assert(cfg.expo.name === 'VantraRun', 'The app is called VantraRun.');

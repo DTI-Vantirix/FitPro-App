@@ -11,9 +11,9 @@ export default function TabsLayout() {
   return <Tabs tabBar={(props) => <TabBar {...props} />}
     screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: colors.background } }}>
     <Tabs.Screen name="home" options={{ title: 'Today' }} />
+    <Tabs.Screen name="feed" options={{ title: 'Feed' }} />
     <Tabs.Screen name="routes" options={{ title: 'Routes' }} />
     <Tabs.Screen name="analytics" options={{ title: 'Analytics' }} />
-    <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
     <Tabs.Screen name="activities" options={{ title: 'Import runs' }} />
   </Tabs>;
 }

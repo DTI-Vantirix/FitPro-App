@@ -2,9 +2,10 @@
  * Shapes follow the website: Volt pill buttons, Graphite cards with a Line border, no shadows.
  */
 import React, { useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View,
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View,
   type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { brand, colors } from '../theme';
 import { display, fonts, heading, stat, type } from '../typography';
@@ -37,7 +38,7 @@ export function ScreenHeader({ onBack, right }: { onBack?: () => void; right?: R
       {onBack && <IconButton icon="arrow-left" label="Back" onPress={onBack} />}
       <Logo variant="horizontal" />
     </View>
-    {right}
+    {!!right && <View style={styles.headerRight}>{right}</View>}
   </View>;
 }
 
@@ -74,14 +75,17 @@ export function SectionHeading({ kicker, title, subtitle }: { kicker?: string; t
 }
 
 // ---- Inputs -----------------------------------------------------------------------------
-export function Field({ label, value, onChangeText, secure = false, keyboardType = 'default', autoCapitalize = 'none', placeholder }: {
+export function Field({ label, value, onChangeText, secure = false, keyboardType = 'default', autoCapitalize = 'none', placeholder, multiline = false, maxLength }: {
   label: string;
   value: string;
   onChangeText: (v: string) => void;
   secure?: boolean;
-  keyboardType?: 'default' | 'email-address' | 'number-pad';
+  keyboardType?: 'default' | 'email-address' | 'number-pad' | 'decimal-pad';
   autoCapitalize?: 'none' | 'sentences';
   placeholder?: string;
+  /** A few lines of free text (a caption). */
+  multiline?: boolean;
+  maxLength?: number;
 }) {
   const [focused, setFocused] = useState(false);
   return <View style={styles.field}>
@@ -97,9 +101,11 @@ export function Field({ label, value, onChangeText, secure = false, keyboardType
       autoCorrect={false}
       secureTextEntry={secure}
       keyboardType={keyboardType}
+      multiline={multiline}
+      maxLength={maxLength}
       onFocus={() => setFocused(true)}
       onBlur={() => setFocused(false)}
-      style={[styles.input, focused && styles.inputFocused]}
+      style={[styles.input, multiline && styles.inputMultiline, focused && styles.inputFocused]}
     />
   </View>;
 }
@@ -142,10 +148,13 @@ export function Action({ label, onPress, busy = false, disabled = false, seconda
   </Pressable>;
 }
 
-export function IconButton({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
-  return <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} hitSlop={6}
-    style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
-    <Feather name={icon} size={18} color={colors.text} />
+/** Round outline button. `active` marks the screen you are on (Volt ring and icon), as the
+ * website's header does. 'trophy' is the one icon Feather lacks; it comes from Ionicons. */
+export function IconButton({ icon, label, onPress, active = false }: { icon: IconName | 'trophy'; label: string; onPress: () => void; active?: boolean }) {
+  const tint = active ? colors.accent : colors.text;
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: active }} onPress={onPress} hitSlop={6}
+    style={({ pressed }) => [styles.iconButton, active && styles.iconButtonActive, pressed && styles.pressed]}>
+    {icon === 'trophy' ? <Ionicons name="trophy-outline" size={18} color={tint} /> : <Feather name={icon} size={18} color={tint} />}
   </Pressable>;
 }
 
@@ -215,13 +224,21 @@ export function Loading({ label }: { label?: string }) {
 }
 
 /** A full screen on Ink, clear of the notch and home indicator. */
-export function Screen({ children, scroll = true }: { children: React.ReactNode; scroll?: boolean }) {
+export function Screen({ children, scroll = true, onRefresh, refreshing = false }: {
+  children: React.ReactNode;
+  scroll?: boolean;
+  /** Pull down to reload. */
+  onRefresh?: () => void;
+  refreshing?: boolean;
+}) {
   const insets = useSafeAreaInsets();
   if (!scroll) {
     return <View style={[styles.root, styles.fixed, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 16 }]}>{children}</View>;
   }
   return <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <ScrollView keyboardShouldPersistTaps="handled"
+      refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent}
+        colors={[colors.accentText]} progressBackgroundColor={colors.accent} /> : undefined}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 40 }]}>{children}</ScrollView>
   </KeyboardAvoidingView>;
 }
@@ -233,6 +250,7 @@ const styles = StyleSheet.create({
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: colors.background },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, marginBottom: 20, paddingHorizontal: 4 },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   hero: { alignItems: 'center', marginTop: 12, marginBottom: 24 },
   tagline: { marginTop: 12, marginBottom: 28 },
   center: { textAlign: 'center' },
@@ -242,6 +260,7 @@ const styles = StyleSheet.create({
   fieldLabel: { fontFamily: fonts.bodyStrong, color: colors.text, fontSize: 14 },
   input: { backgroundColor: colors.panel, borderRadius: 16, paddingHorizontal: 16, minHeight: 52,
     fontFamily: fonts.body, fontSize: 16, color: colors.text, borderColor: colors.panelBorder, borderWidth: 1 },
+  inputMultiline: { minHeight: 88, paddingTop: 14, paddingBottom: 14, textAlignVertical: 'top' },
   inputFocused: { borderColor: colors.accent },
   action: { minHeight: 52, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center',
     paddingHorizontal: 24, paddingVertical: 8, marginTop: 10, borderRadius: 999, gap: 8, flexDirection: 'row' },
@@ -253,6 +272,7 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   actionText: { fontFamily: fonts.bodyStrong, fontSize: 15, textAlign: 'center', flexShrink: 1 },
   iconButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.panelBorder, alignItems: 'center', justifyContent: 'center' },
+  iconButtonActive: { borderColor: colors.accent },
   card: { backgroundColor: colors.panel, borderColor: colors.panelBorder, borderWidth: 1, borderRadius: 22, padding: 18, gap: 10, marginBottom: 14 },
   cardSelected: { borderColor: colors.accent },
   error: { flexDirection: 'row', gap: 10, padding: 14, backgroundColor: colors.dangerBg, borderColor: colors.danger, borderWidth: 1, borderRadius: 16, marginVertical: 12 },
