@@ -1,3 +1,4 @@
+import { deleteAccount } from '../billing/account.js';
 import { StripeError } from '../billing/stripe.js';
 import { claimInvite, normalizeCode } from '../functions/inviteAccess.js';
 import { recordServerError } from '../errors.js';
@@ -268,21 +269,15 @@ export function registerAuthRoutes(router, config) {
     if (user.password_hash && !(await verifyPassword(String(ctx.body.password || ''), user.password_hash))) {
       throw new HttpError(401, 'Enter your current password to delete your account.');
     }
-    // Nobody is billed after their account is gone: the customer is deleted at Stripe
-    // first, which cancels its subscriptions at once. If that cannot be done (Stripe is
-    // unreachable, or the keys have been taken out), the account stays so the person can
-    // try again; deleting it would leave a subscription nobody can reach.
-    if (user.stripe_customer_id) {
-      try {
-        if (!ctx.config.stripe?.ready) throw new StripeError(503, 'Stripe is not set up on this server.');
-        await ctx.stripe.deleteCustomer(user.stripe_customer_id);
-      } catch (error) {
-        if (!(error instanceof StripeError)) throw error;
-        console.error(`[billing] account deletion stopped: ${error.message}`);
-        throw new HttpError(502, 'We could not cancel your subscription, so your account was not deleted. Try again in a few minutes, or email info@dtisys.com.');
-      }
+    // The Stripe customer goes first, then the account (src/billing/account.js). If Stripe
+    // cannot be told, the account stays so the person can try again.
+    try {
+      await deleteAccount({ db: ctx.db, stripe: ctx.stripe, config: ctx.config, user });
+    } catch (error) {
+      if (!(error instanceof StripeError)) throw error;
+      console.error(`[billing] account deletion stopped: ${error.message}`);
+      throw new HttpError(502, 'We could not cancel your subscription, so your account was not deleted. Try again in a few minutes, or email info@dtisys.com.');
     }
-    await ctx.db.query('delete from users where id = $1 returning id', [user.id]);
     return { ok: true, deleted: true };
   });
 

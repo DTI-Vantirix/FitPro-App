@@ -28,6 +28,9 @@ const SYNC_EVENTS = new Set([
   'invoice.payment_failed',
 ]);
 
+// The ones that mean money (or a card for a trial) was taken.
+const PAYMENT_EVENTS = new Set(['checkout.session.completed', 'invoice.paid']);
+
 const idOf = (value) => (value && typeof value === 'object' ? value.id : value) || null;
 
 const report = (db, message) => {
@@ -82,7 +85,13 @@ async function act(db, stripe, config, type, object) {
   const customerId = idOf(object.customer);
   if (SYNC_EVENTS.has(type)) {
     if (!customerId) return 'ignored';
-    return (await syncCustomer(db, stripe, config, customerId)) ? 'handled' : 'ignored';
+    if (await syncCustomer(db, stripe, config, customerId)) return 'handled';
+    // Money has arrived for a customer no account owns (the account was deleted while a
+    // checkout page was still open, say). Nothing here can act on it; the owner can.
+    if (PAYMENT_EVENTS.has(type)) {
+      report(db, `A payment arrived from Stripe for customer ${customerId}, which no account here owns (${type}). It may need a refund: look the customer up in Stripe.`);
+    }
+    return 'ignored';
   }
   if (type === 'charge.refunded') {
     // Only a full refund ends access; a partial one changes nothing.

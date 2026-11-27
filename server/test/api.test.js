@@ -13,6 +13,7 @@ import { SERVER_ROOT, loadConfig } from '../src/config.js';
 import { bootstrapAdmin } from '../src/auth/bootstrap.js';
 import { hashPassword } from '../src/auth/crypto.js';
 import { formatDay, sendTrialReminders } from '../src/billing/reminders.js';
+import { deleteAccount } from '../src/billing/account.js';
 import { serialised } from '../src/billing/queue.js';
 import { loadRegistry } from '../src/entities/registry.js';
 import { migrate } from '../src/migrate.js';
@@ -3293,4 +3294,106 @@ describe('the owner can see which address the server counts a request against', 
       }
       assert.deepEqual(last, { status: 429, data: { error: 'Too many sign-ups from this network. Try again later.' } });
     }));
+});
+
+describe('deleting an account leaves nothing behind at Stripe', () => {
+  let store;
+  const remove = (who) => store.on('DELETE', '/api/auth/me', { token: who.token, body: { password: 'correct-horse-1' } });
+  const serverReports = async (like) => {
+    let rows = [];
+    for (let i = 0; i < 40 && !rows.length; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      rows = await db.query(`select message, context from client_errors where platform = 'server' and message like $1`, [like]);
+    }
+    return rows;
+  };
+
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+    await new Promise((r) => setTimeout(r, 100));
+    await db.query(`delete from client_errors where platform = 'server' returning id`, []);
+  });
+
+  test('an open checkout is expired before the customer is deleted', async () => {
+    const oda = await legacyUser('oda.open@example.com');
+    assert.equal((await store.subscription(oda, { action: 'checkout', plan: 'annual' })).status, 200);
+    const session = store.sessionOf(oda);
+    assert.equal(session.status, 'open');
+
+    assert.deepEqual(await remove(oda), { status: 200, data: { ok: true, deleted: true } });
+    assert.equal(store.fake.state.sessions.get(session.id).status, 'expired', 'nobody can pay into a deleted account');
+    const order = store.fake.calls.filter((c) => ['expireCheckoutSession', 'deleteCustomer'].includes(c.method) && (c.args.sessionId === session.id || c.args.customerId === session.customer)).map((c) => c.method);
+    assert.deepEqual(order, ['expireCheckoutSession', 'deleteCustomer']);
+    assert.equal(await userRow(oda.user.id), undefined);
+  });
+
+  test('a session that can no longer be expired does not stop the deletion; an unreachable Stripe does', async () => {
+    const eli = await legacyUser('eli.expire@example.com');
+    await store.subscription(eli, { action: 'checkout', plan: 'monthly' });
+    store.fake.failNext('listOpenCheckoutSessions');
+    assert.equal((await remove(eli)).status, 502);
+    assert.ok(await userRow(eli.user.id));
+    assert.equal(store.fake.callsTo('deleteCustomer').filter((c) => c.args.customerId === store.sessionOf(eli).customer).length, 0);
+    assert.equal((await remove(eli)).status, 200);
+  });
+
+  test('the customer id is read again at the moment of deleting, not taken from the sign-in', async () => {
+    const sal = await legacyUser('sal.stale@example.com');
+    // what a request read when it was authenticated: no customer yet
+    const asRead = await userRow(sal.user.id);
+    assert.equal(asRead.stripe_customer_id, null);
+    // meanwhile, in another tab, checkout made one and the person paid
+    const sub = await store.subscribe(sal);
+    const customer = (await userRow(sal.user.id)).stripe_customer_id;
+
+    await deleteAccount({ db, stripe: store.fake, config: { ...testConfig, ...SELLING }, user: asRead });
+    assert.deepEqual(store.fake.callsTo('deleteCustomer').at(-1).args, { customerId: customer });
+    assert.equal(store.fake.state.subscriptions.get(sub.id).status, 'canceled');
+    assert.equal(await userRow(sal.user.id), undefined);
+  });
+
+  test('if the account cannot be removed after its customer was, the customer id is cleared', async () => {
+    const hal = await legacyUser('hal.halfway@example.com');
+    await store.subscription(hal, { action: 'checkout', plan: 'monthly' });
+    const customer = (await userRow(hal.user.id)).stripe_customer_id;
+    // a database that fails exactly when the user row is deleted
+    const failing = {
+      ...db,
+      query: (sql, params) => (/^\s*delete from users/i.test(sql) ? Promise.reject(new Error('the database went away')) : db.query(sql, params)),
+    };
+    await assert.rejects(deleteAccount({ db: failing, stripe: store.fake, config: { ...testConfig, ...SELLING }, user: await userRow(hal.user.id) }), /went away/);
+    assert.equal(store.fake.state.customers.get(customer).deleted, true);
+    const row = await userRow(hal.user.id);
+    assert.ok(row, 'the account is still there');
+    assert.equal(row.stripe_customer_id, null, 'and no longer points at a customer that is gone');
+    // so the person is not stuck: they can check out again, or delete again
+    const again = await store.subscription(hal, { action: 'checkout', plan: 'monthly' });
+    assert.equal(again.status, 200, JSON.stringify(again.data));
+    assert.notEqual((await userRow(hal.user.id)).stripe_customer_id, customer);
+    assert.equal((await remove(hal)).status, 200);
+  });
+
+  test('a payment for a customer no account owns is reported to the owner, and still accepted', async () => {
+    const deliver = (type, object) => {
+      const { body, header } = signedEvent(TEST_STRIPE.webhookSecret, { type, object });
+      return store.on('POST', '/api/stripe/webhook', { raw: body, headers: { 'Content-Type': 'application/json', 'Stripe-Signature': header } });
+    };
+    assert.deepEqual(await deliver('checkout.session.completed', { customer: 'cus_orphan_checkout' }), { status: 200, data: { received: true } });
+    const [first] = await serverReports('%cus_orphan_checkout%');
+    assert.ok(first, 'a report was written');
+    assert.match(first.message, /payment arrived .* cus_orphan_checkout.* refund/i);
+    assert.equal(first.context, 'POST /api/stripe/webhook');
+
+    assert.deepEqual(await deliver('invoice.paid', { customer: 'cus_orphan_invoice' }), { status: 200, data: { received: true } });
+    assert.equal((await serverReports('%cus_orphan_invoice%')).length, 1);
+
+    // notices that are not about money arriving say nothing
+    await deliver('customer.subscription.deleted', { customer: 'cus_orphan_quiet' });
+    await deliver('invoice.payment_failed', { customer: 'cus_orphan_quiet' });
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal((await db.query(`select id from client_errors where message like '%cus_orphan_quiet%'`, [])).length, 0);
+  });
 });
