@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Crosshair, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { ArrowLeft, Crosshair, RotateCcw, Save, Trash2, TriangleAlert } from 'lucide-react';
 import { api } from '@/api/client';
 import MapView from '@/components/MapView';
 import ZonePicker from '@/components/run/ZonePicker';
 import { pathMiles } from '@/lib/geo';
+import { locationProblem } from '@/lib/location';
 import { sortZones } from '@/lib/zones';
 
 export default function RouteBuilder() {
@@ -18,6 +19,7 @@ export default function RouteBuilder() {
   const [zoneId, setZoneId] = useState('');
   const [center, setCenter] = useState([40.7128, -74.006]);
   const [here, setHere] = useState(null);
+  const [geoError, setGeoError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [fitSeed] = useState(0);
@@ -31,17 +33,20 @@ export default function RouteBuilder() {
       setZones(list);
       if (list.length) setZoneId((list.find((z) => Number(z.zone_number) === 2) || list[0]).id);
     });
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          setHere(p);
-          setCenter([p.lat, p.lng]);
-        },
-        () => {},
-        { enableHighAccuracy: true, timeout: 12000 }
-      );
+    if (!navigator.geolocation || !window.isSecureContext) {
+      setGeoError(locationProblem(null));
+      return;
     }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setHere(p);
+        setCenter([p.lat, p.lng]);
+        setGeoError(null);
+      },
+      (err) => setGeoError(locationProblem(err)),
+      { enableHighAccuracy: true, timeout: 12000 }
+    );
   }, []);
 
   const snap = async (waypoints) => {
@@ -125,9 +130,17 @@ export default function RouteBuilder() {
         </div>
       </div>
 
+      {geoError && (
+        <p className="flex items-start gap-2 rounded-xl border border-[#FFC24B]/30 bg-[#FFC24B]/10 px-3 py-2.5 text-xs leading-relaxed text-[#FFD27D]">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {geoError}
+        </p>
+      )}
+
       <div className="overflow-hidden rounded-2xl border border-border">
         <MapView
           points={points}
+          position={here}
           path={path}
           editable
           onAddPoint={addPoint}

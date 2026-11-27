@@ -11,6 +11,7 @@ import HeartRateCard from '@/components/run/HeartRateCard';
 import useHeartRate from '@/hooks/useHeartRate';
 import { loadProfile } from '@/lib/profile';
 import { haversineMiles, pathMiles, zoneStatus } from '@/lib/geo';
+import { locationProblem } from '@/lib/location';
 import { formatDuration, formatPace } from '@/lib/format';
 import { sortZones } from '@/lib/zones';
 import { cn } from '@/lib/utils';
@@ -102,8 +103,8 @@ export default function LiveRun() {
   }, [zone]);
 
   useEffect(() => {
-    if (!navigator.geolocation) {
-      setGeoError('This device cannot share a GPS location.');
+    if (!navigator.geolocation || !window.isSecureContext) {
+      setGeoError(locationProblem(null));
       return;
     }
     watchId.current = navigator.geolocation.watchPosition(
@@ -139,12 +140,7 @@ export default function LiveRun() {
           return [...t, { ...p, t: Date.now() }];
         });
       },
-      (err) =>
-        setGeoError(
-          err.code === 1
-            ? 'Location access is blocked. Allow location for this app, then try again.'
-            : 'Waiting for a GPS signal — step outside for a clearer fix.'
-        ),
+      (err) => setGeoError(locationProblem(err)),
       { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
     );
     return () => {
