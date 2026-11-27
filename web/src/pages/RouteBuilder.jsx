@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Crosshair, RotateCcw, Save, Trash2, TriangleAlert } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { api } from '@/api/client';
 import MapView from '@/components/MapView';
 import ZonePicker from '@/components/run/ZonePicker';
@@ -20,6 +21,9 @@ export default function RouteBuilder() {
   const [center, setCenter] = useState([40.7128, -74.006]);
   const [here, setHere] = useState(null);
   const [geoError, setGeoError] = useState(null);
+  // How the next point joins the route: along roads and paths, or straight
+  // across ground the map has no path for.
+  const [offroad, setOffroad] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [fitSeed] = useState(0);
@@ -74,7 +78,9 @@ export default function RouteBuilder() {
   };
 
   const addPoint = (p) => {
-    const next = [...points, p];
+    const point = { lat: p.lat, lng: p.lng };
+    if (offroad && points.length) point.offroad = true;
+    const next = [...points, point];
     setPoints(next);
     snap(next);
   };
@@ -125,7 +131,9 @@ export default function RouteBuilder() {
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <div>
-          <p className="eyebrow">Tap the map — the line follows the roads</p>
+          <p className="eyebrow">
+            {offroad ? 'Off-road: points join in a straight line' : 'Tap the map — the line follows the roads'}
+          </p>
           <h1 className="font-heading text-lg leading-tight">Draw a route</h1>
         </div>
       </div>
@@ -149,6 +157,25 @@ export default function RouteBuilder() {
           fitKey={`${points.length}-${fitSeed}`}
           className="h-[44vh] min-h-[260px] w-full"
         />
+        <div className="absolute bottom-3 left-3 z-[500] flex rounded-full border border-border bg-background p-1">
+          {[
+            { value: false, label: 'Follow roads' },
+            { value: true, label: 'Off-road' },
+          ].map((mode) => (
+            <button
+              key={mode.label}
+              type="button"
+              aria-pressed={offroad === mode.value}
+              onClick={() => setOffroad(mode.value)}
+              className={cn(
+                'min-h-9 rounded-full px-3.5 text-xs font-semibold transition-colors',
+                offroad === mode.value ? 'bg-primary text-primary-foreground' : 'text-steel hover:text-foreground'
+              )}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
         {/* On the map itself, so a wrong tap can be taken back without scrolling. */}
         <div className="absolute right-3 top-3 z-[500] flex flex-col items-end gap-2">
           <button
@@ -197,6 +224,13 @@ export default function RouteBuilder() {
             {snapping ? 'Following roads…' : `${points.length} ${points.length === 1 ? 'point' : 'points'}`}
           </p>
         </div>
+
+        {points.some((p) => p.offroad) && (
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Off-road legs are drawn straight between your points, so add a point at each bend. Spoken directions tell
+            you to head for the next marker there.
+          </p>
+        )}
 
         {snapFailed && (
           <p className="text-[11px] leading-relaxed text-muted-foreground">
