@@ -730,6 +730,21 @@ describe('the server refuses product calls without access', () => {
     assert.equal(fs.readdirSync(uploadDir).length, filesBefore, 'no file was stored');
   });
 
+  test('function names cannot be probed without signing in', async () => {
+    const UNAUTHORIZED = { status: 401, data: { error: 'Unauthorized' } };
+    for (const name of ['socialFeed', 'inviteAccess', 'adminAccess', 'noSuchFunction', 'constructor', 'toString']) {
+      assert.deepEqual(await call('POST', `/api/functions/${name}`, { body: {} }), UNAUTHORIZED, name);
+      assert.deepEqual(await call('POST', `/api/functions/${name}`, { body: {}, token: 'x.y.z' }), UNAUTHORIZED, `${name}, bad token`);
+    }
+    // signed in, a name that does not exist is still a plain 404
+    for (const name of ['noSuchFunction', 'constructor']) {
+      assert.deepEqual(await call('POST', `/api/functions/${name}`, { token: bob.token, body: {} }), {
+        status: 404,
+        data: { error: `Unknown function "${name}".` },
+      });
+    }
+  });
+
   test('no token is still a 401, never a 403', async () => {
     assert.equal((await call('GET', '/api/entities/Run')).status, 401);
     assert.equal((await call('POST', '/api/functions/socialFeed', { body: {} })).status, 401);

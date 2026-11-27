@@ -21,6 +21,9 @@ const OPEN = new Set(['inviteAccess']);
 
 export function registerFunctionRoutes(router) {
   router.add('POST', '/api/functions/:name', async (ctx) => {
+    // Sign-in comes first, so someone who is not signed in gets the same 401 for a
+    // name that exists and one that does not, and cannot find out which functions there are.
+    requireUser(ctx);
     const fn = Object.prototype.hasOwnProperty.call(FUNCTIONS, ctx.params.name) ? FUNCTIONS[ctx.params.name] : null;
     if (!fn) throw new HttpError(404, `Unknown function "${ctx.params.name}".`);
     const user = OPEN.has(ctx.params.name) ? requireUser(ctx) : await requireAccess(ctx);
