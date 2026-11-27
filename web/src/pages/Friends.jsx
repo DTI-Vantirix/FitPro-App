@@ -104,7 +104,7 @@ export default function Friends() {
     <div className="mx-auto max-w-xl space-y-4">
       <div>
         <p className="eyebrow">Your circle</p>
-        <h1 className="mt-1 font-heading text-3xl font-extrabold leading-none">Friends</h1>
+        <h1 className="mt-1 font-heading text-3xl leading-none">Friends</h1>
         <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
           Find athletes by handle inside VantraRun. Facebook and Instagram don’t hand over a friend list, so the
           invite link is how you bring people over from there.
@@ -120,14 +120,14 @@ export default function Friends() {
       {profile && (
         <section className="panel space-y-3 p-5">
           <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/15 font-heading text-sm font-bold uppercase text-primary">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/15 text-sm font-bold uppercase text-primary">
               {(profile.display_name || profile.handle).slice(0, 2)}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate font-heading text-sm font-bold">
+              <p className="truncate font-heading text-sm">
                 {profile.display_name || profile.handle}
               </p>
-              <p className="num truncate text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <p className="vr-label truncate text-[10px]">
                 @{profile.handle} · {profile.visibility} account
               </p>
             </div>
@@ -138,7 +138,7 @@ export default function Friends() {
 
           <div className="rounded-xl border border-border bg-secondary/40 px-3.5 py-2.5">
             <p className="eyebrow">Invite link</p>
-            <p className="num mt-1 truncate text-[11px] text-muted-foreground">{link}</p>
+            <p className="tabular-nums mt-1 truncate text-[11px] text-muted-foreground">{link}</p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -152,7 +152,7 @@ export default function Friends() {
             <button
               type="button"
               onClick={() => shareInvite()}
-              className="flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 font-heading text-[11px] font-semibold text-primary-foreground transition hover:brightness-95"
+              className="flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-semibold text-primary-foreground transition hover:brightness-95"
             >
               <Share2 className="h-3 w-3" /> Share
             </button>
@@ -192,7 +192,7 @@ export default function Friends() {
 
       {incoming.length > 0 && (
         <section className="panel space-y-3 p-5">
-          <h2 className="flex items-center gap-1.5 font-heading text-base font-bold">
+          <h2 className="flex items-center gap-1.5 font-heading text-base">
             <UserPlus className="h-4 w-4 text-primary" /> Requests
           </h2>
           <ConnectionRows
@@ -205,7 +205,7 @@ export default function Friends() {
       )}
 
       <section className="panel space-y-3 p-5">
-        <h2 className="font-heading text-base font-bold">Your friends ({friends.length})</h2>
+        <h2 className="font-heading text-base">Your friends ({friends.length})</h2>
         <ConnectionRows
           connections={friends}
           userId={me?.id}
@@ -216,7 +216,7 @@ export default function Friends() {
 
       {outgoing.length > 0 && (
         <section className="panel space-y-3 p-5">
-          <h2 className="font-heading text-base font-bold">Sent requests</h2>
+          <h2 className="font-heading text-base">Sent requests</h2>
           <ConnectionRows
             connections={outgoing}
             userId={me?.id}

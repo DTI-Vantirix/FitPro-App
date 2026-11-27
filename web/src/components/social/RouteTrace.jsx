@@ -32,12 +32,12 @@ export default function RouteTrace({ points, className = '' }) {
     <svg viewBox="0 0 100 100" className={className} fill="none" aria-hidden="true">
       <polyline
         points={poly}
-        stroke="#C9F84A"
+        stroke="#C6FF00"
         strokeWidth="2.4"
         strokeLinejoin="round"
         strokeLinecap="round"
       />
-      <circle cx={coords[0][0]} cy={coords[0][1]} r="2.6" fill="#C9F84A" />
+      <circle cx={coords[0][0]} cy={coords[0][1]} r="2.2" fill="#0B0B0C" stroke="#C6FF00" strokeWidth="1.2" />
     </svg>
   );
 }

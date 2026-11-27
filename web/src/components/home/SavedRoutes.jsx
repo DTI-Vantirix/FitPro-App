@@ -5,10 +5,10 @@ export default function SavedRoutes({ routes = [] }) {
   return (
     <section>
       <div className="flex items-end justify-between">
-        <h2 className="font-heading text-base font-bold">Saved routes</h2>
+        <h2 className="font-heading text-base">Saved routes</h2>
         <Link
           to="/routes"
-          className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-primary"
+          className="vr-label text-[10px] transition-colors hover:text-primary"
         >
           Manage
         </Link>
@@ -26,7 +26,7 @@ export default function SavedRoutes({ routes = [] }) {
             </div>
             <div>
               <p className="text-sm font-medium leading-tight">{route.name}</p>
-              <p className="num mt-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <p className="vr-label mt-1 text-[10px]">
                 {route.miles} mi · {route.zone}
               </p>
             </div>

@@ -39,13 +39,13 @@ export default function Devices() {
         </Link>
         <div>
           <p className="eyebrow">Sensors</p>
-          <h1 className="font-heading text-lg font-bold leading-tight">Devices</h1>
+          <h1 className="font-heading text-lg leading-tight">Devices</h1>
         </div>
       </div>
 
       <section className="panel space-y-3 p-5">
         <div>
-          <h2 className="font-heading text-base font-bold">Live heart rate</h2>
+          <h2 className="font-heading text-base">Live heart rate</h2>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             Pair a Bluetooth heart-rate monitor and every run records your average and max heart rate alongside pace.
           </p>
@@ -60,7 +60,7 @@ export default function Devices() {
 
       <section className="panel space-y-3 p-5">
         <div>
-          <h2 className="font-heading text-base font-bold">Your watch, automatically</h2>
+          <h2 className="font-heading text-base">Your watch, automatically</h2>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             While you run, tracking uses the phone’s own GPS — nothing to pair. Finished sessions from your watch
             will arrive on their own once the watch connections below are live. There is nothing to export or
@@ -85,7 +85,7 @@ export default function Devices() {
 
       <section className="panel space-y-4 p-5">
         <div>
-          <h2 className="font-heading text-base font-bold">What connects today</h2>
+          <h2 className="font-heading text-base">What connects today</h2>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             Strap and watch heart rate uses the standard Bluetooth profile, so it works without any account or
             approval. Watches deliver their own recordings through their maker’s platform, which each gate differently.

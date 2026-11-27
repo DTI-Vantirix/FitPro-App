@@ -12,7 +12,7 @@ import { applyZones, loadProfile, saveProfile } from '@/lib/profile';
 import { formatPace, parsePace } from '@/lib/format';
 
 const field =
-  'mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary/60';
+  'mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm transition-colors placeholder:text-muted-foreground/70 focus:border-primary';
 
 export default function Settings() {
   const [form, setForm] = useState({ age: '35', sex: 'male', height_in: '70', weight_lb: '170' });
@@ -99,7 +99,7 @@ export default function Settings() {
         </Link>
         <div>
           <p className="eyebrow">Training profile</p>
-          <h1 className="font-heading text-lg font-bold leading-tight">Settings</h1>
+          <h1 className="font-heading text-lg leading-tight">Settings</h1>
         </div>
       </div>
 
@@ -109,7 +109,7 @@ export default function Settings() {
         <>
           <section className="panel space-y-4 p-5">
             <div>
-              <h2 className="font-heading text-base font-bold">Your numbers</h2>
+              <h2 className="font-heading text-base">Your numbers</h2>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                 Age, height and weight give VantraRun your max heart rate and threshold pace, which set the five zones.
               </p>
@@ -165,7 +165,7 @@ export default function Settings() {
                 <div key={stat.label} className="bg-card px-3 py-3">
                   <p className="eyebrow text-[9px]">{stat.label}</p>
                   <p className="num mt-1 text-lg leading-none">{stat.value}</p>
-                  <p className="num mt-1 text-[9px] uppercase tracking-[0.1em] text-muted-foreground">{stat.unit}</p>
+                  <p className="vr-label mt-1 text-[9px]">{stat.unit}</p>
                 </div>
               ))}
             </div>
@@ -190,7 +190,7 @@ export default function Settings() {
               type="button"
               onClick={save}
               disabled={busy || !valid}
-              className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
             >
               {busy ? 'Saving…' : 'Save and update my zones'}
             </button>
@@ -204,7 +204,7 @@ export default function Settings() {
 
           <section className="space-y-3">
             <div className="flex items-end justify-between gap-3">
-              <h2 className="font-heading text-base font-bold">Your five zones</h2>
+              <h2 className="font-heading text-base">Your five zones</h2>
               <Link to="/zones" className="text-xs text-primary hover:underline">
                 Manage zones
               </Link>
@@ -223,7 +223,7 @@ export default function Settings() {
             className="panel flex items-center justify-between gap-3 p-5 transition-colors hover:border-primary/40"
           >
             <div>
-              <p className="font-heading text-sm font-bold">Devices</p>
+              <p className="font-heading text-sm">Devices</p>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                 Pair a heart-rate strap for live bpm, and see what each watch needs.
               </p>

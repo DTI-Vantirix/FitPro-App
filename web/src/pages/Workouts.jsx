@@ -26,12 +26,12 @@ export default function Workouts() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="eyebrow">Gym sessions</p>
-          <h1 className="mt-2 font-heading text-3xl font-extrabold leading-none">Gym log</h1>
+          <h1 className="mt-2 font-heading text-3xl leading-none">Gym log</h1>
         </div>
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="flex items-center gap-2 rounded-full bg-primary px-4 py-2.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 active:scale-[0.99]"
+          className="flex items-center gap-2 rounded-full bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 active:scale-[0.99]"
         >
           <Plus className="h-4 w-4" strokeWidth={2.5} /> Log workout
         </button>
@@ -59,14 +59,14 @@ export default function Workouts() {
           <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
             <Dumbbell className="h-5 w-5" />
           </span>
-          <h2 className="font-heading text-lg font-bold">No sessions logged</h2>
+          <h2 className="font-heading text-lg">No sessions logged</h2>
           <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
             Add the lifts you did at the gym — sets, reps and weight — so your training history builds itself.
           </p>
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="mt-2 rounded-full border border-border px-4 py-2.5 font-heading text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary"
+            className="mt-2 rounded-full border border-border px-4 py-2.5 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary"
           >
             Log your first session
           </button>

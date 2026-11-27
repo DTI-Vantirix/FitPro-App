@@ -99,16 +99,16 @@ export default function MapView({
         {editable ? <ClickCatcher onAddPoint={onAddPoint} /> : null}
 
         {pathLine.length > 1 ? (
-          <Polyline positions={pathLine} pathOptions={{ color: '#C9F84A', weight: 4, lineCap: 'round' }} />
+          <Polyline positions={pathLine} pathOptions={{ color: '#C6FF00', weight: 5, lineCap: 'round', lineJoin: 'round' }} />
         ) : waypointLine.length > 1 ? (
           <Polyline
             positions={waypointLine}
-            pathOptions={{ color: '#8A9463', weight: 3, dashArray: '1 7', lineCap: 'round' }}
+            pathOptions={{ color: '#8A8A93', weight: 3, dashArray: '1 7', lineCap: 'round', lineJoin: 'round' }}
           />
         ) : null}
 
         {trailLine.length > 1 && (
-          <Polyline positions={trailLine} pathOptions={{ color: '#C9F84A', weight: 5, lineCap: 'round' }} />
+          <Polyline positions={trailLine} pathOptions={{ color: '#C6FF00', weight: 5, lineCap: 'round', lineJoin: 'round' }} />
         )}
 
         {showWaypoints &&
@@ -120,7 +120,7 @@ export default function MapView({
                 key={`wp-${i}`}
                 center={[p.lat, p.lng]}
                 radius={4}
-                pathOptions={{ color: '#16170F', fillColor: '#E9FFA8', fillOpacity: 1, weight: 2 }}
+                pathOptions={{ color: '#0B0B0C', fillColor: '#F5F5F2', fillOpacity: 1, weight: 2 }}
               />
             );
           })}
@@ -133,7 +133,7 @@ export default function MapView({
             center={[position.lat, position.lng]}
             radius={9}
             className="you-are-here"
-            pathOptions={{ color: '#0C0C0A', weight: 3, fillColor: '#C9F84A', fillOpacity: 1 }}
+            pathOptions={{ color: '#0B0B0C', weight: 3, fillColor: '#C6FF00', fillOpacity: 1 }}
           />
         )}
       </MapContainer>

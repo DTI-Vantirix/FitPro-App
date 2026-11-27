@@ -66,7 +66,7 @@ export default function AccessGate() {
         <span className="flex h-11 w-11 items-center justify-center rounded-full bg-primary/15 text-primary">
           <KeyRound className="h-5 w-5" />
         </span>
-        <h1 className="mt-4 font-heading text-2xl font-extrabold leading-tight">Invite only</h1>
+        <h1 className="mt-4 font-heading text-2xl leading-tight">Invite only</h1>
         <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
           VantraRun is open to a small group of testers. Enter the single-use code you were given to unlock the app.
         </p>
@@ -78,7 +78,7 @@ export default function AccessGate() {
             onChange={(e) => setCode(e.target.value.toUpperCase())}
             placeholder="FP-XXXX-XXXX"
             autoCapitalize="characters"
-            className="num mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-3 text-center text-base tracking-[0.12em] outline-none placeholder:text-muted-foreground/50 focus:border-primary/60"
+            className="num mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-3 text-center text-base tracking-[0.12em] placeholder:text-muted-foreground/50 focus:border-primary"
           />
         </label>
 
@@ -88,7 +88,7 @@ export default function AccessGate() {
           type="button"
           onClick={redeem}
           disabled={busy || code.trim().length < 6}
-          className="mt-4 w-full rounded-full bg-primary py-3.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
+          className="mt-4 w-full rounded-full bg-primary py-3.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
         >
           {busy ? 'Checking…' : 'Unlock VantraRun'}
         </button>

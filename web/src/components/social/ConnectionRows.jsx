@@ -35,12 +35,12 @@ export default function ConnectionRows({ connections, userId, kind, onChanged })
             key={c.id}
             className="flex items-center gap-3 rounded-xl border border-border bg-secondary/30 px-3 py-2.5"
           >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15 font-heading text-xs font-bold uppercase text-primary">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold uppercase text-primary">
               {(name || handle || '?').slice(0, 2)}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate font-heading text-sm font-semibold">{name || handle}</p>
-              <p className="num truncate text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <p className="truncate font-heading text-sm">{name || handle}</p>
+              <p className="vr-label truncate text-[10px]">
                 @{handle}
               </p>
             </div>
@@ -70,7 +70,7 @@ export default function ConnectionRows({ connections, userId, kind, onChanged })
               </span>
             )}
             {kind === 'friends' && (
-              <span className="num shrink-0 text-[10px] uppercase tracking-[0.1em] text-primary">
+              <span className="vr-label shrink-0 text-[10px] text-primary">
                 Friends
               </span>
             )}

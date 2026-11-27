@@ -1,10 +1,35 @@
 import { formatDuration, formatPace } from '@/lib/format';
+import logoUrl from '@/assets/brand/vantrarun-horizontal-full-colour.svg';
 
 export const CARD_W = 1080;
 export const CARD_H = 1350;
 
-const HEAD = "'Archivo', 'Inter', system-ui, sans-serif";
-const MONO = "'JetBrains Mono', ui-monospace, monospace";
+const HEAD = "'Barlow Condensed', 'Arial Narrow', sans-serif";
+const MONO = "Inter, system-ui, sans-serif";
+
+const VOLT = '#C6FF00';
+const INK = '#0B0B0C';
+const CHALK = '#F5F5F2';
+const STEEL = '#8A8A93';
+const TEXT_2 = '#A6A6AE';
+const LINE = '#2A2A2F';
+
+// The card draws the real logo and the brand faces, so both must be loaded
+// before the first draw.
+const logo = typeof Image === 'undefined' ? null : new Image();
+export const cardAssetsReady =
+  typeof document === 'undefined'
+    ? Promise.resolve()
+    : Promise.all([
+        new Promise((resolve) => {
+          logo.onload = resolve;
+          logo.onerror = resolve;
+          logo.src = logoUrl;
+        }),
+        document.fonts?.load?.("italic 900 200px 'Barlow Condensed'").catch(() => {}),
+        document.fonts?.load?.("800 52px 'Barlow Condensed'").catch(() => {}),
+        document.fonts?.load?.('500 24px Inter').catch(() => {}),
+      ]).then(() => {});
 
 function coverRect(ctx, el, w, h) {
   const ew = el.videoWidth || el.naturalWidth || el.width;
@@ -48,32 +73,35 @@ function drawRoute(ctx, points, box) {
     if (i) ctx.lineTo(x, y);
     else ctx.moveTo(x, y);
   });
-  ctx.strokeStyle = '#C9F84A';
+  ctx.strokeStyle = VOLT;
   ctx.lineWidth = 12;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
-  ctx.shadowColor = 'rgba(201,248,74,0.5)';
-  ctx.shadowBlur = 34;
   ctx.stroke();
-  ctx.shadowBlur = 0;
 
   const [sx, sy] = toXY(pts[0]);
   const [ex, ey] = toXY(pts[pts.length - 1]);
-  ctx.fillStyle = '#C9F84A';
-  [ [sx, sy], [ex, ey] ].forEach(([x, y]) => {
-    ctx.beginPath();
-    ctx.arc(x, y, 14, 0, Math.PI * 2);
-    ctx.fill();
-  });
+  // Finish: a solid Volt dot. Start: Ink with a Volt outline, drawn on top.
+  ctx.fillStyle = VOLT;
+  ctx.beginPath();
+  ctx.arc(ex, ey, 16, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = INK;
+  ctx.strokeStyle = VOLT;
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.arc(sx, sy, 14, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
   return true;
 }
 
 function column(ctx, x, label, value) {
   ctx.textAlign = 'left';
-  ctx.fillStyle = 'rgba(240,240,232,0.45)';
-  ctx.font = `600 22px ${MONO}`;
+  ctx.fillStyle = STEEL;
+  ctx.font = `500 22px ${MONO}`;
   ctx.fillText(label, x, 1120);
-  ctx.fillStyle = '#F5F5EE';
+  ctx.fillStyle = CHALK;
   ctx.font = `800 52px ${HEAD}`;
   ctx.fillText(value, x, 1180);
 }
@@ -93,30 +121,17 @@ export function drawCard(ctx, { card, points, media }) {
     }
   }
 
-  if (drewBg) {
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, 'rgba(12,12,11,0.5)');
-    g.addColorStop(0.42, 'rgba(12,12,11,0.68)');
-    g.addColorStop(1, 'rgba(12,12,11,0.97)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
-  } else {
-    ctx.fillStyle = '#0C0C0B';
-    ctx.fillRect(0, 0, W, H);
-    const glow = ctx.createRadialGradient(W * 0.5, H * 0.08, 0, W * 0.5, H * 0.08, H * 0.85);
-    glow.addColorStop(0, 'rgba(201,248,74,0.18)');
-    glow.addColorStop(1, 'rgba(12,12,11,0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, W, H);
-  }
+  // A flat Ink veil keeps the numbers readable over a photo.
+  ctx.fillStyle = drewBg ? 'rgba(11,11,12,0.72)' : INK;
+  ctx.fillRect(0, 0, W, H);
 
-  // Header
-  ctx.textAlign = 'left';
-  ctx.fillStyle = '#C9F84A';
-  ctx.font = `800 30px ${HEAD}`;
-  ctx.fillText('VANTRARUN', 72, 108);
+  // Header: the logo itself, never the name typed out.
+  if (logo?.naturalWidth) {
+    const h = 52;
+    ctx.drawImage(logo, 72, 62, (logo.naturalWidth / logo.naturalHeight) * h, h);
+  }
   ctx.textAlign = 'right';
-  ctx.fillStyle = 'rgba(240,240,232,0.6)';
+  ctx.fillStyle = TEXT_2;
   ctx.font = `500 24px ${MONO}`;
   ctx.fillText(card.date || '', W - 72, 106);
 
@@ -124,20 +139,20 @@ export function drawCard(ctx, { card, points, media }) {
 
   // Headline stat
   ctx.textAlign = 'left';
-  ctx.fillStyle = 'rgba(240,240,232,0.5)';
-  ctx.font = `600 24px ${MONO}`;
+  ctx.fillStyle = STEEL;
+  ctx.font = `500 24px ${MONO}`;
   ctx.fillText('DISTANCE', 72, 830);
 
   const big = Number(card.distance_mi || 0).toFixed(2);
   const unit = 'MI';
 
-  ctx.fillStyle = '#F5F5EE';
-  ctx.font = `900 200px ${HEAD}`;
+  ctx.fillStyle = CHALK;
+  ctx.font = `italic 900 210px ${HEAD}`;
   ctx.fillText(big, 68, 1000);
   const width = ctx.measureText(big).width;
-  ctx.fillStyle = '#C9F84A';
-  ctx.font = `800 44px ${MONO}`;
-  ctx.fillText(unit, 68 + width + 20, 998);
+  ctx.fillStyle = VOLT;
+  ctx.font = `800 56px ${HEAD}`;
+  ctx.fillText(unit, 68 + width + 28, 998);
 
   // Three columns
   column(ctx, 72, 'PACE', `${formatPace(card.avg_pace_sec)}`);
@@ -145,13 +160,13 @@ export function drawCard(ctx, { card, points, media }) {
   column(ctx, 732, 'ZONE', card.zone_name || '—');
 
   // Footer
-  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillStyle = LINE;
   ctx.fillRect(72, 1232, W - 144, 2);
-  ctx.fillStyle = 'rgba(240,240,232,0.65)';
-  ctx.font = `600 24px ${MONO}`;
+  ctx.fillStyle = TEXT_2;
+  ctx.font = `500 24px ${MONO}`;
   ctx.fillText(card.handle ? `@${card.handle}` : '', 72, 1290);
   ctx.textAlign = 'right';
-  ctx.fillStyle = 'rgba(201,248,74,0.85)';
+  ctx.fillStyle = VOLT;
   ctx.fillText(card.title ? card.title.slice(0, 34).toUpperCase() : '', W - 72, 1290);
   ctx.textAlign = 'left';
 }

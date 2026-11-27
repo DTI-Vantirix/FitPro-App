@@ -6,7 +6,10 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B0B0C",
+    "icon": "./assets/icon.png",
     "ios": {
+      "icon": "./assets/icon.png",
       "supportsTablet": false,
       "bundleIdentifier": "com.vantrarun.app",
       "infoPlist": {
@@ -29,7 +32,13 @@
       "blockedPermissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE"
-      ]
+      ],
+      "backgroundColor": "#0B0B0C",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-foreground.png",
+        "monochromeImage": "./assets/adaptive-monochrome.png",
+        "backgroundColor": "#C6FF00"
+      }
     },
     "plugins": [
       "expo-router",
@@ -78,7 +87,15 @@
           "bluetoothAlwaysPermission": "VantraRun connects to your heart-rate strap or watch to show live heart rate during a run."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0B0B0C",
+          "image": "./assets/splash.png",
+          "imageWidth": 200
+        }
+      ]
     ],
     "extra": {
       "scope": "VantraRun run coach (GPS, zones, cues, directions) plus read-only Apple Health and Health Connect manual import.",

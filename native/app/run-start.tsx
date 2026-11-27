@@ -219,7 +219,7 @@ function RunStart() {
 }
 
 const local = StyleSheet.create({
-  selected: { borderColor: colors.accent, backgroundColor: '#19352F' },
+  selected: { borderColor: colors.accent, backgroundColor: colors.selectedBg },
   section: { marginTop: 14, marginBottom: 6, gap: 8 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderColor: colors.panelBorder, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },

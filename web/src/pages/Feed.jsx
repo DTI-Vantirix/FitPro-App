@@ -63,12 +63,12 @@ export default function Feed() {
       <div className="flex items-end justify-between gap-3">
         <div>
           <p className="eyebrow">Training circle</p>
-          <h1 className="mt-1 font-heading text-3xl font-extrabold leading-none">Feed</h1>
+          <h1 className="mt-1 font-heading text-3xl leading-none">Feed</h1>
         </div>
         <div className="flex gap-2">
           <Link
             to="/friends"
-            className="flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2.5 font-heading text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+            className="flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             <Users className="h-3.5 w-3.5" /> Friends
           </Link>
@@ -78,7 +78,7 @@ export default function Feed() {
               setInitial({});
               setComposer(true);
             }}
-            className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-2.5 font-heading text-xs font-semibold text-primary-foreground transition hover:brightness-95"
+            className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-2.5 text-xs font-semibold text-primary-foreground transition hover:brightness-95"
           >
             <Plus className="h-3.5 w-3.5" /> New post
           </button>
@@ -95,7 +95,7 @@ export default function Feed() {
             type="button"
             onClick={() => setTab(t.id)}
             className={cn(
-              'flex-1 rounded-full py-2 font-heading text-xs font-medium transition-colors',
+              'flex-1 rounded-full py-2 text-xs font-medium transition-colors',
               tab === t.id ? 'bg-primary/10 text-primary' : 'text-muted-foreground'
             )}
           >
@@ -108,7 +108,7 @@ export default function Feed() {
 
       {list?.length === 0 && (
         <div className="panel p-6 text-center">
-          <p className="font-heading text-base font-bold">
+          <p className="font-heading text-base">
             {tab === 'feed' ? 'Nothing in your circle yet' : 'No public posts yet'}
           </p>
           <p className="mx-auto mt-1.5 max-w-sm text-xs leading-relaxed text-muted-foreground">
@@ -122,7 +122,7 @@ export default function Feed() {
               setInitial({});
               setComposer(true);
             }}
-            className="mt-4 rounded-full bg-primary px-4 py-2.5 font-heading text-xs font-semibold text-primary-foreground transition hover:brightness-95"
+            className="mt-4 rounded-full bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground transition hover:brightness-95"
           >
             Create a post
           </button>

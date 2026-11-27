@@ -126,12 +126,12 @@ export default function RouteBuilder() {
         </Link>
         <div>
           <p className="eyebrow">Tap the map — the line follows the roads</p>
-          <h1 className="font-heading text-lg font-bold leading-tight">Draw a route</h1>
+          <h1 className="font-heading text-lg leading-tight">Draw a route</h1>
         </div>
       </div>
 
       {geoError && (
-        <p className="flex items-start gap-2 rounded-xl border border-[#FFC24B]/30 bg-[#FFC24B]/10 px-3 py-2.5 text-xs leading-relaxed text-[#FFD27D]">
+        <p className="flex items-start gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-xs leading-relaxed text-foreground">
           <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {geoError}
         </p>
@@ -159,7 +159,7 @@ export default function RouteBuilder() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Ironworks loop"
-              className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary/60"
+              className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm transition-colors placeholder:text-muted-foreground/70 focus:border-primary"
             />
           </label>
         </div>
@@ -172,7 +172,7 @@ export default function RouteBuilder() {
               <span className="ml-1 text-xs text-muted-foreground">mi</span>
             </p>
           </div>
-          <p className="num text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+          <p className="vr-label text-[11px]">
             {snapping ? 'Following roads…' : `${points.length} ${points.length === 1 ? 'point' : 'points'}`}
           </p>
         </div>
@@ -218,7 +218,7 @@ export default function RouteBuilder() {
           type="button"
           onClick={save}
           disabled={saving || !name.trim() || points.length < 2}
-          className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
+          className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
         >
           <Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save route'}
         </button>

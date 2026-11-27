@@ -34,7 +34,7 @@ const SECTIONS = [
     title: 'How we use it',
     body: [
       'To do what the app is for: record and show your runs, coach you against your zones, give directions on your routes, show your history and statistics, and run the social features you choose to use.',
-      'To keep the service working and secure: sending the sign-up code and password-reset emails, fixing crashes, and blocking abuse.',
+      'To keep the service working and secure: sending sign-up code password-reset emails, fixing crashes, blocking abuse.',
       'We do not sell your data, use it for advertising, build a profile of you for anyone else, or share it with data brokers or insurers.',
     ],
   },
@@ -69,7 +69,7 @@ const SECTIONS = [
   {
     title: 'How long we keep it',
     body: [
-      'There is no fixed period. Your data is kept until you delete it or delete your account.',
+      'There is no fixed period. Your data kept until you delete it or your account.',
       'Deleting your account removes your account and every record tied to it from the live database straight away, including error reports. Copies may remain in the hosting provider’s routine database backups for a short time until those backups expire.',
       'Error reports are also trimmed automatically: only the most recent 2,000 across everyone are kept.',
       'Runs waiting to upload are stored on your phone until the server has them. Deleting your account from the app removes them from the phone as well.',
@@ -132,7 +132,7 @@ export default function Privacy() {
           ← Back to VantraRun
         </Link>
         <p className="eyebrow mt-6">Privacy</p>
-        <h1 className="mt-1 font-heading text-2xl font-bold leading-tight">Your data stays yours</h1>
+        <h1 className="mt-1 font-heading text-2xl leading-tight">Your data stays yours</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
           VantraRun records where you run and how hard your heart works. That is sensitive information, so this page says
           exactly what is collected, why, who can see it, how long it is kept and how to delete it.
@@ -147,7 +147,7 @@ export default function Privacy() {
         ].map((item) => (
           <div key={item.label} className="bg-card px-3 py-3.5 text-center">
             <p className="eyebrow text-[9px]">{item.label}</p>
-            <p className="mt-1 font-heading text-base font-bold leading-none">{item.value}</p>
+            <p className="mt-1 font-heading text-base leading-none">{item.value}</p>
           </div>
         ))}
       </div>
@@ -155,7 +155,7 @@ export default function Privacy() {
       <div className="space-y-3">
         {SECTIONS.map((section) => (
           <section key={section.title} className="panel space-y-2 p-5">
-            <h2 className="font-heading text-sm font-bold">{section.title}</h2>
+            <h2 className="font-heading text-sm">{section.title}</h2>
             {section.body.map((paragraph) => (
               <p key={paragraph.slice(0, 40)} className="text-[11px] leading-relaxed text-muted-foreground">
                 {paragraph}
@@ -165,7 +165,7 @@ export default function Privacy() {
         ))}
       </div>
 
-      <p className="num text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+      <p className="vr-label text-[10px]">
         Last updated {POLICY_UPDATED}
       </p>
     </div>

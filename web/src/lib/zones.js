@@ -1,4 +1,15 @@
-export const ZONE_COLORS = ['#6FA8FF', '#C9F84A', '#7ED957', '#FFC24B', '#FF6A3D'];
+// One accent only, so the zones climb from Steel to Volt. The zone's number and
+// name always show beside the colour. Keep in step with native/src/run/zones.ts.
+export const ZONE_COLORS = ['#8A8A93', '#A6A6AE', '#F5F5F2', '#9FCC00', '#C6FF00'];
+
+/** The colour to draw a zone in. Zones saved before the rebrand keep their old
+ *  stored colour, so the five standard zones are coloured by number. */
+export function zoneColor(zone) {
+  const n = Number(zone?.zone_number);
+  if (n >= 1 && n <= 5) return ZONE_COLORS[n - 1];
+  const stored = String(zone?.color || '').toUpperCase();
+  return ZONE_COLORS.includes(stored) ? stored : ZONE_COLORS[4];
+}
 
 /**
  * The five training zones. Heart-rate bands are a percent of max heart rate;
@@ -14,7 +25,7 @@ export const ZONE_SPECS = [
     hr_max_pct: 60,
     purpose: 'Active recovery, warm-up and cool-down',
     feel: 'Effortless. You can sing, talk continuously and breathe through your nose.',
-    color: '#6FA8FF',
+    color: '#8A8A93',
     slow_factor: 1.4,
     fast_factor: 1.28,
   },
@@ -26,7 +37,7 @@ export const ZONE_SPECS = [
     hr_max_pct: 70,
     purpose: 'Building aerobic base and endurance',
     feel: 'Comfortable. Full conversation, deeper breathing. Sustainable for hours.',
-    color: '#C9F84A',
+    color: '#A6A6AE',
     slow_factor: 1.28,
     fast_factor: 1.15,
   },
@@ -38,7 +49,7 @@ export const ZONE_SPECS = [
     hr_max_pct: 80,
     purpose: 'Improving aerobic capacity and efficiency',
     feel: 'Challenging but manageable. Short sentences. Needs focus to hold.',
-    color: '#7ED957',
+    color: '#F5F5F2',
     slow_factor: 1.15,
     fast_factor: 1.06,
   },
@@ -50,7 +61,7 @@ export const ZONE_SPECS = [
     hr_max_pct: 90,
     purpose: 'Raising anaerobic threshold and speed endurance',
     feel: 'Uncomfortable. Single words only. Legs start to burn.',
-    color: '#FFC24B',
+    color: '#9FCC00',
     slow_factor: 1.06,
     fast_factor: 1.0,
   },
@@ -62,7 +73,7 @@ export const ZONE_SPECS = [
     hr_max_pct: 100,
     purpose: 'Developing peak power and anaerobic capacity',
     feel: 'All-out. Speaking is impossible. Short sprints and intervals.',
-    color: '#FF6A3D',
+    color: '#C6FF00',
     slow_factor: 1.0,
     fast_factor: 0.93,
   },

@@ -104,18 +104,18 @@ export default function Home() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="eyebrow">{format(new Date(), 'EEEE, d MMMM')}</p>
-          <h1 className="mt-2 font-heading text-3xl font-extrabold leading-none sm:text-4xl">Your week</h1>
+          <h1 className="mt-2 font-heading text-3xl leading-none sm:text-4xl">Your week</h1>
         </div>
         <div className="flex gap-2">
           <Link
             to="/routes/new"
-            className="hidden items-center gap-2 rounded-full border border-border px-4 py-2.5 font-heading text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:text-primary sm:flex"
+            className="hidden items-center gap-2 rounded-full border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:border-primary/40 hover:text-primary sm:flex"
           >
             Plan a route <ArrowUpRight className="h-3.5 w-3.5" />
           </Link>
           <Link
             to="/run"
-            className="flex items-center gap-2 rounded-full bg-primary px-4 py-2.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 active:scale-[0.99]"
+            className="flex items-center gap-2 rounded-full bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 active:scale-[0.99]"
           >
             <Activity className="h-4 w-4" strokeWidth={2.2} /> Start a run
           </Link>
@@ -149,13 +149,13 @@ export default function Home() {
             <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
               <MapPin className="h-5 w-5" />
             </span>
-            <h2 className="font-heading text-lg font-bold">Plan your first route</h2>
+            <h2 className="font-heading text-lg">Plan your first route</h2>
             <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
               Draw a route once, set the zone, and every run starts from it.
             </p>
             <Link
               to="/routes/new"
-              className="mt-1 rounded-full bg-primary px-4 py-2.5 font-heading text-sm font-semibold text-primary-foreground"
+              className="mt-1 rounded-full bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
             >
               Draw a route
             </Link>

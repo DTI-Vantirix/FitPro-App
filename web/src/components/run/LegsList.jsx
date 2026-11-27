@@ -11,18 +11,18 @@ export default function LegsList({ legs = [], active = null }) {
     <ul className="space-y-2">
       {legs.map((leg) => (
         <li key={leg.index} className="flex items-center gap-3">
-          <span className="num flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border text-[10px] text-muted-foreground">
+          <span className="tabular-nums flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border text-[10px] text-muted-foreground">
             {leg.index}
           </span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-medium leading-tight">
               {leg.from} <span className="text-muted-foreground">→</span> {leg.to}
             </p>
-            <p className="num mt-0.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+            <p className="vr-label mt-0.5 text-[10px]">
               {Number(leg.distance_mi || 0).toFixed(2)} mi · {formatDuration(leg.duration_sec || 0)}
             </p>
           </div>
-          <span className="num shrink-0 text-xs text-foreground">
+          <span className="tabular-nums shrink-0 text-xs text-foreground">
             {leg.avg_pace_sec ? `${formatPace(leg.avg_pace_sec)} /mi` : '—'}
           </span>
         </li>
@@ -37,11 +37,11 @@ export default function LegsList({ legs = [], active = null }) {
             <p className="truncate text-xs font-medium leading-tight text-primary">
               {active.from} <span className="text-muted-foreground">→</span> {active.to}
             </p>
-            <p className="num mt-0.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+            <p className="vr-label mt-0.5 text-[10px]">
               {Number(active.distance_mi || 0).toFixed(2)} mi · {formatDuration(active.duration_sec || 0)}
             </p>
           </div>
-          <span className="num shrink-0 text-xs text-muted-foreground">
+          <span className="tabular-nums shrink-0 text-xs text-muted-foreground">
             {paceOf(active.distance_mi, active.duration_sec)
               ? `${formatPace(paceOf(active.distance_mi, active.duration_sec))} /mi`
               : '—'}
