@@ -1,4 +1,4 @@
-import { decideAccess, grantFree } from '../access.js';
+import { GRACE_DAYS, decideAccess, grantFree } from '../access.js';
 import { HttpError } from '../lib/http.js';
 import { isUuid } from '../lib/serialize.js';
 
@@ -71,7 +71,8 @@ export default async function adminAccess({ db, user, body }) {
         entitlements: own.map(listedEntitlement),
       };
     });
-    return { people };
+    // How long a paid period still counts after it ends: the screen works out "access until" from it.
+    return { people, grace_days: GRACE_DAYS };
   }
 
   if (action === 'grant') {

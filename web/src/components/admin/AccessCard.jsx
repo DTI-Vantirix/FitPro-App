@@ -26,21 +26,22 @@ function reasonLabel(person) {
 
 const PAID_SOURCES = ['stripe', 'apple'];
 const isPaid = (entitlement) => PAID_SOURCES.includes(entitlement.source);
-// A paid period that has just ended still counts for this long (GRACE_DAYS in server/src/access.js).
-const ALLOWANCE_MS = 3 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const endOf = (entitlement) => new Date(entitlement.expires_at).getTime();
-const isLivePaid = (entitlement) =>
+// `graceDays`: how long a paid period still counts after it ends. The server sends it with
+// the list (`grace_days`), so this screen has no copy of the number to fall out of step.
+const isLivePaid = (entitlement, graceDays) =>
   isPaid(entitlement) &&
   ['trial', 'active', 'grace'].includes(entitlement.status) &&
-  endOf(entitlement) + ALLOWANCE_MS >= Date.now();
+  endOf(entitlement) + graceDays * DAY_MS >= Date.now();
 const day = (value) => new Date(value).toLocaleDateString();
 
 // Where a paid subscription stands, in plain words.
-function paidLine(entitlement) {
+function paidLine(entitlement, graceDays) {
   const { status } = entitlement;
   if (status === 'revoked') return `${entitlement.note === 'Refunded' ? 'Refunded' : 'Ended'} ${day(entitlement.expires_at)}`;
   if (status === 'expired') return `Ended ${day(entitlement.expires_at)}`;
-  if (status === 'grace') return `Payment failed, access until ${day(endOf(entitlement) + ALLOWANCE_MS)}`;
+  if (status === 'grace') return `Payment failed, access until ${day(endOf(entitlement) + graceDays * DAY_MS)}`;
   if (entitlement.cancel_at_period_end) return `Ends ${day(entitlement.expires_at)}`;
   return `${status === 'trial' ? 'Trial ends' : 'Renews'} ${day(entitlement.expires_at)}`;
 }
@@ -52,6 +53,7 @@ const messageOf = (err, fallback) => err?.response?.data?.error || fallback;
 
 export default function AccessCard() {
   const [people, setPeople] = useState(null);
+  const [graceDays, setGraceDays] = useState(0);
   const [search, setSearch] = useState('');
   const [email, setEmail] = useState('');
   const [note, setNote] = useState('');
@@ -65,7 +67,10 @@ export default function AccessCard() {
     const request = ++latest.current;
     const res = await api.functions.invoke('adminAccess', { action: 'list', search: term });
     // a slower, older search must not replace a newer one
-    if (request === latest.current) setPeople(res.data?.people || []);
+    if (request === latest.current) {
+      setGraceDays(Number(res.data?.grace_days) || 0);
+      setPeople(res.data?.people || []);
+    }
   };
 
   // First load decides whether the card shows at all; later searches wait for a pause in typing.
@@ -201,12 +206,12 @@ export default function AccessCard() {
                     </td>
                     <td className="px-3 py-2">
                       <span className={person.allowed ? '' : 'text-muted-foreground'}>{reasonLabel(person)}</span>
-                      {paid.filter(isLivePaid).length >= 2 && (
+                      {paid.filter((entitlement) => isLivePaid(entitlement, graceDays)).length >= 2 && (
                         <span className="block text-[10px] font-semibold text-destructive">Two subscriptions: refund one in Stripe</span>
                       )}
                       {paid.map((entitlement) => (
                         <span key={entitlement.id} className="block text-[10px] text-muted-foreground">
-                          {paidLine(entitlement)}
+                          {paidLine(entitlement, graceDays)}
                           {entitlement.external_id && <span className="num block break-all text-[9px]">{entitlement.external_id}</span>}
                         </span>
                       ))}

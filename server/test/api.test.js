@@ -3703,3 +3703,12 @@ describe('the prices at Stripe are checked again every ten minutes', () => {
     }
   });
 });
+
+describe('the admin list says how long the allowance is', () => {
+  test('grace_days comes from the server, so the screen never has its own copy', async () => {
+    const list = await call('POST', '/api/functions/adminAccess', { token: admin.token, body: { action: 'list', search: 'nobody-matches-this' } });
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.data, { people: [], grace_days: GRACE_DAYS });
+    assert.equal(GRACE_DAYS, 3);
+  });
+});
