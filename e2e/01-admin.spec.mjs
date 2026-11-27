@@ -89,11 +89,23 @@ test('the admin sees who has access, and can give and take back a free pass', as
   await expect(card.getByRole('row').filter({ hasText: ADMIN.email })).toContainText('Admin');
 
   // take the invite pass away: asks first, then the person is closed out on the server
-  await row.getByRole('button', { name: `Remove invite code access from ${tester.email}` }).click();
-  await expect(row).toContainText('Invite code', { timeout: 1000 });
+  const removeButton = row.getByRole('button', { name: `Remove invite code access from ${tester.email}` });
+  await removeButton.click();
+  // Only asked so far: nothing has been taken away on the server.
+  await expect(row.getByRole('button', { name: 'Yes, remove' })).toBeVisible();
+  expect((await runs()).status()).toBe(200);
+  // Backing out leaves it that way.
+  await row.getByRole('button', { name: 'Keep' }).click();
+  await expect(removeButton).toBeVisible();
+  expect((await runs()).status()).toBe(200);
+
+  // Asked again and confirmed: now the person is refused.
+  await removeButton.click();
   await row.getByRole('button', { name: 'Yes, remove' }).click();
   await expect(row).toContainText('No access');
-  expect((await runs()).status()).toBe(403);
+  const refused = await runs();
+  expect(refused.status()).toBe(403);
+  expect((await refused.json()).error).toBe('Enter an invite code to use VantraRun.');
 
   // give it back by hand
   await card.getByLabel('Email to give free access').fill(tester.email);
