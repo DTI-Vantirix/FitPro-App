@@ -3240,3 +3240,57 @@ describe('nothing waits on Stripe with a database connection in hand', () => {
     assert.deepEqual((await entitlementsOf(rob.user.id)).map((r) => [r.status, r.note]), [['revoked', 'Refunded']]);
   });
 });
+
+describe('the owner can see which address the server counts a request against', () => {
+  const info = (who, headers = {}) => call('POST', '/api/functions/requestInfo', { token: who?.token, body: {}, headers });
+  const withEnv = async (env, work) => {
+    const before = { TRUST_PROXY: process.env.TRUST_PROXY, TRUSTED_PROXY_HOPS: process.env.TRUSTED_PROXY_HOPS };
+    Object.assign(process.env, env);
+    try {
+      await work();
+    } finally {
+      for (const [key, value] of Object.entries(before)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  };
+
+  test('only admins may ask', async () => {
+    const member = await invitedUser('rita.requestinfo@example.com');
+    assert.deepEqual(await info(member), { status: 403, data: { error: 'Admins only' } });
+    assert.equal((await info(null)).status, 401);
+  });
+
+  test('it shows the forwarded list, the socket address and the one that is used', async () => {
+    const plain = await info(admin, { 'X-Forwarded-For': '9.9.9.9, 203.0.113.7' });
+    assert.equal(plain.status, 200, JSON.stringify(plain.data));
+    assert.deepEqual(Object.keys(plain.data).sort(), ['client_ip', 'forwarded_for', 'socket', 'trusted_proxy_hops']);
+    assert.deepEqual(plain.data.forwarded_for, ['9.9.9.9', '203.0.113.7']);
+    assert.match(plain.data.socket, /127\.0\.0\.1|::1/);
+    assert.equal(plain.data.client_ip, plain.data.socket, 'no proxy is trusted in the test run');
+    assert.equal(plain.data.trusted_proxy_hops, null);
+
+    await withEnv({ TRUST_PROXY: 'true' }, async () => {
+      const leftmost = await info(admin, { 'X-Forwarded-For': '9.9.9.9, 203.0.113.7' });
+      assert.deepEqual([leftmost.data.client_ip, leftmost.data.trusted_proxy_hops], ['9.9.9.9', null]);
+    });
+    await withEnv({ TRUST_PROXY: 'true', TRUSTED_PROXY_HOPS: '1' }, async () => {
+      const real = await info(admin, { 'X-Forwarded-For': '9.9.9.9, 203.0.113.7' });
+      assert.deepEqual([real.data.client_ip, real.data.trusted_proxy_hops], ['203.0.113.7', 1]);
+    });
+  });
+
+  test('with TRUSTED_PROXY_HOPS set, a forged first entry no longer gets a fresh allowance', () =>
+    withEnv({ TRUST_PROXY: 'true', TRUSTED_PROXY_HOPS: '1' }, async () => {
+      // thirty sign-ups an hour from one network: the proxy appends the same real address each time
+      let last;
+      for (let i = 0; i < 31; i++) {
+        last = await call('POST', '/api/auth/register', {
+          body: { email: `forger.${i}@example.com`, password: 'longenough1', invite_code: 'FP-NOPE-NOPE' },
+          headers: { 'X-Forwarded-For': `198.18.0.${i}, 203.0.113.250` },
+        });
+      }
+      assert.deepEqual(last, { status: 429, data: { error: 'Too many sign-ups from this network. Try again later.' } });
+    }));
+});

@@ -277,7 +277,29 @@ Nothing here needs the site to be public.
    Leave `SUBSCRIPTIONS` unset for now. After the restart the log shows
    `[billing] Stripe keys are for TEST mode.` With any of the four missing it works as
    before and, once `SUBSCRIPTIONS` is on, says which setting is missing.
-10. Set `SUBSCRIPTIONS=on` **on a site that is not yet public**, and run the test list:
+10. **Make the sign-up limits count real addresses (`TRUSTED_PROXY_HOPS`).** Do this before
+    the next step. The limits on sign-ups count the address a request comes from, and
+    behind Render that address is read from a header a visitor can partly forge.
+    - Sign in to the site as the admin, open the browser's developer tools (F12) →
+      Console, and paste:
+
+      ```
+      fetch('/api/functions/requestInfo', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + localStorage.getItem('fitpro_access_token') }, body: '{}' }).then((r) => r.json()).then(console.log)
+      ```
+
+      (or tell Claude and it will read it with you).
+    - Look at `forwarded_for`. Find your own public address in it (search the web for
+      "what is my IP" to know it) and count its position **from the right**: last is 1,
+      second from last is 2.
+    - Render → the service → Environment: add `TRUSTED_PROXY_HOPS` with that number, save,
+      and run the line again: `client_ip` must now show your own address, and
+      `trusted_proxy_hops` the number.
+    - If your address is not in the list at all, stop and say so: the limits would then
+      count everyone as one visitor.
+
+    Not checked from here: what Render's proxy puts in that header. Without this setting
+    the server works as before and warns about it in its log at start-up.
+11. Set `SUBSCRIPTIONS=on` **on a site that is not yet public**, and run the test list:
     - sign up without an invite code: you land on the subscription screen, not in the app;
     - subscribe with Stripe's test card `4242 4242 4242 4242` (any future date, any CVC):
       the app opens within seconds;
@@ -294,7 +316,7 @@ Nothing here needs the site to be public.
       move a test subscription forward; otherwise wait).
     - an account that has an invite code or a free pass is never shown the subscription
       screen.
-11. Going live: repeat 2 to 8 in **live mode** (live prices, the live key `sk_live_...`,
+12. Going live: repeat 2 to 8 in **live mode** (live prices, the live key `sk_live_...`,
     a live webhook endpoint with its own signing secret), replace the four values in
     Render, check the log says `LIVE mode`, and only then set `SUBSCRIPTIONS=on` on the
     public site.
@@ -344,5 +366,5 @@ where Stripe sends people back.
 | 4 | a test sign-up receives its 6-digit email |
 | 5 / 6 | the app opens, signs in, and "Start a run" appears; then the phone test list on the build board |
 | 7 | the map appears in "Free run with map" on Android |
-| 9 | the service log shows `[billing] Stripe keys are for TEST mode.` (or `LIVE mode.`); after `SUBSCRIPTIONS=on`, `<site>/api/auth/options` shows `"subscriptions":true`; after a test purchase, Stripe shows the webhook delivery as succeeded |
+| 9 | `requestInfo` shows your own address as `client_ip`; the service log shows `[billing] Stripe keys are for TEST mode.` (or `LIVE mode.`); after `SUBSCRIPTIONS=on`, `<site>/api/auth/options` shows `"subscriptions":true`; after a test purchase, Stripe shows the webhook delivery as succeeded |
 | 5 / 6, with the site deployed | a friend's invite link tapped in Messages or Notes opens the app on the Friends screen and says whose request was sent (Android: only after `ANDROID_CERT_SHA256` is set and the app reinstalled) |

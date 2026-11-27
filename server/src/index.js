@@ -5,6 +5,7 @@ import { bootstrapAdmin } from './auth/bootstrap.js';
 import { startTrialReminders } from './billing/reminders.js';
 import { loadConfig } from './config.js';
 import { createDb } from './db.js';
+import { trustedProxyHops } from './lib/http.js';
 import { loadRegistry } from './entities/registry.js';
 import { migrate } from './migrate.js';
 
@@ -24,6 +25,12 @@ if (config.production && !config.mail.resendApiKey) {
 
 if ((process.env.ANDROID_CERT_SHA256 || '').trim() && !config.appLinks.androidCertSha256.length) {
   console.warn('[links] ANDROID_CERT_SHA256 is set but holds no SHA-256 fingerprint (64 hex digits, colons optional): invite links will not open the Android app.');
+}
+
+if (process.env.TRUST_PROXY === 'true') {
+  const hops = trustedProxyHops();
+  if (hops === null) console.warn('[proxy] TRUSTED_PROXY_HOPS is not set: rate limits count the first X-Forwarded-For entry, which a client can forge if the proxy appends to that header. Set it before SUBSCRIPTIONS is turned on; docs/launch-checklist.md (step 9) says how to find the value.');
+  else if (hops === 0) console.warn('[proxy] TRUSTED_PROXY_HOPS is not a whole number of 1 or more: X-Forwarded-For is ignored and every request is counted against the proxy address.');
 }
 
 // Payments are never a reason not to start: a missing setting is said once, here.

@@ -111,6 +111,22 @@ They were left out of stage 1 on purpose. None was about Apple, so none waits fo
 5. **The phone's "confirm your email" screen asks for the password** when it is reached
    from sign-in (`475410e`), and sends it with the code.
 
+**One gap is still open, and is the owner's to close on the live site:**
+
+6. **Set `TRUSTED_PROXY_HOPS` before `SUBSCRIPTIONS=on`.** Every per-network limit (sign-ups,
+   sign-in guesses) counts the address `clientIp` returns. Behind Render's proxy that
+   comes from `X-Forwarded-For`, and until now the server took the leftmost entry. If the
+   proxy appends to that header rather than replacing it, a client can put anything it
+   likes on the left and get a fresh allowance with every request, which matters once
+   sign-up is open. With `TRUSTED_PROXY_HOPS=n` the server takes the nth entry from the
+   right (the one our own proxy wrote) and falls back to the socket address when the
+   list is shorter. Unset keeps the old behaviour exactly, so nothing changes until it
+   is set. What Render's proxy sends could not be checked from here: the admin-only
+   function `requestInfo` returns `{ forwarded_for, socket, client_ip, trusted_proxy_hops }`
+   for the request it receives, so the right value can be read off the live site
+   (`docs/launch-checklist.md`, step 9). The server warns in its log at start-up while
+   `TRUST_PROXY=true` and the setting is missing.
+
 **2026-11-27 — The emailed code only confirms the password its owner chose.**
 Registering again with an unverified address replaces the password and mails the
 address a new code, so the owner could be led to confirm an account holding someone
