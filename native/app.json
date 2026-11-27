@@ -12,17 +12,38 @@
       "icon": "./assets/icon.png",
       "supportsTablet": false,
       "bundleIdentifier": "com.vantrarun.app",
+      "associatedDomains": [
+        "applinks:vantrarun.onrender.com"
+      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "location",
           "audio",
           "bluetooth-central"
-        ]
+        ],
+        "NSPhotoLibraryAddUsageDescription": "VantraRun does not save anything to your photo library. It only reads the one photo or video you choose as the background of a post."
       }
     },
     "android": {
       "package": "com.vantrarun.app",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "vantrarun.onrender.com",
+              "path": "/friends"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
       "permissions": [
         "android.permission.health.READ_EXERCISE",
         "android.permission.health.READ_DISTANCE",
@@ -31,7 +52,8 @@
       ],
       "blockedPermissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
       ],
       "backgroundColor": "#0B0B0C",
       "adaptiveIcon": {
@@ -95,7 +117,16 @@
           "image": "./assets/splash.png",
           "imageWidth": 200
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "VantraRun opens your photo library only when you tap \"Choose a photo or video\" to put a background on a post you are making. Only the one you pick is used, and it is uploaded only when you tap Post.",
+          "cameraPermission": "VantraRun uses the camera only when you tap \"Take a photo\" to put a background on a post you are making. The photo is uploaded only when you tap Post.",
+          "microphonePermission": "VantraRun does not record sound. The camera is used for photos only; a video you add to a post is one you choose from your library, and it plays without sound."
+        }
+      ],
+      "expo-video"
     ],
     "extra": {
       "scope": "VantraRun run coach (GPS, zones, cues, directions) plus read-only Apple Health and Health Connect manual import.",

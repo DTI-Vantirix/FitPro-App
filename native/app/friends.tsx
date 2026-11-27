@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Alert, Share, StyleSheet, Text, View } from 'react-native';
-import { Action, Card, ErrorNotice, Field, Heading, IconButton, Label, Notice, SectionHeading } from '../src/components/Ui';
+import { Action, Card, ErrorNotice, Field, Heading, IconButton, Label, Notice, SectionHeading, type IconName } from '../src/components/Ui';
 import { WEB_URL } from '../src/config';
 import { Brand, Gated, Loading, Screen } from '../src/run/ui/Screen';
 import { acceptConnection, findProfileByHandle, listProfiles, loadConnections, removeConnection, sendRequest } from '../src/social/api';
+import { forgetInvite, handledInvites, inviteHandle, inviteMessage, inviteStep, markInviteHandled } from '../src/social/invite-link';
 import { cleanHandle, connectionWith, inviteLink, otherSide, searchProfiles, splitConnections, type Connection, type SocialProfile } from '../src/social/logic';
 import { Avatar, PersonRow, Tag } from '../src/social/ui/Parts';
 import { useSocial, words } from '../src/social/use-social';
@@ -12,9 +13,16 @@ import { colors } from '../src/theme';
 import { type } from '../src/typography';
 
 /** The website's Friends page: your profile and invite link, search by handle or name,
- * requests waiting for you, your friends, and the requests you sent. */
+ * requests waiting for you, your friends, and the requests you sent.
+ *
+ * Opened by an invite link (/friends?add=<handle>, see src/social/invite-link.ts) it also does
+ * what the website does with one: looks the handle up and sends that person a friend request,
+ * once, saying who it is for and what came of it. */
 function Friends() {
   const router = useRouter();
+  // Cleaned here, before anything else sees it: a link can be written by anyone.
+  const linked = inviteHandle(useLocalSearchParams<{ add?: string | string[] }>().add);
+  const [linkNews, setLinkNews] = useState<{ text: string; icon: IconName } | null>(null);
   const { me, loadMe } = useSocial();
   const [connections, setConnections] = useState<Connection[] | null>(null);
   const [people, setPeople] = useState<SocialProfile[]>([]);
@@ -58,6 +66,43 @@ function Friends() {
     }, 400);
     return () => { live = false; clearTimeout(timer); };
   }, [needle, token, people]);
+
+  // The link has arrived where it was going, so the access gate has nothing left to carry.
+  useEffect(() => { forgetInvite(); }, [linked]);
+
+  // An invite link: one lookup and at most one request, to somebody else, however often this
+  // screen is drawn or the same link is opened. inviteStep decides; this only carries it out.
+  useEffect(() => {
+    if (!me) return;
+    const who = { id: me.account.id, handle: me.profile.handle };
+    const first = inviteStep({ add: linked, me: who, connections, handled: handledInvites() });
+    if (first.kind === 'self') { setLinkNews({ text: inviteMessage(first), icon: 'info' }); return; }
+    // Dealt with already: the person is left in the search box, where their state shows.
+    if (first.kind === 'done') { setQuery((typed) => typed || `@${linked}`); return; }
+    if (first.kind !== 'lookup') return;
+    // Marked before anything is awaited, so nothing that happens meanwhile can start a second one.
+    markInviteHandled(who.id, first.handle);
+    const known = connections ?? [];
+    setQuery(`@${first.handle}`);
+    setLinkNews({ text: inviteMessage({ kind: 'looking', handle: first.handle }), icon: 'user-plus' });
+    void (async () => {
+      try {
+        const found = await findProfileByHandle(me.token, first.handle);
+        const next = inviteStep({ add: first.handle, me: who, connections: known, handled: [], found });
+        if (next.kind === 'send') {
+          setLinkNews({ text: inviteMessage({ kind: 'sending', target: next.target }), icon: 'user-plus' });
+          const made = await sendRequest(me.token, { meId: who.id, myProfile: me.profile, target: next.target });
+          setLinkNews({ text: inviteMessage({ kind: 'sent', target: next.target, status: made.status }), icon: 'check' });
+          await load();
+        } else if (next.kind === 'missing' || next.kind === 'already' || next.kind === 'self') {
+          setLinkNews({ text: inviteMessage(next, who.id), icon: 'info' });
+        }
+      } catch (cause) {
+        setLinkNews(null);
+        setError(`The friend request to @${first.handle} was not sent. ${words(cause)} Their handle is in the search box: tap Connect to try again.`);
+      }
+    })();
+  }, [linked, me, connections, load]);
 
   const results = useMemo(() => {
     const found = searchProfiles(people, needle, meId);
@@ -114,6 +159,7 @@ function Friends() {
     <SectionHeading kicker="Your circle" title="Friends"
       subtitle="Find athletes by handle inside VantraRun. Facebook and Instagram don’t hand over a friend list, so the invite link is how you bring people over from there." />
     <ErrorNotice message={error} />
+    {!!linkNews && <Notice icon={linkNews.icon}>{linkNews.text}</Notice>}
     {!!note && <Notice icon="check">{note}</Notice>}
     {!me && <Action label="Try again" secondary onPress={() => { void refresh(); }} busy={refreshing} />}
 
@@ -134,7 +180,7 @@ function Friends() {
           </View>
           <Action label="Share invite link" icon="share-2" compact
             onPress={() => { void Share.share({ message: `Run with me on VantraRun\n${link}` }).catch(() => {}); }} />
-          <Text style={type.small}>The link opens the VantraRun website. Whoever opens it signed in sends you a friend request.</Text>
+          <Text style={type.small}>The link opens VantraRun: the app on a phone that has it, the website otherwise. Whoever opens it signed in sends you a friend request.</Text>
         </>}
       </Card>
 

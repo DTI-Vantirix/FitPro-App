@@ -1,14 +1,17 @@
 /** Pieces shared by the Feed, Friends and Challenges screens, built from the kit in
- * src/components/Ui.tsx: avatar circle, choice pills, a person row, the route trace and
- * the post card. Shapes follow the website's social components. */
-import React, { useMemo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Card, Heading, Icon, Label, type IconName } from '../../components/Ui';
+ * src/components/Ui.tsx: avatar circle, choice pills, a person row, the route trace, the
+ * share card and the post card. Shapes follow the website's social components. */
+import React, { useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { Card, Heading, Icon, Label, Logo, type IconName } from '../../components/Ui';
+import { API_URL } from '../../config';
 import { formatDuration } from '../../run/format';
 import { formatPace } from '../../run/zones';
 import { brand, colors } from '../../theme';
-import { fonts, stat, type } from '../../typography';
+import { display, fonts, stat, type } from '../../typography';
 import { audienceIcon, audienceLabel, initials, timeAgo, traceSegments, type LatLng, type Post } from '../logic';
+import { backgroundOf, cardDate } from '../media';
+import { BackgroundMedia, type MediaSource } from './Media';
 
 export function Avatar({ name, handle, size = 40, solid = false }: { name?: string | null; handle?: string | null; size?: number; solid?: boolean }) {
   return <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }, solid && styles.avatarSolid]}>
@@ -114,15 +117,83 @@ export function RunStatsCard({ distanceMi, avgPaceSec, durationSec, zoneName, ti
   </View>;
 }
 
-export function PostCard({ post, mine, busy, onDelete, onShare, now }: {
+const CARD_W = 1080;
+const CARD_H = 1350;
+
+/** The website's share card (web/src/lib/shareCard.js), drawn with views instead of a canvas:
+ * the photo or video, a flat Ink veil so the numbers stay readable, the logo and date, the
+ * route line, the distance, then pace, time and zone, and the handle and title. Every size is
+ * the website's, scaled from its 1080 x 1350 card to the width this one is given.
+ * With no media, or media that will not load, the card is plain Ink. */
+export function ShareCard({ media, playing = true, onMediaFailed, distanceMi, avgPaceSec, durationSec, zoneName, title, handle, date, points }: {
+  media: MediaSource | null;
+  /** A video plays only while this is true (the card is on screen). */
+  playing?: boolean;
+  onMediaFailed?: () => void;
+  distanceMi: number;
+  avgPaceSec: number;
+  durationSec: number;
+  zoneName: string;
+  title: string;
+  handle: string;
+  /** "27 NOV 2026" */
+  date: string;
+  points: LatLng[];
+}) {
+  const [width, setWidth] = useState(0);
+  const [failedUri, setFailedUri] = useState<string | null>(null);
+  const shown = media && media.uri !== failedUri ? media : null;
+  const s = width / CARD_W;
+  const distance = (Number(distanceMi) || 0).toFixed(2);
+  const columns: [string, string][] = [['Pace', formatPace(avgPaceSec)], ['Time', formatDuration(durationSec)], ['Zone', zoneName || '—']];
+  const small = { fontFamily: fonts.bodyMedium, fontSize: 24 * s, lineHeight: 32 * s };
+  return <View style={styles.shareCard} onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width)}
+    accessible accessibilityRole="image"
+    accessibilityLabel={`${distance} miles. Pace ${formatPace(avgPaceSec)} per mile. Time ${formatDuration(durationSec)}.${zoneName ? ` ${zoneName}.` : ''}${title ? ` ${title}.` : ''}${shown ? ` Over a ${shown.kind}.` : ''}`}>
+    {shown && <BackgroundMedia source={shown} playing={playing} onFailed={() => { setFailedUri(shown.uri); onMediaFailed?.(); }} />}
+    {shown && <View style={styles.veil} pointerEvents="none" />}
+    {width > 0 && <View style={[styles.shareBody, { paddingHorizontal: 72 * s, paddingTop: 62 * s, paddingBottom: 48 * s }]}>
+      <View style={styles.shareRow}>
+        <Logo variant="horizontal" height={52 * s} />
+        <Text style={[small, { color: brand.text2 }]} numberOfLines={1}>{date}</Text>
+      </View>
+      <View style={styles.shareTrace}>
+        <RouteTrace points={points} size={Math.round(480 * s)} />
+      </View>
+      <Text style={[small, { color: brand.steel, letterSpacing: 2 * s }]}>DISTANCE</Text>
+      <View style={[styles.baseline, { gap: 24 * s }]}>
+        <Text style={display(210 * s)} numberOfLines={1}>{distance}</Text>
+        <Text style={[stat(56 * s), { color: brand.volt }]}>MI</Text>
+      </View>
+      <View style={[styles.shareRow, { marginTop: 44 * s }]}>
+        {columns.map(([label, value]) => <View key={label} style={styles.shareColumn}>
+          <Text style={[small, { fontSize: 22 * s, color: brand.steel, letterSpacing: 2 * s }]}>{label.toUpperCase()}</Text>
+          <Text style={stat(52 * s)} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
+        </View>)}
+      </View>
+      <View style={[styles.shareLine, { height: Math.max(StyleSheet.hairlineWidth, 2 * s), marginTop: 40 * s, marginBottom: 22 * s }]} />
+      <View style={[styles.shareRow, { gap: 24 * s }]}>
+        <Text style={[small, { color: brand.text2 }]} numberOfLines={1}>{handle ? `@${handle}` : ''}</Text>
+        <Text style={[small, styles.shareTitle]} numberOfLines={1}>{title.slice(0, 34).toUpperCase()}</Text>
+      </View>
+    </View>}
+  </View>;
+}
+
+export function PostCard({ post, mine, busy, onDelete, onShare, now, visible = true }: {
   post: Post;
   mine: boolean;
   busy: boolean;
   onDelete: () => void;
   onShare: () => void;
   now: number;
+  /** On screen right now: a video background plays only then. */
+  visible?: boolean;
 }) {
   const name = post.authorName || post.authorHandle;
+  // Only media on the VantraRun server is ever shown; anything else is a post without a background.
+  const background = useMemo(() => backgroundOf(post, API_URL), [post.backgroundType, post.backgroundUrl]);
+  const [mediaFailed, setMediaFailed] = useState(false);
   return <Card style={styles.post}>
     <View style={styles.postHeader}>
       <Avatar name={post.authorName} handle={post.authorHandle} size={36} />
@@ -132,8 +203,12 @@ export function PostCard({ post, mine, busy, onDelete, onShare, now }: {
       </View>
       <Tag label={audienceLabel(post.visibility)} icon={audienceIcon(post.visibility)} />
     </View>
-    <RunStatsCard distanceMi={post.distanceMi} avgPaceSec={post.avgPaceSec} durationSec={post.durationSec} zoneName={post.zoneName}
-      title={post.title} points={post.routePoints} />
+    {background.kind !== 'none' && !mediaFailed
+      ? <ShareCard media={background} playing={visible} onMediaFailed={() => setMediaFailed(true)}
+        distanceMi={post.distanceMi} avgPaceSec={post.avgPaceSec} durationSec={post.durationSec} zoneName={post.zoneName}
+        title={post.title} handle={post.authorHandle} date={cardDate(post.createdAt)} points={post.routePoints} />
+      : <RunStatsCard distanceMi={post.distanceMi} avgPaceSec={post.avgPaceSec} durationSec={post.durationSec} zoneName={post.zoneName}
+        title={post.title} points={post.routePoints} />}
     {!!post.caption && <Text style={styles.caption}>{post.caption}</Text>}
     {mine && <View style={styles.postFooter}>
       <Pressable accessibilityRole="button" accessibilityLabel="Share this post" onPress={onShare} hitSlop={8}
@@ -177,6 +252,14 @@ const styles = StyleSheet.create({
   statsLine: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 14, rowGap: 4, marginTop: 4 },
   statsSmall: { ...type.small, color: colors.muted, fontVariant: ['tabular-nums'] },
   statsTitle: { borderTopWidth: 1, borderTopColor: colors.panelBorder, paddingHorizontal: 14, paddingVertical: 8 },
+  shareCard: { width: '100%', aspectRatio: CARD_W / CARD_H, borderRadius: 16, overflow: 'hidden', backgroundColor: brand.ink, borderWidth: 1, borderColor: colors.panelBorder },
+  veil: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(11, 11, 12, 0.72)' },
+  shareBody: { flex: 1 },
+  shareRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  shareTrace: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  shareColumn: { flex: 1 },
+  shareLine: { backgroundColor: brand.line },
+  shareTitle: { flexShrink: 1, textAlign: 'right', color: brand.volt },
   post: { gap: 12 },
   postHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   caption: { ...type.body, color: colors.text },

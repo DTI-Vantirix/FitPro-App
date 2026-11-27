@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useIsFocused, useRouter } from 'expo-router';
 import { ActivityIndicator, Alert, FlatList, RefreshControl, Share, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Action, Card, ErrorNotice, Heading, Label } from '../../src/components/Ui';
@@ -13,6 +13,9 @@ import { colors } from '../../src/theme';
 import { display, type } from '../../src/typography';
 
 type Tab = 'feed' | 'discover';
+
+// A post counts as on screen when most of it is; its video background plays only then.
+const VIEWABILITY = { itemVisiblePercentThreshold: 60 };
 
 /** The Feed tab, as the website's Feed page: "Your circle" is the runner's own posts and
  * their accepted friends' (the server's socialFeed picks them), "Discover" is posts made
@@ -29,6 +32,12 @@ function Feed() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const loadId = useRef(0);
+  // Which posts are on screen, and whether this tab is the one showing: videos stop otherwise.
+  const focused = useIsFocused();
+  const [onScreen, setOnScreen] = useState<ReadonlySet<string>>(() => new Set());
+  const onViewable = useRef(({ viewableItems }: { viewableItems: { key: string; isViewable: boolean }[] }) => {
+    setOnScreen(new Set(viewableItems.flatMap((token) => (token.isViewable && typeof token.key === 'string' ? [token.key] : []))));
+  }).current;
 
   const load = useCallback(async (which: Tab) => {
     const id = loadId.current + 1;
@@ -95,6 +104,8 @@ function Feed() {
     keyExtractor={(item) => item.id}
     initialNumToRender={4}
     windowSize={5}
+    viewabilityConfig={VIEWABILITY}
+    onViewableItemsChanged={onViewable}
     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void refresh(); }} tintColor={colors.accent}
       colors={[colors.accentText]} progressBackgroundColor={colors.accent} />}
     ListHeaderComponent={<>
@@ -131,6 +142,7 @@ function Feed() {
         </Card>}
     ListFooterComponent={shown.length > 0 ? <Label style={local.footer}>Nothing posts unless you create it</Label> : undefined}
     renderItem={({ item }) => <PostCard post={item} now={now} mine={!!me && item.ownerId === me.account.id} busy={deletingId === item.id}
+      visible={focused && onScreen.has(item.id)}
       onDelete={() => confirmDelete(item)} onShare={() => share(item)} />}
   />;
 }
