@@ -137,7 +137,7 @@ export default function RouteBuilder() {
         </p>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-border">
+      <div className="relative overflow-hidden rounded-2xl border border-border">
         <MapView
           points={points}
           position={here}
@@ -149,6 +149,27 @@ export default function RouteBuilder() {
           fitKey={`${points.length}-${fitSeed}`}
           className="h-[44vh] min-h-[260px] w-full"
         />
+        {/* On the map itself, so a wrong tap can be taken back without scrolling. */}
+        <div className="absolute right-3 top-3 z-[500] flex flex-col items-end gap-2">
+          <button
+            type="button"
+            onClick={undo}
+            disabled={!points.length}
+            aria-label="Undo last point"
+            className="flex min-h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-semibold text-foreground transition-colors hover:border-foreground disabled:text-steel"
+          >
+            <RotateCcw className="h-4 w-4" strokeWidth={1.75} /> Undo
+          </button>
+          <button
+            type="button"
+            onClick={clearPoints}
+            disabled={!points.length}
+            aria-label="Clear all points"
+            className="flex min-h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-semibold text-foreground transition-colors hover:border-foreground disabled:text-steel"
+          >
+            <Trash2 className="h-4 w-4" strokeWidth={1.75} /> Clear
+          </button>
+        </div>
       </div>
 
       <div className="panel space-y-4 p-5">
@@ -193,22 +214,6 @@ export default function RouteBuilder() {
             className="flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
           >
             <Crosshair className="h-3.5 w-3.5" /> Add my location
-          </button>
-          <button
-            type="button"
-            onClick={undo}
-            disabled={!points.length}
-            className="flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-          >
-            <RotateCcw className="h-3.5 w-3.5" /> Undo
-          </button>
-          <button
-            type="button"
-            onClick={clearPoints}
-            disabled={!points.length}
-            className="flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-40"
-          >
-            <Trash2 className="h-3.5 w-3.5" /> Clear
           </button>
         </div>
 
