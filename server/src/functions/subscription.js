@@ -111,7 +111,9 @@ async function checkout({ db, user, body, config, stripe }) {
   const result = await db.tx(async (tx) => {
     await lockUser(tx, user.id);
     let customerId;
+    let known;
     try {
+      [{ stripe_customer_id: known }] = await tx.query('select stripe_customer_id from users where id = $1', [user.id]);
       customerId = await ensureCustomer(tx, stripe, user);
     } catch (error) {
       if (error instanceof StripeError) return { error };
@@ -120,8 +122,11 @@ async function checkout({ db, user, body, config, stripe }) {
     try {
       // The person may have paid a moment ago in another tab, with the webhook still on its
       // way: ask Stripe before selling a second subscription. This also lets them in.
-      await syncCustomer(tx, stripe, config, customerId);
-      if (await stripeRowOf(tx, user.id)) return { subscribed: true };
+      // (A customer made a moment ago has nothing to ask about.)
+      if (known) {
+        await syncCustomer(tx, stripe, config, customerId);
+        if (await stripeRowOf(tx, user.id)) return { subscribed: true };
+      }
 
       for (const open of await stripe.listOpenCheckoutSessions(customerId)) {
         await stripe.expireCheckoutSession(open.id);

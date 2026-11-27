@@ -3,6 +3,7 @@ import path from 'node:path';
 import { registerAuthRoutes } from './auth/routes.js';
 import { authenticate } from './auth/users.js';
 import { createStripe } from './billing/stripe.js';
+import { registerBillingRoutes } from './billing/webhook.js';
 import { registerEntityRoutes } from './entities/routes.js';
 import { recordServerError, registerErrorRoutes } from './errors.js';
 import { createEntityService } from './entities/service.js';
@@ -50,6 +51,7 @@ export function createApp({ db, config, registry, stripe = createStripe(config) 
   registerAuthRoutes(router);
   registerEntityRoutes(router, entities);
   registerFunctionRoutes(router);
+  registerBillingRoutes(router);
   registerUploadRoutes(router);
   registerErrorRoutes(router);
   registerWellKnownRoutes(router);
@@ -126,7 +128,7 @@ export function createApp({ db, config, registry, stripe = createStripe(config) 
         db,
         config,
         stripe,
-        body: wantsJson ? await readJson(req) : {},
+        body: wantsJson && !match.raw ? await readJson(req) : {},
         user: await authenticate(req, db, config),
       };
 

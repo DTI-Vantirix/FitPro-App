@@ -57,7 +57,9 @@ export class Router {
     this.routes = [];
   }
 
-  add(method, pattern, handler) {
+  // `raw`: the handler reads the request body itself (a webhook checks a signature over
+  // the exact bytes), so the app must not read or parse it first.
+  add(method, pattern, handler, { raw = false } = {}) {
     const keys = [];
     const source = pattern
       .split('/')
@@ -69,7 +71,7 @@ export class Router {
         return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       })
       .join('/');
-    this.routes.push({ method, regex: new RegExp(`^${source}/?$`), keys, handler });
+    this.routes.push({ method, regex: new RegExp(`^${source}/?$`), keys, handler, raw });
     return this;
   }
 
@@ -84,7 +86,7 @@ export class Router {
       route.keys.forEach((key, i) => {
         params[key] = decodeURIComponent(m[i + 1]);
       });
-      return { handler: route.handler, params };
+      return { handler: route.handler, params, raw: route.raw };
     }
     return pathMatched ? { methodNotAllowed: true } : null;
   }
