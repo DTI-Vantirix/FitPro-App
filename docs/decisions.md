@@ -41,6 +41,43 @@ abandoned sign-up doesn't use it up. Accounts that already existed keep working 
 can still redeem a code after signing in. Release is invite-only testing: TestFlight
 internal (testers added to the owner's team) and Play internal testing.
 
+**2026-11-27 — One access check, enforced on the server.** Stage 1 of subscriptions
+(`docs/superpowers/specs/2026-11-27-subscriptions-design.md`). Before this, only
+`ingestActivity` refused an account without an invite code; every other call relied on
+the screens hiding things. Now:
+
+- Access lives in one table, `entitlements`, with a row per source (invite code, free
+  pass from the owner, and later Stripe and Apple), and one function decides
+  (`server/src/access.js`). Admins pass by role and need no row.
+- Every product call (entities, uploads, every function except `inviteAccess`) answers
+  `403 "Subscribe or enter an invite code to use VantraRun."` without access. The
+  account itself stays reachable: sign in and out, `/api/auth/me`, password change and
+  reset, account deletion (the app stores require it for people who have not paid),
+  redeeming a code and reading the access status.
+- `ingestActivity`'s refusal keeps its 403 status but its message changed from
+  `"Redeem your invite code before syncing activities."`. The phone sorts replies by
+  status only (`native/src/run/queue.ts`): a 403 keeps the run queued for a later retry,
+  so installed builds are not affected.
+- A paid period that has ended still counts for 3 days (`GRACE_DAYS`), so a late
+  renewal notice never locks out a payer. Nothing writes paid rows yet.
+- Existing testers needed no action: the migration copied redeemed invite codes over.
+- The owner can see everyone's access and why, and give or take back a free pass by
+  email (Settings → Who has access, the `adminAccess` function). A free pass can only be
+  given to an email that already has an account; for anyone else, send an invite code.
+- `access_grants` is kept and still written (the invite-code screen counts athletes
+  from it) but is history only. Taking back an invite pass does not free the code.
+- `trial_used_at` was added to `users` for stage 2 and is not read or written yet. It
+  is not in `User.json`: that file lists what a client may write, and this is not one.
+
+**2026-11-27 — The `SUBSCRIPTIONS` switch, off by default.** `SUBSCRIPTIONS=on` makes the
+invite code optional at sign-up: an account made without one is verified, can sign in,
+and has no access until it redeems a code (or, from stage 2, subscribes). Anything
+other than exactly `on` is off, and off behaves as before, with the same messages.
+`GET /api/auth/options` and the `inviteAccess` status report the switch so the screens
+can follow it. It must stay off on the live site until payments are built and tested:
+turned on today it would let anyone create an account that can do nothing, with no way
+to pay. The website's "Invite only" gate is unchanged; the paywall is stage 2.
+
 **2026-11-25 — Gym hidden for now.** The owner wants the first release to be a
 run coach, with gym logging built back up later. The website no longer shows the
 gym log, gym stops on routes and runs, workout posts or the `workouts` challenge
@@ -102,6 +139,7 @@ anyone who had accepted the earlier text is asked again.
    on the fake adapter.) Deletion/"unsync" of synced activities?
 4. ~~Should the **server** also require an accepted invite for `ingestActivity`?~~
    Decided 2026-11-25: yes. `ingestActivity` answers 403 without an accepted code.
+   Extended 2026-11-27 to every product call (see "One access check" above).
 5. Background sync: in scope? Needs its own design and permission model.
 6. Health-data retention, export, and the privacy policy wording.
 7. Hosting: which provider and region.

@@ -62,6 +62,13 @@ also serves the website) and one Postgres database, both in Virginia.
    | `ADMIN_EMAIL` | your own email address |
    | `ADMIN_PASSWORD` | a new password of **12 or more characters** (shorter ones are ignored); you will remove it in step 4 |
 
+   One setting is deliberately **not** asked for: `SUBSCRIPTIONS`. Leave it unset. Unset
+   (or `off`) keeps sign-up invite-only, which is how testing runs. Setting it to `on`
+   lets anyone create an account without a code, and such an account can do nothing
+   until payments exist, so do not turn it on until the subscription stages are built
+   and tested. To check what a running site is using, open
+   `<site address>/api/auth/options`: it should show `"subscriptions":false`.
+
 4. Review the cost Render shows and apply. The plans in the file are the smallest paid
    ones: about **$13 a month** at the prices listed on 2026-11-25 (web $7, database $6,
    1 GB disk $0.25). Free plans are not used because free services sleep and the free
@@ -89,6 +96,10 @@ after it is created; if there is none, say so and a nightly export can be added.
    a settings page.)
 3. Settings → change your password if you like, then create invite codes (Settings →
    Invite codes), one per tester.
+4. Settings → **Who has access** lists every account and why it can or cannot use the
+   app ("Admin", "Invite code", "Granted by you", "No access"). You can give free access
+   to someone who already has an account by typing their email, and take a free pass
+   back with "Remove". Someone with no account yet needs an invite code instead.
 4. Settings → Error reports should say "No errors recorded". This is where crashes from
    the phone app and unexpected server errors appear.
 5. Create a test account in a private browser window with one of the codes, to confirm

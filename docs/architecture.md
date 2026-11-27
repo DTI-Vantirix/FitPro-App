@@ -54,7 +54,10 @@ little to learn or upgrade.
   `docs/reference/base44-functions/`, plus `routeDirections` (turn-by-turn
   directions for a saved route, from the same Valhalla router). Behaviour is the same; they now use SQL
   directly, and the invite claim and the health-data upsert are atomic.
-  `adminClientErrors` lists the error reports below.
+  `adminClientErrors` lists the error reports below. `adminAccess` lists who has
+  access and gives or takes back free passes (see "Who may use the product").
+- `src/access.js`: the one place that answers "may this account use the product, and
+  why". Everything else asks it.
 - `src/storage.js`: where uploads live. Local disk, or an S3-compatible bucket when the
   `S3_*` settings are present (requests signed here, no SDK).
 - `src/errors.js`: error reports kept in our own table (`client_errors`): crashes the
@@ -70,6 +73,47 @@ little to learn or upgrade.
 - `migrations/`: numbered SQL files, applied in order by `npm run migrate` (and on
   API start unless `MIGRATE_ON_START=false`).
 
+### Who may use the product
+
+Having an account is not the same as having access. An account has access when its
+role is admin, or it has a live row in `entitlements` (migration 005). There is one row
+per source of access per account:
+
+| `source` | written by | today |
+| --- | --- | --- |
+| `invite` | redeeming an invite code, at sign-up or afterwards | in use |
+| `admin` | the owner granting free access by email (Settings → Who has access) | in use |
+| `stripe`, `apple` | a paid subscription | not built yet (stages 2 and 3); the table and the check already allow for them |
+
+A row is live when its `status` is `trial`, `active` or `grace` and it is not more than
+three days past `expires_at` (`GRACE_DAYS`; free passes have no expiry). The three days
+are there so a renewal notice that arrives late never locks out someone who paid. With
+more than one live row, access holds while any of them is good; the paid one is the
+one reported. Admins need no row.
+
+`src/access.js` holds all of it: `accessOf` (the full answer), `hasAccess`,
+`requireAccess` (for routes) and `grantFree`. The server enforces it, not only the screens:
+
+- **Closed without access** (`403 "Subscribe or enter an invite code to use VantraRun."`):
+  everything under `/api/entities/*`, `POST /api/uploads`, and every function except
+  `inviteAccess`.
+- **Open to any signed-in account**: everything under `/api/auth/*` (the account, sign-out,
+  password change, deletion), the `inviteAccess` function (access status and redeeming
+  a code) and `POST /api/client-errors`.
+- **Open to everyone**: sign-in and sign-up, password reset, `/api/auth/options`,
+  `/api/health`, the two `/.well-known/` files, uploaded media by its address, and the
+  website's own pages (the privacy policy among them).
+
+`access_grants` (one row per redeemed invite code) is still written, because the
+invite-code screen reads it, but it no longer decides anything. Migration 005 copied
+every existing row into `entitlements`, so testers kept access through the change.
+Removing someone's invite pass revokes the entitlement and leaves the `access_grants`
+row and the used code as history.
+
+The `SUBSCRIPTIONS` setting (off by default) only changes sign-up: off, an invite code
+is required, as before; on, it is optional, and an account made without one is verified
+but has no access. Payments are not built, so it stays off.
+
 ### Access rules
 
 Each entity's `rls` block decides who may read, create, update and delete its
@@ -84,7 +128,7 @@ records, e.g. "the owner or an admin" for runs, "anyone signed in" for challenge
   the server and ignored if a client sends them.
 
 Backend functions run with full access, like Base44's service role, and do their
-own checks (`adminInviteCodes` is admin-only, `challengeBoard` only returns the
+own checks (`adminInviteCodes` and `adminAccess` are admin-only, `challengeBoard` only returns the
 one metric, `socialFeed` only friends' non-private posts).
 
 ### Database
