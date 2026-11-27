@@ -2604,3 +2604,111 @@ describe('when the webhook is late', () => {
     assert.equal((await stripeRows(zed))[0].cancel_at_period_end, true, 'nothing changed here');
   });
 });
+
+describe('your data: an account with a subscription', () => {
+  let store;
+  const NOT_DELETED = {
+    status: 502,
+    data: { error: 'We could not cancel your subscription, so your account was not deleted. Try again in a few minutes, or email info@dtisys.com.' },
+  };
+  const remove = (app, who, password = 'correct-horse-1') =>
+    call('DELETE', '/api/auth/me', { token: who.token, body: { password }, origin: app.origin });
+  const login = (email) => call('POST', '/api/auth/login', { body: { email, password: 'correct-horse-1' } });
+
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('deleting an account deletes its Stripe customer first', async () => {
+    const del = await legacyUser('del.deletes@example.com');
+    const sub = await store.subscribe(del);
+    await store.subscription(del, { action: 'refresh' });
+    const customer = (await userRow(del.user.id)).stripe_customer_id;
+    // the customer is deleted while the account still exists: the fake looks when it is called
+    let accountThere = null;
+    const real = store.fake.deleteCustomer;
+    store.fake.deleteCustomer = async (id) => {
+      accountThere = Boolean(await userRow(del.user.id));
+      return real(id);
+    };
+    try {
+      assert.deepEqual(await remove(store, del), { status: 200, data: { ok: true, deleted: true } });
+    } finally {
+      store.fake.deleteCustomer = real;
+    }
+    assert.equal(accountThere, true);
+    assert.deepEqual(store.fake.callsTo('deleteCustomer').at(-1).args, { customerId: customer });
+    assert.equal(store.fake.state.customers.get(customer).deleted, true);
+    assert.equal(store.fake.state.subscriptions.get(sub.id).status, 'canceled', 'so nothing is billed again');
+    assert.equal(await userRow(del.user.id), undefined);
+    assert.equal((await entitlementsOf(del.user.id)).length, 0);
+    assert.equal((await login('del.deletes@example.com')).status, 401);
+  });
+
+  test('the account is kept when Stripe cannot be reached', async () => {
+    const kay = await legacyUser('kay.kept@example.com');
+    const sub = await store.subscribe(kay);
+    await store.subscription(kay, { action: 'refresh' });
+    store.fake.failNext('deleteCustomer');
+    assert.deepEqual(await remove(store, kay), NOT_DELETED);
+    assert.ok(await userRow(kay.user.id));
+    assert.equal((await login('kay.kept@example.com')).status, 200, 'the person can still sign in');
+    assert.equal((await store.runs(kay)).status, 200, 'and still has what they pay for');
+    assert.equal(store.fake.state.subscriptions.get(sub.id).status, 'trialing');
+
+    assert.deepEqual(await remove(store, kay), { status: 200, data: { ok: true, deleted: true } }, 'trying again succeeds');
+    assert.equal(await userRow(kay.user.id), undefined);
+    assert.equal(store.fake.state.subscriptions.get(sub.id).status, 'canceled');
+  });
+
+  test('the account is kept when the keys have been removed', async () => {
+    const ken = await legacyUser('ken.keyless@example.com');
+    await store.subscribe(ken);
+    const calls = store.fake.callsTo('deleteCustomer').length;
+    // the main app has no Stripe settings at all
+    assert.deepEqual(await call('DELETE', '/api/auth/me', { token: ken.token, body: { password: 'correct-horse-1' } }), NOT_DELETED);
+    assert.ok(await userRow(ken.user.id));
+    assert.equal(store.fake.callsTo('deleteCustomer').length, calls);
+    // with the switch off but the keys present, it works
+    const keysOnly = await startApp({ stripe: TEST_STRIPE }, { stripe: store.fake });
+    try {
+      assert.equal((await remove(keysOnly, ken)).status, 200);
+    } finally {
+      await keysOnly.close();
+    }
+    assert.equal(await userRow(ken.user.id), undefined);
+  });
+
+  test('a wrong password never reaches Stripe', async () => {
+    const wyn = await legacyUser('wyn.wrong@example.com');
+    await store.subscribe(wyn);
+    const calls = store.fake.callsTo('deleteCustomer').length;
+    assert.deepEqual(await remove(store, wyn, 'not-the-password'), { status: 401, data: { error: 'Enter your current password to delete your account.' } });
+    assert.equal(store.fake.callsTo('deleteCustomer').length, calls);
+    assert.ok(await userRow(wyn.user.id));
+  });
+
+  test('an account that never subscribed is deleted with no Stripe call', async () => {
+    const nan = await legacyUser('nan.never@example.com');
+    const calls = store.fake.calls.length;
+    assert.deepEqual(await remove(store, nan), { status: 200, data: { ok: true, deleted: true } });
+    assert.equal(store.fake.calls.length, calls);
+    assert.equal(await userRow(nan.user.id), undefined);
+  });
+
+  test('the cancellation notice that follows a deleted account is accepted', async () => {
+    const bye = await legacyUser('bye.bye@example.com');
+    const sub = await store.subscribe(bye);
+    const customer = (await userRow(bye.user.id)).stripe_customer_id;
+    assert.equal((await remove(store, bye)).status, 200);
+    const calls = store.fake.callsTo('listSubscriptions').length;
+    const { body, header } = signedEvent(TEST_STRIPE.webhookSecret, { type: 'customer.subscription.deleted', object: { id: sub.id, customer, status: 'canceled' } });
+    const res = await store.on('POST', '/api/stripe/webhook', { raw: body, headers: { 'Content-Type': 'application/json', 'Stripe-Signature': header } });
+    assert.deepEqual(res, { status: 200, data: { received: true } });
+    assert.equal(store.fake.callsTo('listSubscriptions').length, calls);
+    assert.equal((await db.query(`select id from entitlements where external_id = $1`, [sub.id])).length, 0);
+  });
+});

@@ -1,3 +1,4 @@
+import { StripeError } from '../billing/stripe.js';
 import { claimInvite, normalizeCode } from '../functions/inviteAccess.js';
 import { HttpError, clientIp, rateLimiter } from '../lib/http.js';
 import { sendMail } from '../lib/mail.js';
@@ -202,6 +203,20 @@ export function registerAuthRoutes(router) {
     const user = requireUser(ctx);
     if (user.password_hash && !(await verifyPassword(String(ctx.body.password || ''), user.password_hash))) {
       throw new HttpError(401, 'Enter your current password to delete your account.');
+    }
+    // Nobody is billed after their account is gone: the customer is deleted at Stripe
+    // first, which cancels its subscriptions at once. If that cannot be done (Stripe is
+    // unreachable, or the keys have been taken out), the account stays so the person can
+    // try again; deleting it would leave a subscription nobody can reach.
+    if (user.stripe_customer_id) {
+      try {
+        if (!ctx.config.stripe?.ready) throw new StripeError(503, 'Stripe is not set up on this server.');
+        await ctx.stripe.deleteCustomer(user.stripe_customer_id);
+      } catch (error) {
+        if (!(error instanceof StripeError)) throw error;
+        console.error(`[billing] account deletion stopped: ${error.message}`);
+        throw new HttpError(502, 'We could not cancel your subscription, so your account was not deleted. Try again in a few minutes, or email info@dtisys.com.');
+      }
     }
     await ctx.db.query('delete from users where id = $1 returning id', [user.id]);
     return { ok: true, deleted: true };
