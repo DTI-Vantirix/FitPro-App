@@ -18,19 +18,14 @@ import { serialised } from '../src/billing/queue.js';
 import { syncOverdue } from '../src/billing/sync.js';
 import { loadRegistry } from '../src/entities/registry.js';
 import { migrate } from '../src/migrate.js';
-import { createPsqlDb } from './psql-db.js';
-import { TEST_PRICES, TEST_STRIPE, createFakeStripe, daysFromNowUnix, signedEvent } from './stripe-fake.js';
+import { chooseDb } from './open-db.js';
+import { TEST_PRICES, TEST_STRIPE, createFakeStripe, daysFromNowUnix, signBody, signedEvent } from './stripe-fake.js';
 
 const DB_URL = process.env.TEST_DATABASE_URL || 'postgres://fitpro:fitpro@localhost:5432/fitpro_test';
 
-async function openDb() {
-  try {
-    const { createDb } = await import('../src/db.js');
-    return createDb(DB_URL);
-  } catch {
-    return createPsqlDb(DB_URL); // `pg` not installed: fall back to the psql CLI
-  }
-}
+// The real driver; without `pg` installed, a psql stand-in on a developer machine and a
+// loud failure in CI (test/open-db.js).
+const openDb = () => chooseDb({ url: DB_URL });
 
 let db;
 let server;
@@ -2135,8 +2130,17 @@ describe('Stripe webhook', () => {
     // a correct signature, but over a different body
     const other = signedEvent(TEST_STRIPE.webhookSecret, { type: 'invoice.paid', object: { customer: 'cus_other' } });
     assert.deepEqual(await deliver(event, { header: other.header }), INVALID);
-    // and a body that is not JSON is refused on its signature, before anything is read from it
+    // a body that does not match its signature is refused on the signature, before anything is read from it
     assert.deepEqual(await deliver(event, { body: 'not json' }), INVALID);
+    // and one that is signed correctly but is not JSON is refused as not being an event
+    const junk = 'this is not JSON {';
+    assert.deepEqual(await deliver(event, { body: junk, header: signBody(TEST_STRIPE.webhookSecret, junk) }), {
+      status: 400, data: { error: 'That is not a Stripe event.' },
+    });
+    const noId = JSON.stringify({ type: 'invoice.paid', data: { object: {} } });
+    assert.deepEqual(await deliver(event, { body: noId, header: signBody(TEST_STRIPE.webhookSecret, noId) }), {
+      status: 400, data: { error: 'That is not a Stripe event.' },
+    });
 
     assert.equal((await stripeRows(uma)).length, 0);
     assert.equal(await eventCount(), before);
