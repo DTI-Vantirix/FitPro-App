@@ -41,6 +41,15 @@ module.exports = {
   				DEFAULT: 'hsl(var(--destructive))',
   				foreground: 'hsl(var(--destructive-foreground))'
   			},
+  			// VantraRun brand colours, by name.
+  			volt: '#C6FF00',
+  			ink: '#0B0B0C',
+  			graphite: '#1C1C1F',
+  			line: '#2A2A2F',
+  			steel: '#8A8A93',
+  			'text-2': '#A6A6AE',
+  			chalk: '#F5F5F2',
+  			danger: '#FF4D4D',
   			border: 'hsl(var(--border))',
   			input: 'hsl(var(--input))',
   			ring: 'hsl(var(--ring))',
@@ -63,11 +72,14 @@ module.exports = {
   			}
   		},
   		fontFamily: {
-  			heading: ['var(--font-heading)'],
-  			body: ['var(--font-body)'],
-  			display: ['var(--font-display)'],
-  			mono: ['var(--font-mono)']
+  			display: ['"Barlow Condensed"', '"Arial Narrow"', 'sans-serif'],
+  			heading: ['"Barlow Condensed"', '"Arial Narrow"', 'sans-serif'],
+  			sans: ['Inter', 'system-ui', '-apple-system', '"Segoe UI"', 'sans-serif'],
+  			body: ['Inter', 'system-ui', '-apple-system', '"Segoe UI"', 'sans-serif'],
+  			// The brand has no monospace face: figures use Inter.
+  			mono: ['Inter', 'system-ui', '-apple-system', '"Segoe UI"', 'sans-serif']
   		},
+  		letterSpacing: { label: '0.14em', heading: '0.06em' },
   		keyframes: {
   			'accordion-down': {
   				from: {

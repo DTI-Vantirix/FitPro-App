@@ -87,7 +87,7 @@ export default function ChallengeDetail() {
         </Link>
         <div className="min-w-0">
           <p className="eyebrow">Challenge group</p>
-          <h1 className="truncate font-heading text-lg font-bold leading-tight">
+          <h1 className="truncate font-heading text-lg leading-tight">
             {challenge?.name || 'Loading…'}
           </h1>
         </div>
@@ -132,7 +132,7 @@ export default function ChallengeDetail() {
                   type="button"
                   onClick={leave}
                   disabled={busy}
-                  className="flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3.5 py-2 font-heading text-xs font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-40"
+                  className="flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-40"
                 >
                   <LogOut className="h-3.5 w-3.5" /> Leave
                 </button>
@@ -141,7 +141,7 @@ export default function ChallengeDetail() {
                   type="button"
                   onClick={join}
                   disabled={busy}
-                  className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-4 py-2.5 font-heading text-xs font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
+                  className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
                 >
                   <Check className="h-3.5 w-3.5" /> {busy ? 'Joining…' : 'Join'}
                 </button>
@@ -151,10 +151,10 @@ export default function ChallengeDetail() {
 
           <section className="panel space-y-3 p-5">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="flex items-center gap-1.5 font-heading text-base font-bold">
+              <h2 className="flex items-center gap-1.5 font-heading text-base">
                 <Users className="h-4 w-4 text-primary" /> Leaderboard
               </h2>
-              <span className="num text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <span className="vr-label text-[10px]">
                 {metric.label}
               </span>
             </div>

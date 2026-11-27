@@ -339,7 +339,7 @@ const styles = StyleSheet.create({
   description: { color: colors.muted, fontSize: 13, lineHeight: 20 },
   count: { color: colors.text, fontSize: 13, fontWeight: '700', marginTop: 6 },
   choice: { borderWidth: 1, borderColor: colors.panelBorder, borderRadius: 10, padding: 12, flexDirection: 'row', gap: 12 },
-  choiceSelected: { borderColor: colors.accent, backgroundColor: '#19352F' },
+  choiceSelected: { borderColor: colors.accent, backgroundColor: colors.selectedBg },
   pressed: { opacity: 0.6 },
   choiceText: { flex: 1, gap: 5 },
   check: { color: colors.accent, fontSize: 25, marginTop: 1 },

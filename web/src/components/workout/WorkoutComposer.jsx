@@ -5,7 +5,7 @@ import { EXERCISES, muscleFor } from '@/lib/exercises';
 import { api } from '@/api/client';
 
 const inputClass =
-  'w-full rounded-lg border border-border bg-secondary/60 px-2.5 py-2 text-sm outline-none focus:border-primary/60 num';
+  'w-full rounded-lg border border-border bg-secondary/60 px-2.5 py-2 text-sm focus:border-primary num';
 
 export default function WorkoutComposer({ open, onOpenChange, onSaved }) {
   const [name, setName] = useState('');
@@ -98,7 +98,7 @@ export default function WorkoutComposer({ open, onOpenChange, onSaved }) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Push A — chest & shoulders"
-                className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none focus:border-primary/60"
+                className="mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm focus:border-primary"
               />
             </label>
             <label className="block">
@@ -107,7 +107,7 @@ export default function WorkoutComposer({ open, onOpenChange, onSaved }) {
                 value={duration}
                 onChange={(e) => setDuration(e.target.value)}
                 inputMode="numeric"
-                className="num mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none focus:border-primary/60"
+                className="num mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm focus:border-primary"
               />
             </label>
           </div>
@@ -116,7 +116,7 @@ export default function WorkoutComposer({ open, onOpenChange, onSaved }) {
             <select
               value={pick}
               onChange={(e) => setPick(e.target.value)}
-              className="w-full rounded-xl border border-border bg-secondary/60 px-3 py-2.5 text-sm outline-none focus:border-primary/60"
+              className="w-full rounded-xl border border-border bg-secondary/60 px-3 py-2.5 text-sm focus:border-primary"
             >
               {EXERCISES.map((ex) => (
                 <option key={ex.name} value={ex.name} className="bg-card">
@@ -127,7 +127,7 @@ export default function WorkoutComposer({ open, onOpenChange, onSaved }) {
             <button
               type="button"
               onClick={addExercise}
-              className="flex shrink-0 items-center gap-1 rounded-xl bg-primary px-3.5 font-heading text-xs font-semibold text-primary-foreground transition hover:brightness-95"
+              className="flex shrink-0 items-center gap-1 rounded-xl bg-primary px-3.5 font-heading text-xs text-primary-foreground transition hover:brightness-95"
             >
               <Plus className="h-3.5 w-3.5" /> Add
             </button>
@@ -139,7 +139,7 @@ export default function WorkoutComposer({ open, onOpenChange, onSaved }) {
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold leading-tight">{ex.name}</p>
-                    <p className="num text-[9px] uppercase tracking-[0.14em] text-muted-foreground">{ex.muscle}</p>
+                    <p className="vr-label text-[9px]">{ex.muscle}</p>
                   </div>
                   <button
                     type="button"
@@ -197,7 +197,7 @@ export default function WorkoutComposer({ open, onOpenChange, onSaved }) {
             type="button"
             onClick={save}
             disabled={saving}
-            className="w-full rounded-full bg-primary py-3.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-50"
+            className="w-full rounded-full bg-primary py-3.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save session'}
           </button>

@@ -6,10 +6,10 @@ export default function RecentActivity({ items = [] }) {
   return (
     <section className="panel p-5 sm:p-6">
       <div className="flex items-center justify-between">
-        <h2 className="font-heading text-base font-bold">Recent activity</h2>
+        <h2 className="font-heading text-base">Recent activity</h2>
         <Link
           to="/analytics"
-          className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-primary"
+          className="flex items-center gap-1 vr-label text-[10px] transition-colors hover:text-primary"
         >
           All <ArrowRight className="h-3 w-3" />
         </Link>
@@ -29,13 +29,13 @@ export default function RecentActivity({ items = [] }) {
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium leading-tight">{item.title}</p>
-                  <p className="mt-0.5 truncate font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                  <p className="mt-0.5 truncate vr-label text-[10px]">
                     {relativeDay(item.date)} · {item.meta}
                   </p>
                 </div>
                 <div className="shrink-0 text-right">
                   <p className="num text-sm text-foreground">{item.value}</p>
-                  <p className="num text-[10px] uppercase tracking-[0.1em] text-muted-foreground">{item.unit}</p>
+                  <p className="vr-label text-[10px]">{item.unit}</p>
                 </div>
               </li>
             );

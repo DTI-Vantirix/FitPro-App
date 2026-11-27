@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CARD_H, CARD_W, drawCard, loadBackground } from '@/lib/shareCard';
+import { CARD_H, CARD_W, cardAssetsReady, drawCard, loadBackground } from '@/lib/shareCard';
 
 // Single source of truth for the generated post: the same canvas is the preview
 // and the file that gets saved or shared.
@@ -18,13 +18,9 @@ export default function ShareCardCanvas({
 
   useEffect(() => {
     let alive = true;
-    if (document.fonts?.ready) {
-      document.fonts.ready.then(() => {
-        if (alive) setFontsReady(true);
-      });
-    } else {
-      setFontsReady(true);
-    }
+    cardAssetsReady.then(() => {
+      if (alive) setFontsReady(true);
+    });
     return () => {
       alive = false;
     };
@@ -63,7 +59,7 @@ export default function ShareCardCanvas({
       ref={ref}
       width={CARD_W}
       height={CARD_H}
-      className="h-auto w-full rounded-2xl bg-[#0C0C0B]"
+      className="h-auto w-full rounded-2xl bg-background"
     />
   );
 }

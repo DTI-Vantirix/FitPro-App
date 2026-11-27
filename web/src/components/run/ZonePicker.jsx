@@ -1,4 +1,4 @@
-import { zoneRangeLabel } from '@/lib/zones';
+import { zoneColor, zoneRangeLabel } from '@/lib/zones';
 import { cn } from '@/lib/utils';
 
 export default function ZonePicker({ zones = [], value, onChange, label = 'Target zone' }) {
@@ -21,9 +21,9 @@ export default function ZonePicker({ zones = [], value, onChange, label = 'Targe
                   : 'border-border text-muted-foreground hover:border-border/80 hover:text-foreground'
               )}
             >
-              <span className="h-2 w-2 rounded-full" style={{ background: zone.color || '#C9F84A' }} />
+              <span className="h-2 w-2 rounded-full" style={{ background: zoneColor(zone) }} />
               <span>{zone.name}</span>
-              <span className="num text-[10px] opacity-60">{zoneRangeLabel(zone)}</span>
+              <span className="tabular-nums text-[10px] opacity-60">{zoneRangeLabel(zone)}</span>
             </button>
           );
         })}

@@ -4,7 +4,7 @@ import { Check, KeyRound, LogOut, Mail } from 'lucide-react';
 import { api } from '@/api/client';
 
 const field =
-  'mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary/60';
+  'mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm transition-colors placeholder:text-muted-foreground/70 focus:border-primary';
 
 export default function AccountCard() {
   const [user, setUser] = useState(null);
@@ -53,7 +53,7 @@ export default function AccountCard() {
   return (
     <section className="panel space-y-4 p-5">
       <div>
-        <h2 className="font-heading text-base font-bold">Login &amp; password</h2>
+        <h2 className="font-heading text-base">Login &amp; password</h2>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
           The email you sign in with, and the password for it.
         </p>
@@ -120,7 +120,7 @@ export default function AccountCard() {
         <button
           type="submit"
           disabled={busy || !valid || !user}
-          className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
+          className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
         >
           <KeyRound className="h-4 w-4" />
           {busy ? 'Updating…' : 'Change password'}

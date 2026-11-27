@@ -31,7 +31,7 @@ export default function RunSummary({ run }) {
         <Check className="h-5 w-5" strokeWidth={2.5} />
         <p className="eyebrow !text-primary">Run saved</p>
       </div>
-      <h1 className="font-heading text-3xl font-extrabold">{run.route_name}</h1>
+      <h1 className="font-heading text-3xl">{run.route_name}</h1>
 
       {run.points?.length > 1 && (
         <div className="overflow-hidden rounded-2xl border border-border">
@@ -79,7 +79,7 @@ export default function RunSummary({ run }) {
           {savedRoute ? (
             <Link
               to="/routes"
-              className="mt-3 flex items-center justify-center gap-2 rounded-full border border-primary/40 py-3 font-heading text-sm font-medium text-primary"
+              className="mt-3 flex items-center justify-center gap-2 rounded-full border border-primary/40 py-3 text-sm font-medium text-primary"
             >
               <Check className="h-4 w-4" /> Saved — see your routes
             </Link>
@@ -89,13 +89,13 @@ export default function RunSummary({ run }) {
                 value={routeName}
                 onChange={(e) => setRouteName(e.target.value)}
                 placeholder="Evening loop"
-                className="min-w-0 flex-1 rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70 focus:border-primary/60"
+                className="min-w-0 flex-1 rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm placeholder:text-muted-foreground/70 focus:border-primary"
               />
               <button
                 type="button"
                 onClick={saveAsRoute}
                 disabled={savingRoute}
-                className="shrink-0 rounded-full bg-primary px-4 py-2.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
+                className="shrink-0 rounded-full bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
               >
                 {savingRoute ? 'Saving…' : 'Save'}
               </button>
@@ -106,7 +106,7 @@ export default function RunSummary({ run }) {
 
       <Link
         to={`/feed?compose=run&id=${run.id}`}
-        className="flex items-center justify-center gap-2 rounded-full border border-primary/40 py-3 font-heading text-sm font-medium text-primary transition hover:bg-primary/10"
+        className="flex items-center justify-center gap-2 rounded-full border border-primary/40 py-3 text-sm font-medium text-primary transition hover:bg-primary/10"
       >
         <Share2 className="h-4 w-4" /> Share this run
       </Link>
@@ -114,13 +114,13 @@ export default function RunSummary({ run }) {
       <div className="flex gap-2">
         <Link
           to="/analytics"
-          className="flex-1 rounded-full border border-border py-3 text-center font-heading text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary"
+          className="flex-1 rounded-full border border-border py-3 text-center text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary"
         >
           See analytics
         </Link>
         <Link
           to="/"
-          className="flex-1 rounded-full bg-primary py-3 text-center font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95"
+          className="flex-1 rounded-full bg-primary py-3 text-center text-sm font-semibold text-primary-foreground transition hover:brightness-95"
         >
           Done
         </Link>

@@ -18,20 +18,22 @@ export type HrStatus = 'in' | 'above' | 'below' | 'unknown';
 export type HrBounds = { min: number; max: number };
 export type Profile = { id: string; hr_max: number | null; threshold_sec: number | null };
 
+// Zone colours are one ramp, Steel through Chalk to Volt (brand: a single accent). Literal hex because this
+// file stays pure; the values mirror brand.* in src/theme.ts. Number and name always accompany the colour.
 const SPECS = [
-  { n: 1, intensity: 'Very Light', lo: 50, hi: 60, color: '#6FA8FF', slow: 1.4, fast: 1.28,
+  { n: 1, intensity: 'Very Light', lo: 50, hi: 60, color: '#8A8A93', slow: 1.4, fast: 1.28,
     purpose: 'Active recovery, warm-up and cool-down',
     feel: 'Effortless. You can sing, talk continuously and breathe through your nose.' },
-  { n: 2, intensity: 'Light', lo: 60, hi: 70, color: '#C9F84A', slow: 1.28, fast: 1.15,
+  { n: 2, intensity: 'Light', lo: 60, hi: 70, color: '#A6A6AE', slow: 1.28, fast: 1.15,
     purpose: 'Building aerobic base and endurance',
     feel: 'Comfortable. Full conversation, deeper breathing. Sustainable for hours.' },
-  { n: 3, intensity: 'Moderate', lo: 70, hi: 80, color: '#7ED957', slow: 1.15, fast: 1.06,
+  { n: 3, intensity: 'Moderate', lo: 70, hi: 80, color: '#F5F5F2', slow: 1.15, fast: 1.06,
     purpose: 'Improving aerobic capacity and efficiency',
     feel: 'Challenging but manageable. Short sentences. Needs focus to hold.' },
-  { n: 4, intensity: 'Hard', lo: 80, hi: 90, color: '#FFC24B', slow: 1.06, fast: 1.0,
+  { n: 4, intensity: 'Hard', lo: 80, hi: 90, color: '#9FCC00', slow: 1.06, fast: 1.0,
     purpose: 'Raising anaerobic threshold and speed endurance',
     feel: 'Uncomfortable. Single words only. Legs start to burn.' },
-  { n: 5, intensity: 'Maximum', lo: 90, hi: 100, color: '#FF6A3D', slow: 1.0, fast: 0.93,
+  { n: 5, intensity: 'Maximum', lo: 90, hi: 100, color: '#C6FF00', slow: 1.0, fast: 0.93,
     purpose: 'Developing peak power and anaerobic capacity',
     feel: 'All-out. Speaking is impossible. Short sprints and intervals.' },
 ];

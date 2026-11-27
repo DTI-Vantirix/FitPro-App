@@ -94,13 +94,13 @@ export default function Analytics() {
         <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
           <TrendingUp className="h-5 w-5" />
         </span>
-        <h1 className="font-heading text-lg font-bold">No training data yet</h1>
+        <h1 className="font-heading text-lg">No training data yet</h1>
         <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
           Log a run and your distance and pace trends build up here.
         </p>
         <Link
           to="/run"
-          className="mt-2 rounded-full bg-primary px-4 py-2.5 font-heading text-sm font-semibold text-primary-foreground"
+          className="mt-2 rounded-full bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
         >
           Start a run
         </Link>
@@ -113,11 +113,11 @@ export default function Analytics() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="eyebrow">All time</p>
-          <h1 className="mt-2 font-heading text-3xl font-extrabold leading-none">Analytics</h1>
+          <h1 className="mt-2 font-heading text-3xl leading-none">Analytics</h1>
         </div>
         <Link
           to="/zones"
-          className="rounded-full border border-border px-4 py-2.5 font-heading text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary"
+          className="rounded-full border border-border px-4 py-2.5 text-sm font-medium transition-colors hover:border-primary/40 hover:text-primary"
         >
           Pace zones
         </Link>
@@ -131,8 +131,8 @@ export default function Analytics() {
 
       <section className="panel p-5">
         <div className="flex items-baseline justify-between">
-          <h2 className="font-heading text-base font-bold">Weekly distance</h2>
-          <span className="num text-[10px] uppercase tracking-[0.12em] text-muted-foreground">last 8 weeks</span>
+          <h2 className="font-heading text-base">Weekly distance</h2>
+          <span className="vr-label text-[10px]">last 8 weeks</span>
         </div>
         <div className="mt-4">
           <WeeklyDistanceChart data={weekly} />
@@ -141,8 +141,8 @@ export default function Analytics() {
 
       <section className="panel p-5">
         <div className="flex items-baseline justify-between">
-          <h2 className="font-heading text-base font-bold">Pace trend</h2>
-          <span className="num text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          <h2 className="font-heading text-base">Pace trend</h2>
+          <span className="vr-label text-[10px]">
             {paceTrend.length} runs
           </span>
         </div>
@@ -157,7 +157,7 @@ export default function Analytics() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="panel p-5">
-          <h2 className="font-heading text-base font-bold">Zone discipline</h2>
+          <h2 className="font-heading text-base">Zone discipline</h2>
           {totals.zones.length ? (
             <ul className="mt-3 space-y-2">
               {totals.zones.map(([zone, count]) => (
@@ -169,7 +169,7 @@ export default function Analytics() {
                       style={{ width: `${(count / runList.length) * 100}%` }}
                     />
                   </span>
-                  <span className="num w-8 shrink-0 text-right text-[11px] text-muted-foreground">{count}</span>
+                  <span className="tabular-nums w-8 shrink-0 text-right text-[11px] text-muted-foreground">{count}</span>
                 </li>
               ))}
             </ul>
@@ -179,7 +179,7 @@ export default function Analytics() {
         </section>
 
         <section className="panel p-5">
-          <h2 className="font-heading text-base font-bold">Best efforts</h2>
+          <h2 className="font-heading text-base">Best efforts</h2>
           <ul className="mt-3 divide-y divide-border">
             {[
               { label: 'Longest run', value: best.longest ? `${Number(best.longest.distance_mi).toFixed(2)} mi` : '—', sub: best.longest?.route_name || '' },

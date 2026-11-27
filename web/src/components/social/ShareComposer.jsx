@@ -148,10 +148,10 @@ export default function ShareComposer({ open, onOpenChange, profile, initialId, 
                     : 'border-border text-muted-foreground hover:text-foreground'
                 )}
               >
-                <span className="block max-w-[150px] truncate font-heading text-xs font-semibold">
+                <span className="block max-w-[150px] truncate font-heading text-xs">
                   {s.route_name || 'Free run'}
                 </span>
-                <span className="num mt-0.5 block text-[10px] uppercase tracking-[0.1em]">
+                <span className="vr-label mt-0.5 block text-[10px]">
                   {Number(s.distance_mi || 0).toFixed(2)} mi
                 </span>
               </button>
@@ -235,7 +235,7 @@ export default function ShareComposer({ open, onOpenChange, profile, initialId, 
               onChange={(e) => setCaption(e.target.value)}
               rows={2}
               placeholder="Legs felt heavy, kept it easy."
-              className="mt-1.5 w-full resize-none rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70 focus:border-primary/60"
+              className="mt-1.5 w-full resize-none rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-sm placeholder:text-muted-foreground/70 focus:border-primary"
             />
           </label>
 
@@ -267,20 +267,20 @@ export default function ShareComposer({ open, onOpenChange, profile, initialId, 
               type="button"
               onClick={save}
               disabled={!selected || posting}
-              className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 font-heading text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
             >
               <Upload className="h-4 w-4" /> {posting ? 'Posting…' : 'Post to VantraRun'}
             </button>
           ) : (
             <div className="space-y-2.5 rounded-xl border border-primary/30 bg-primary/5 p-3.5">
-              <p className="flex items-center gap-1.5 font-heading text-xs font-bold text-primary">
+              <p className="flex items-center gap-1.5 font-heading text-xs text-primary">
                 <Check className="h-3.5 w-3.5" /> Posted — now send it out
               </p>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={shareSystem}
-                  className="flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 font-heading text-[11px] font-semibold text-primary-foreground transition hover:brightness-95"
+                  className="flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-semibold text-primary-foreground transition hover:brightness-95"
                 >
                   <Share2 className="h-3 w-3" /> Share sheet
                 </button>

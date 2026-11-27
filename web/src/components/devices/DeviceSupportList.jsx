@@ -2,7 +2,7 @@ import { cn } from '@/lib/utils';
 
 const TONES = {
   live: 'border-primary/30 bg-primary/10 text-primary',
-  setup: 'border-[#FFC24B]/30 bg-[#FFC24B]/10 text-[#FFD27D]',
+  setup: 'border-border bg-card text-foreground',
   later: 'border-border bg-secondary text-muted-foreground',
 };
 
@@ -57,10 +57,10 @@ export default function DeviceSupportList() {
       {DEVICES.map((device) => (
         <li key={device.name} className="py-4 first:pt-0 last:pb-0">
           <div className="flex items-start justify-between gap-3">
-            <p className="font-heading text-sm font-bold leading-tight">{device.name}</p>
+            <p className="font-heading text-sm leading-tight">{device.name}</p>
             <span
               className={cn(
-                'shrink-0 rounded-full border px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.12em]',
+                'shrink-0 rounded-full border px-2.5 py-1 vr-label text-[9px]',
                 TONES[device.tone]
               )}
             >

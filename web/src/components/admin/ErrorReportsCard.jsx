@@ -39,7 +39,7 @@ export default function ErrorReportsCard() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="eyebrow">Admin</p>
-          <h2 className="mt-1 flex items-center gap-2 font-heading text-base font-bold">
+          <h2 className="mt-1 flex items-center gap-2 font-heading text-base">
             <Bug className="h-4 w-4" /> Error reports
           </h2>
           <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">

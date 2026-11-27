@@ -10,7 +10,7 @@ export default function SplitsList({ splits = [], limit }) {
     <ul className="space-y-1.5">
       {rows.map((split) => (
         <li key={split.mile} className="flex items-center gap-3">
-          <span className="num w-12 shrink-0 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+          <span className="vr-label w-12 shrink-0 text-[10px]">
             mile {split.mile}
           </span>
           <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary">
@@ -19,7 +19,7 @@ export default function SplitsList({ splits = [], limit }) {
               style={{ width: `${Math.min(100, (fastest / split.pace_sec) * 100)}%` }}
             />
           </span>
-          <span className="num w-11 shrink-0 text-right text-xs text-foreground">{formatPace(split.pace_sec)}</span>
+          <span className="tabular-nums w-11 shrink-0 text-right text-xs text-foreground">{formatPace(split.pace_sec)}</span>
         </li>
       ))}
     </ul>

@@ -1,4 +1,5 @@
 import { Bluetooth, HeartPulse, Unplug } from 'lucide-react';
+import { zoneColor } from '@/lib/zones';
 import { cn } from '@/lib/utils';
 
 export default function HeartRateCard({ heart, hrMax = 0, zones = [] }) {
@@ -51,16 +52,16 @@ export default function HeartRateCard({ heart, hrMax = 0, zones = [] }) {
         <div className="mt-3 flex items-end justify-between gap-3">
           <p className="num text-4xl leading-none">
             {bpm || '––'}
-            <span className="ml-1.5 font-mono text-xs font-normal text-muted-foreground">bpm</span>
+            <span className="ml-1.5 tabular-nums text-xs font-normal text-muted-foreground">bpm</span>
           </p>
           <div className="text-right">
             {zone && (
-              <p className="text-xs font-semibold" style={{ color: zone.color || '#C9F84A' }}>
+              <p className="text-xs font-semibold" style={{ color: zoneColor(zone) }}>
                 {zone.name}
               </p>
             )}
             {pct ? (
-              <p className="num mt-0.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+              <p className="vr-label mt-0.5 text-[10px]">
                 {Math.round(pct)}% of max
               </p>
             ) : null}
@@ -69,7 +70,7 @@ export default function HeartRateCard({ heart, hrMax = 0, zones = [] }) {
       )}
 
       {status === 'connected' && stats.avg ? (
-        <p className="num mt-2 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+        <p className="vr-label mt-2 text-[10px]">
           avg {stats.avg} · max {stats.max}
         </p>
       ) : null}

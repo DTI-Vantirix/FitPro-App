@@ -10,7 +10,7 @@ await test('template matches the web onboarding', () => {
   assert.deepEqual({ name: zone2.name, fast: zone2.fast_sec, slow: zone2.slow_sec, lo: zone2.hr_min_pct, hi: zone2.hr_max_pct, n: zone2.zone_number, order: zone2.sort_order },
     { name: 'Zone 2', fast: 690, slow: 768, lo: 60, hi: 70, n: 2, order: 2 });
   assert.deepEqual([zones[0].fast_sec, zones[0].slow_sec, zones[4].fast_sec, zones[4].slow_sec], [768, 840, 558, 600]);
-  assert.equal(zones[4].color, '#FF6A3D');
+  assert.equal(zones[4].color, '#C6FF00');
   assert.equal(z.zoneTemplate(0)[3].slow_sec, 636); // falls back to 600 like the web
 });
 await test('heart-rate bounds are the zone percentages of max heart rate', () => {
