@@ -25,6 +25,14 @@ if ((process.env.ANDROID_CERT_SHA256 || '').trim() && !config.appLinks.androidCe
   console.warn('[links] ANDROID_CERT_SHA256 is set but holds no SHA-256 fingerprint (64 hex digits, colons optional): invite links will not open the Android app.');
 }
 
+// Payments are never a reason not to start: a missing setting is said once, here.
+if (config.stripe.ready) {
+  const mode = config.stripe.secretKey.startsWith('sk_live_') ? 'LIVE' : config.stripe.secretKey.startsWith('sk_test_') ? 'TEST' : null;
+  console.log(mode ? `[billing] Stripe keys are for ${mode} mode.` : '[billing] Stripe keys are set (the secret key is neither sk_test_ nor sk_live_).');
+} else if (config.subscriptions) {
+  console.warn('[billing] SUBSCRIPTIONS is on but a Stripe setting is missing (STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_MONTHLY, STRIPE_PRICE_ANNUAL): nobody can subscribe and the gate shows the invite code only.');
+}
+
 // Nothing a single request does may stop the process: a failure that escapes the
 // request handler is logged and answered, and a stray rejection is only logged.
 const handle = createApp({ db, config, registry });
