@@ -1,4 +1,4 @@
-import { decideAccess, grantFree } from '../access.js';
+import { GRACE_DAYS, decideAccess, grantFree } from '../access.js';
 import { HttpError } from '../lib/http.js';
 import { isUuid } from '../lib/serialize.js';
 
@@ -10,6 +10,8 @@ const FREE_SOURCES = ['invite', 'admin'];
 
 const iso = (value) => (value ? new Date(value).toISOString() : null);
 
+const PAID_SOURCES = ['stripe', 'apple'];
+
 const publicEntitlement = (row) => ({
   id: row.id,
   source: row.source,
@@ -19,6 +21,16 @@ const publicEntitlement = (row) => ({
   granted_by: row.granted_by ?? null,
   note: row.note ?? null,
   created_date: iso(row.created_date),
+});
+
+// What the list shows on top of that: whether a subscription is set to end, who took a
+// free pass away and when, and for a paid row the id to look up at the payment provider.
+const listedEntitlement = (row) => ({
+  ...publicEntitlement(row),
+  cancel_at_period_end: Boolean(row.cancel_at_period_end),
+  revoked_by: row.revoked_by ?? null,
+  revoked_at: iso(row.revoked_at),
+  ...(PAID_SOURCES.includes(row.source) ? { external_id: row.external_id ?? null } : {}),
 });
 
 // Turns what the admin typed into a pattern that matches it literally, anywhere in the email.
@@ -56,10 +68,11 @@ export default async function adminAccess({ db, user, body }) {
         full_name: person.full_name ?? null,
         role: person.role,
         ...access,
-        entitlements: own.map(publicEntitlement),
+        entitlements: own.map(listedEntitlement),
       };
     });
-    return { people };
+    // How long a paid period still counts after it ends: the screen works out "access until" from it.
+    return { people, grace_days: GRACE_DAYS };
   }
 
   if (action === 'grant') {
@@ -81,7 +94,14 @@ export default async function adminAccess({ db, user, body }) {
     if (!FREE_SOURCES.includes(row.source)) {
       throw new HttpError(400, 'Paid subscriptions are cancelled with the payment provider.');
     }
-    await db.query(`update entitlements set status = 'revoked', updated_date = now() where id = $1 returning id`, [id]);
+    // Who took it away, and when. Removing it a second time keeps the first record.
+    await db.query(
+      `update entitlements
+          set status = 'revoked', revoked_by = $2, revoked_at = now(), updated_date = now()
+        where id = $1 and status <> 'revoked'
+        returning id`,
+      [id, user.email]
+    );
     return { ok: true };
   }
 

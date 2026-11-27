@@ -7,17 +7,20 @@ import adminInviteCodes from './adminInviteCodes.js';
 import challengeBoard from './challengeBoard.js';
 import ingestActivity from './ingestActivity.js';
 import inviteAccess from './inviteAccess.js';
+import requestInfo from './requestInfo.js';
 import routeDirections from './routeDirections.js';
 import snapRoute from './snapRoute.js';
 import socialFeed from './socialFeed.js';
+import subscription from './subscription.js';
 
 // POST /api/functions/:name — same names and bodies the app sent to Base44
 // (base44.functions.invoke). Every function needs a signed-in user, and every one
 // except those in OPEN needs access to the product.
-const FUNCTIONS = { adminAccess, adminClientErrors, adminInviteCodes, challengeBoard, ingestActivity, inviteAccess, routeDirections, snapRoute, socialFeed };
+const FUNCTIONS = { adminAccess, adminClientErrors, adminInviteCodes, challengeBoard, ingestActivity, inviteAccess, requestInfo, routeDirections, snapRoute, socialFeed, subscription };
 
-// What a person without access can still call: read their access status and redeem a code.
-const OPEN = new Set(['inviteAccess']);
+// What a person without access can still call: read their access status, redeem a code,
+// and subscribe or look after a subscription.
+const OPEN = new Set(['inviteAccess', 'subscription']);
 
 export function registerFunctionRoutes(router) {
   router.add('POST', '/api/functions/:name', async (ctx) => {
@@ -27,6 +30,6 @@ export function registerFunctionRoutes(router) {
     const fn = Object.prototype.hasOwnProperty.call(FUNCTIONS, ctx.params.name) ? FUNCTIONS[ctx.params.name] : null;
     if (!fn) throw new HttpError(404, `Unknown function "${ctx.params.name}".`);
     const user = OPEN.has(ctx.params.name) ? requireUser(ctx) : await requireAccess(ctx);
-    return fn({ db: ctx.db, user, body: ctx.body || {}, config: ctx.config });
+    return fn({ db: ctx.db, user, body: ctx.body || {}, config: ctx.config, stripe: ctx.stripe, req: ctx.req });
   });
 }

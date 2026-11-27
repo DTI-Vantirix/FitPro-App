@@ -36,6 +36,19 @@ export function loadConfig(env = process.env) {
     throw new Error('JWT_SECRET must be set to at least 32 random characters in production');
   }
 
+  // Stripe (subscriptions bought on the website). All four or nothing: with any one
+  // missing the server runs as if there were none, and says so once at start-up.
+  const stripe = {
+    secretKey: (env.STRIPE_SECRET_KEY || '').trim(),
+    webhookSecret: (env.STRIPE_WEBHOOK_SECRET || '').trim(),
+    prices: {
+      monthly: (env.STRIPE_PRICE_MONTHLY || '').trim(),
+      annual: (env.STRIPE_PRICE_ANNUAL || '').trim(),
+    },
+  };
+  stripe.ready = Boolean(stripe.secretKey && stripe.webhookSecret && stripe.prices.monthly && stripe.prices.annual);
+  const subscriptions = env.SUBSCRIPTIONS === 'on';
+
   return {
     production,
     port: Number(env.PORT) || 4000,
@@ -70,7 +83,18 @@ export function loadConfig(env = process.env) {
     routerApiKey: env.ROUTER_API_KEY || '',
     // Off: sign-up needs an invite code. On: anyone can sign up, and an account
     // without access is told to subscribe or enter a code (docs/decisions.md).
-    subscriptions: env.SUBSCRIPTIONS === 'on',
+    subscriptions,
+    stripe,
+    // Selling needs the switch and the keys. Looking after people who already pay
+    // (the webhook, the portal, cancel on delete) needs only the keys.
+    selling: subscriptions && stripe.ready,
+    // Sign-up with no invite code (only possible with SUBSCRIPTIONS on) sends a
+    // verification email to whatever address is typed, so it is capped: this many such
+    // emails an hour across everyone, and this many such sign-ups an hour from one network.
+    signup: {
+      openMailsPerHour: Number(env.OPEN_SIGNUP_MAILS_PER_HOUR) > 0 ? Number(env.OPEN_SIGNUP_MAILS_PER_HOUR) : 300,
+      openPerNetworkPerHour: 10,
+    },
     // Outside production, auth responses include the emailed code so you can
     // test sign-up without a mail provider. Never on in production.
     exposeDevCodes: !production && env.EXPOSE_DEV_CODES !== 'false',

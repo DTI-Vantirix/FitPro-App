@@ -10,7 +10,10 @@
             ┌──────▼───────┐        ┌───────────────┐
             │  server/     │───────▶│ Valhalla      │ route snapping
             │  Node API    │        │ (OSM, public) │
-            └──────┬───────┘        └───────────────┘
+            │              │        └───────────────┘
+            │              │        ┌───────────────┐
+            │              │◀──────▶│ Stripe        │ website subscriptions:
+            └──────┬───────┘        └───────────────┘ API calls out, webhooks in
                    │ SQL
             ┌──────▼───────┐        ┌───────────────┐
             │ Postgres 16  │        │ uploads/ dir  │ (object storage later)
@@ -58,8 +61,31 @@ little to learn or upgrade.
   access and gives or takes back free passes (see "Who may use the product").
 - `src/access.js`: the one place that answers "may this account use the product, and
   why". Everything else asks it.
+- `src/billing/`: subscriptions bought on the website (see "Stripe" below).
+  - `stripe.js`: the only code that talks to Stripe, over HTTPS with `fetch` (no SDK),
+    with the API version pinned in `STRIPE_API_VERSION`. The app puts it on `ctx.stripe`;
+    tests pass a fake with the same methods (`test/stripe-fake.js`).
+  - `signature.js`: checks a webhook's `Stripe-Signature` header.
+  - `plans.js`: the two plans, their prices and the trial length.
+  - `sync.js`: turns a Stripe subscription into our `entitlements` row, and
+    `syncCustomer`, which asks Stripe for a customer's subscriptions and writes what it says.
+  - `webhook.js`: `POST /api/stripe/webhook`.
+  - `queue.js`: one thing at a time per customer (and per account), inside the process.
+    This, not a database lock, is what keeps billing work in order: nothing in the
+    database is held while Stripe is being asked.
+  - `account.js`: deleting an account that may have a Stripe customer (open checkouts
+    expired, the customer deleted, then the account).
+  - `reminders.js`: the email two days before a free trial ends, from an hourly sweep,
+    and the start of billing's other background job, the daily check of subscriptions
+    whose period has passed without word from Stripe (`syncOverdue` in `sync.js`).
+- `src/functions/subscription.js`: what the screens call: `status`, `checkout`,
+  `refresh`, `portal`, `resume`.
 - `src/storage.js`: where uploads live. Local disk, or an S3-compatible bucket when the
   `S3_*` settings are present (requests signed here, no SDK).
+- `src/lib/http.js`: the router, JSON helpers, the in-memory rate limiter and `clientIp`,
+  the address a request is counted against. Behind a proxy that address comes from
+  `X-Forwarded-For`; `TRUSTED_PROXY_HOPS` says which entry to believe, and the admin-only
+  `requestInfo` function shows what arrives so the right value can be found on a host.
 - `src/errors.js`: error reports kept in our own table (`client_errors`): crashes the
   phone app posts to `POST /api/client-errors`, and the API's own unexpected errors.
 - `src/well-known.js`: the two public files that let a friend invite link
@@ -83,7 +109,8 @@ per source of access per account:
 | --- | --- | --- |
 | `invite` | redeeming an invite code, at sign-up or afterwards | in use |
 | `admin` | the owner granting free access by email (Settings → Who has access) | in use |
-| `stripe`, `apple` | a paid subscription | not built yet (stages 2 and 3); the table and the check already allow for them |
+| `stripe` | a subscription bought on the website; the row is a copy of what Stripe says (see "Stripe" below) | in use when the Stripe settings are present |
+| `apple` | a subscription bought in the iPhone app | not built yet (stage 3); the table and the check already allow for it |
 
 A row is live when its `status` is `trial`, `active` or `grace` and it is not more than
 three days past `expires_at` (`GRACE_DAYS`). Free passes have no expiry; a paid row
@@ -98,13 +125,16 @@ one reported. Admins need no row.
 - **Closed without access** (`403 "Enter an invite code to use VantraRun."`, or
   `"Subscribe or enter an invite code to use VantraRun."` when `SUBSCRIPTIONS` is on):
   everything under `/api/entities/*`, `POST /api/uploads`, and every function except
-  `inviteAccess`.
+  `inviteAccess` and `subscription`. The body also carries `"code": "no_access"`, which
+  the website uses to show the gate when access ends in the middle of a session.
 - **Open to any signed-in account**: everything under `/api/auth/*` (the account, sign-out,
   password change, deletion), the `inviteAccess` function (access status and redeeming
-  a code) and `POST /api/client-errors`.
+  a code), the `subscription` function (status, checkout and looking after a
+  subscription) and `POST /api/client-errors`.
 - **Open to everyone**: sign-in and sign-up, password reset, `/api/auth/options`,
-  `/api/health`, the two `/.well-known/` files, uploaded media by its address, and the
-  website's own pages (the privacy policy among them).
+  `/api/health`, the two `/.well-known/` files, uploaded media by its address, the
+  website's own pages (the privacy policy and the terms among them), and
+  `POST /api/stripe/webhook`, which accepts only a body signed with the webhook secret.
 
 `access_grants` (one row per redeemed invite code) is still written, because the
 invite-code screen reads it, but it no longer decides anything. Migration 005 copied
@@ -117,9 +147,70 @@ at the new build's next start, not before.
 Removing someone's invite pass revokes the entitlement and leaves the `access_grants`
 row and the used code as history.
 
-The `SUBSCRIPTIONS` setting (off by default) only changes sign-up: off, an invite code
+The `SUBSCRIPTIONS` setting (off by default) changes sign-up: off, an invite code
 is required, as before; on, it is optional, and an account made without one is verified
-but has no access. Payments are not built, so it stays off.
+but has no access until it subscribes or redeems a code. It stays off on the live site
+until the payment test list in `docs/launch-checklist.md` has been run.
+
+### Stripe (subscriptions bought on the website)
+
+Stripe is the record of what was paid. Our `entitlements` row (source `stripe`,
+`external_id` = the subscription id) is a copy of it, and there is one rule for keeping
+the copy right: **ask Stripe, do not trust the notice.** Whenever something may have
+changed, `syncCustomer` lists that customer's subscriptions at Stripe and writes what
+it finds. It runs:
+
+- for every webhook about a customer (the event's type and customer are read, nothing else);
+- when the person comes back from Checkout or the portal (`subscription` → `refresh`);
+- before a second checkout is sold, so someone who paid in another tab is let in instead;
+- when an account that has a Stripe customer asks for its access status and is about
+  to be told "no" (at most once in five minutes per account). The phone only ever
+  calls `inviteAccess`, so this is what repairs a lost renewal notice for it;
+- once a day, for subscriptions our table says are running but whose period has passed
+  (at most 50 a run), which also catches an ending we never heard about;
+- before a trial reminder is sent, so nobody who has just cancelled is told they are
+  about to be charged.
+
+Stripe is always asked first, with no transaction open, and the answer is then written
+in a short transaction. Work for one customer is kept in order by `queue.js`.
+
+So a repeated notice changes nothing, an old one arriving late cannot reopen access,
+and a missing one is repaired the next time the person turns up. Event ids are kept
+for 30 days (`stripe_events`) and a repeat answers `{ received: true, duplicate: true }`.
+A failure while handling answers 500 and records nothing, so Stripe sends it again.
+
+| Stripe status | Our row | `expires_at` |
+| --- | --- | --- |
+| `trialing` | `trial` | when the trial ends |
+| `active` | `active` | end of the period paid for (read from the subscription's item) |
+| `past_due` | `grace` | start of the unpaid period, so access lasts `GRACE_DAYS` (3) more and no longer; if Stripe gives no period start, the date the row already has is kept |
+| `canceled`, `unpaid`, `incomplete_expired`, `paused` | `expired` | when Stripe ended it |
+| `incomplete` | nothing is written | |
+
+A charge refunded in full (`charge.refunded`) ends that subscription at once: it is
+cancelled at Stripe and its row becomes `revoked` with the note `Refunded`. A revoked
+row is never changed again. A partial refund changes nothing.
+
+Settings and what they switch on:
+
+| | needs |
+| --- | --- |
+| Checkout and the paywall (`config.selling`) | `SUBSCRIPTIONS=on` **and** all four `STRIPE_*` settings |
+| The webhook, `refresh`, `portal`, `resume`, the status repair, the trial reminder, cancelling at Stripe when an account is deleted | the four `STRIPE_*` settings only |
+
+With any of the four missing the server starts as usual, says so once in its log, and
+the webhook address answers 404. An account that has a Stripe customer cannot be
+deleted while the settings are missing or Stripe is unreachable (the person is asked
+to try again), because the customer is deleted at Stripe first: that is what cancels
+the subscription.
+
+Nothing about a card is stored: only the customer id (`users.stripe_customer_id`),
+subscription ids and event ids. The website loads nothing from Stripe; Checkout and
+the portal are redirects to Stripe's own pages.
+
+On the website, `AccessGate` shows the "Invite only" card while nothing is for sale and
+`Paywall` when the server says it is selling. Back from Checkout (`/?checkout=success`)
+the paywall calls `refresh` until the account is open, for up to 30 seconds.
 
 ### Access rules
 
@@ -135,7 +226,8 @@ records, e.g. "the owner or an admin" for runs, "anyone signed in" for challenge
   the server and ignored if a client sends them.
 
 Backend functions run with full access, like Base44's service role, and do their
-own checks (`adminInviteCodes` and `adminAccess` are admin-only, `challengeBoard` only returns the
+own checks (`adminInviteCodes`, `adminAccess` and `requestInfo` are admin-only, `subscription` only ever
+acts on the caller's own Stripe customer, `challengeBoard` only returns the
 one metric, `socialFeed` only friends' non-private posts).
 
 ### Database
@@ -149,7 +241,8 @@ routes, connections to users). Deleting a user deletes everything they own;
 invite codes they redeemed keep their history but drop the user link.
 
 Unique indexes back the rules the app relies on: one email per account, one
-`@handle` per athlete, one membership per challenge per user, one grant per user,
+`@handle` per athlete, one membership per challenge per user, one grant per user, one
+Stripe customer per account, one entitlement row per subscription,
 and one run or workout per user per `(source, external_id)` for health sync.
 
 ## Web

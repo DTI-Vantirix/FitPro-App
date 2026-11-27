@@ -8,6 +8,7 @@ import ErrorReportsCard from '@/components/admin/ErrorReportsCard';
 import InviteCodesCard from '@/components/admin/InviteCodesCard';
 import SocialProfileCard from '@/components/social/SocialProfileCard';
 import AccountCard from '@/components/settings/AccountCard';
+import SubscriptionCard from '@/components/settings/SubscriptionCard';
 import { estimateZones, zoneTemplate } from '@/lib/zones';
 import { applyZones, loadProfile, saveProfile } from '@/lib/profile';
 import { formatPace, parsePace } from '@/lib/format';
@@ -233,6 +234,8 @@ export default function Settings() {
           </Link>
 
           <AccountCard />
+
+          <SubscriptionCard />
 
           <SocialProfileCard />
 

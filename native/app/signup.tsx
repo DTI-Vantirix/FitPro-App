@@ -21,6 +21,10 @@ export default function SignUp() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [codeTaken, setCodeTaken] = useState(false);
+  // The server confirms an email only together with the password its owner chose. Coming
+  // from sign-up that password is still in memory; coming from sign-in (an account that
+  // signed in before confirming) it is not, so the code step asks for it.
+  const [passwordInHand, setPasswordInHand] = useState(false);
 
   if (loadingSession) return <Loading />;
   if (accessToken) return <Redirect href="/consent" />;
@@ -44,6 +48,7 @@ export default function SignUp() {
     // The password stays in memory until the code is confirmed: it is sent again with the code.
     setCode('');
     setCodeTaken(false);
+    setPasswordInHand(true);
     setStep('code');
   });
 
@@ -56,7 +61,7 @@ export default function SignUp() {
 
   const resend = () => attempt(async () => {
     await resendEmailCode(email);
-    setNotice('If that address is waiting to be confirmed, a new code is on its way.');
+    setNotice('If that address is waiting to be confirmed, a new code is on its way. If you asked less than a minute ago, use the code you already have.');
   });
 
   const detailsReady = email.trim().includes('@') && password.length >= 8 && inviteCode.trim().length > 0;
@@ -79,8 +84,13 @@ export default function SignUp() {
       <ErrorNotice message={error} />
       {!!notice && <Notice>{notice}</Notice>}
       <Card>
+        {!passwordInHand && <>
+          <Field label="Password" value={password} onChangeText={setPassword} secure />
+          <Note>Enter the password you chose when you signed up.</Note>
+        </>}
         <Field label="Six-digit code" value={code} onChangeText={setCode} keyboardType="number-pad" />
-        <Action label="Confirm and continue" onPress={() => { void confirm(); }} busy={busy} disabled={code.trim().length < 6} />
+        <Action label="Confirm and continue" onPress={() => { void confirm(); }} busy={busy}
+          disabled={code.trim().length < 6 || (!passwordInHand && password.length < 8)} />
         <Action label="Send a new code" onPress={() => { void resend(); }} busy={busy} secondary />
         {codeTaken && <Action label="Use a different invite code" secondary
           onPress={() => { setStep('details'); setInviteCode(''); setError(null); setCodeTaken(false); }} />}

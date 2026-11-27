@@ -1,65 +1,17 @@
-import { useEffect, useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { Outlet, useSearchParams } from 'react-router-dom';
 import { KeyRound, LogOut } from 'lucide-react';
-import { api } from '@/api/client';
+import { NO_ACCESS_EVENT, api } from '@/api/client';
+import InviteCodeForm from '@/components/access/InviteCodeForm';
+import Paywall from '@/components/access/Paywall';
 
-export default function AccessGate() {
-  const [state, setState] = useState('checking');
-  const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
+// Stands between a signed-in person and the app. With access, the app. Without:
+// the "Invite only" card while nothing is for sale, or the paywall when the server
+// says it is selling subscriptions. The server enforces the same rule on every call;
+// this only decides what to show.
 
-  useEffect(() => {
-    let alive = true;
-    api.auth
-      .me()
-      .then((u) => {
-        if (alive) setEmail(u?.email || '');
-      })
-      .catch(() => {});
-    api.functions
-      .invoke('inviteAccess', { action: 'status' })
-      .then((res) => {
-        if (alive) setState(res.data?.allowed ? 'allowed' : 'blocked');
-      })
-      .catch(() => {
-        if (alive) {
-          setState('blocked');
-          setError('Could not check your access. Try again in a moment.');
-        }
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const redeem = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await api.functions.invoke('inviteAccess', { action: 'redeem', code });
-      if (res.data?.allowed) {
-        setState('allowed');
-      } else {
-        setError(res.data?.error || 'That code did not work.');
-      }
-    } catch (err) {
-      setError(err?.response?.data?.error || 'That code did not work.');
-    }
-    setBusy(false);
-  };
-
-  if (state === 'allowed') return <Outlet />;
-
-  if (state === 'checking') {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-primary" />
-      </div>
-    );
-  }
-
+// The gate as it has been since sign-up needed an invite code.
+function InviteOnlyCard({ email, error, onAllowed }) {
   return (
     <div className="flex min-h-screen items-center justify-center px-5 py-10">
       <div className="panel w-full max-w-sm p-6">
@@ -71,27 +23,7 @@ export default function AccessGate() {
           VantraRun is open to a small group of testers. Enter the single-use code you were given to unlock the app.
         </p>
 
-        <label className="mt-5 block">
-          <span className="eyebrow">Invite code</span>
-          <input
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            placeholder="FP-XXXX-XXXX"
-            autoCapitalize="characters"
-            className="num mt-1.5 w-full rounded-xl border border-border bg-secondary/60 px-3.5 py-3 text-center text-base tracking-[0.12em] placeholder:text-muted-foreground/50 focus:border-primary"
-          />
-        </label>
-
-        {error && <p className="mt-2.5 text-xs text-destructive">{error}</p>}
-
-        <button
-          type="button"
-          onClick={redeem}
-          disabled={busy || code.trim().length < 6}
-          className="mt-4 w-full rounded-full bg-primary py-3.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-40"
-        >
-          {busy ? 'Checking…' : 'Unlock VantraRun'}
-        </button>
+        <InviteCodeForm onAllowed={onAllowed} initialError={error} />
 
         <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
           <p className="truncate text-[10px] text-muted-foreground">{email}</p>
@@ -106,4 +38,84 @@ export default function AccessGate() {
       </div>
     </div>
   );
+}
+
+export default function AccessGate() {
+  const [state, setState] = useState('checking');
+  const [subscriptions, setSubscriptions] = useState(false);
+  const [email, setEmail] = useState('');
+  const [error, setError] = useState(null);
+  const [params, setParams] = useSearchParams();
+
+  // true or false as the server answers; null when it could not be asked.
+  const check = useCallback(async () => {
+    try {
+      const res = await api.functions.invoke('inviteAccess', { action: 'status' });
+      setSubscriptions(Boolean(res.data?.subscriptions));
+      return Boolean(res.data?.allowed);
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    api.auth
+      .me()
+      .then((u) => {
+        if (alive) setEmail(u?.email || '');
+      })
+      .catch(() => {});
+    check().then((allowed) => {
+      if (!alive) return;
+      if (allowed === null) setError('Could not check your access. Try again in a moment.');
+      setState(allowed ? 'allowed' : 'blocked');
+    });
+    return () => {
+      alive = false;
+    };
+  }, [check]);
+
+  // Access can end while the app is open (a refund, a pass taken back, a period that ran
+  // out). The server then refuses the next call; the client says so with this event, and
+  // the gate asks again and shows the way back in instead of a screen of failed requests.
+  useEffect(() => {
+    if (state !== 'allowed') return undefined;
+    let alive = true;
+    const onRefused = async () => {
+      const allowed = await check();
+      if (alive && allowed === false) {
+        setError(null);
+        setState('blocked');
+      }
+    };
+    window.addEventListener(NO_ACCESS_EVENT, onRefused);
+    return () => {
+      alive = false;
+      window.removeEventListener(NO_ACCESS_EVENT, onRefused);
+    };
+  }, [state, check]);
+
+  // Back from checkout with the account already open: nothing to confirm, tidy the address.
+  useEffect(() => {
+    if (state !== 'allowed' || !params.has('checkout')) return;
+    const next = new URLSearchParams(params);
+    next.delete('checkout');
+    setParams(next, { replace: true });
+  }, [state, params, setParams]);
+
+  const allow = useCallback(() => setState('allowed'), []);
+
+  if (state === 'allowed') return <Outlet />;
+
+  if (state === 'checking') {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-primary" />
+      </div>
+    );
+  }
+
+  const inviteOnly = <InviteOnlyCard email={email} error={error} onAllowed={allow} />;
+  return subscriptions ? <Paywall email={email} onAllowed={allow} fallback={inviteOnly} /> : inviteOnly;
 }

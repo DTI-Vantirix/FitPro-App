@@ -1,11 +1,19 @@
 // Starts the real API, serving the built web app, against a throwaway database
 // for the browser tests. Everything in fitpro_e2e is wiped on every start.
-//   node e2e/start-server.mjs        (Playwright runs this; see playwright.config.mjs)
+//   node e2e/start-server.mjs                 (Playwright runs this; see playwright.config.mjs)
+//   node e2e/start-server.mjs subscriptions   a second server with SUBSCRIPTIONS on and a
+//                                             stand-in for Stripe, on fitpro_e2e_subs (below)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ADMIN, BASE_URL, CARRIED, PORT } from './fixtures.mjs';
+import http from 'node:http';
+import { ADMIN, BASE_URL, CARRIED, PORT, SUBS_BASE_URL, SUBS_PORT } from './fixtures.mjs';
+
+// The second server: same website, same API, but selling. Its own port and database.
+const selling = process.argv[2] === 'subscriptions';
+const baseUrl = selling ? SUBS_BASE_URL : BASE_URL;
+const port = selling ? SUBS_PORT : PORT;
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -20,24 +28,31 @@ try {
 const nearby = process.env.TEST_DATABASE_URL || 'postgres://fitpro:fitpro@localhost:5432/fitpro_test';
 const e2eUrl = new URL(process.env.E2E_DATABASE_URL || nearby);
 if (!process.env.E2E_DATABASE_URL) e2eUrl.pathname = '/fitpro_e2e';
+if (selling) e2eUrl.pathname = `${e2eUrl.pathname}_subs`;
 const dbName = decodeURIComponent(e2eUrl.pathname.slice(1));
 if (!/e2e/.test(dbName)) throw new Error(`Refusing to wipe "${dbName}": the e2e database name must contain "e2e".`);
 
 Object.assign(process.env, {
   NODE_ENV: 'development', // so sign-up answers include the emailed code
   DATABASE_URL: e2eUrl.href,
-  PORT: String(PORT),
+  PORT: String(port),
   WEB_DIST: path.join(root, 'web', 'dist'),
-  APP_URL: BASE_URL,
+  APP_URL: baseUrl,
   PUBLIC_URL: '',
-  CORS_ORIGINS: BASE_URL,
+  CORS_ORIGINS: baseUrl,
   ROUTER_URL: 'off',
   RESEND_API_KEY: '', // never send real email from a test run
   EXPOSE_DEV_CODES: 'true',
   TRUST_PROXY: 'false',
   UPLOAD_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'fitpro-e2e-uploads-')),
   MIGRATE_ON_START: 'false',
-  SUBSCRIPTIONS: 'off', // the browser tests cover today's invite-only sign-up
+  // The first server covers today's invite-only sign-up; the second one sells.
+  SUBSCRIPTIONS: selling ? 'on' : 'off',
+  // Never a developer's Stripe settings: the second server gets made-up ids and a fake below.
+  STRIPE_SECRET_KEY: '',
+  STRIPE_WEBHOOK_SECRET: '',
+  STRIPE_PRICE_MONTHLY: '',
+  STRIPE_PRICE_ANNUAL: '',
 });
 
 const { createDb } = await import('../server/src/db.js');
@@ -78,4 +93,9 @@ try {
   await db.close();
 }
 
-await import('../server/src/index.js');
+if (!selling) {
+  await import('../server/src/index.js');
+} else {
+  const { startSellingServer } = await import('./stripe-stand-in.mjs');
+  await startSellingServer({ baseUrl, port });
+}

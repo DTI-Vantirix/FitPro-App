@@ -12,20 +12,21 @@ import { createApp } from '../src/app.js';
 import { SERVER_ROOT, loadConfig } from '../src/config.js';
 import { bootstrapAdmin } from '../src/auth/bootstrap.js';
 import { hashPassword } from '../src/auth/crypto.js';
+import { formatDay, sendTrialReminders } from '../src/billing/reminders.js';
+import { deleteAccount } from '../src/billing/account.js';
+import { serialised } from '../src/billing/queue.js';
+import { syncOverdue } from '../src/billing/sync.js';
 import { loadRegistry } from '../src/entities/registry.js';
+import { priceCheck } from '../src/functions/subscription.js';
 import { migrate } from '../src/migrate.js';
-import { createPsqlDb } from './psql-db.js';
+import { chooseDb } from './open-db.js';
+import { TEST_PRICES, TEST_STRIPE, createFakeStripe, daysFromNowUnix, signBody, signedEvent } from './stripe-fake.js';
 
 const DB_URL = process.env.TEST_DATABASE_URL || 'postgres://fitpro:fitpro@localhost:5432/fitpro_test';
 
-async function openDb() {
-  try {
-    const { createDb } = await import('../src/db.js');
-    return createDb(DB_URL);
-  } catch {
-    return createPsqlDb(DB_URL); // `pg` not installed: fall back to the psql CLI
-  }
-}
+// The real driver; without `pg` installed, a psql stand-in on a developer machine and a
+// loud failure in CI (test/open-db.js).
+const openDb = () => chooseDb({ url: DB_URL });
 
 let db;
 let server;
@@ -122,8 +123,9 @@ before(async () => {
 
 // A second instance of the API on the same database with some settings changed,
 // for behaviour that sits behind a setting. Returns its address and a way to stop it.
-async function startApp(overrides) {
-  const other = http.createServer(createApp({ db, config: { ...testConfig, ...overrides }, registry }));
+// `stripe` replaces the Stripe client with a fake (test/stripe-fake.js).
+async function startApp(overrides, { stripe } = {}) {
+  const other = http.createServer(createApp({ db, config: { ...testConfig, ...overrides }, registry, ...(stripe ? { stripe } : {}) }));
   await new Promise((r) => other.listen(0, r));
   return {
     origin: `http://127.0.0.1:${other.address().port}`,
@@ -667,7 +669,7 @@ describe('invite grants written by an older build are picked up at start-up', ()
 });
 
 describe('the server refuses product calls without access', () => {
-  const NO_ACCESS = { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } };
+  const NO_ACCESS = { status: 403, data: { error: 'Enter an invite code to use VantraRun.', code: 'no_access' } };
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 9, 9, 9]);
   const aRun = { distance_mi: 2, duration_sec: 1200, route_name: 'Before the lapse', started_at: '2026-11-21T12:00:00Z' };
   const upload = {
@@ -952,8 +954,8 @@ describe('sign-up needs a code', () => {
 
 describe('sign-up when subscriptions are on', () => {
   // The refusal names what is on offer: a subscription only where one can be bought.
-  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
-  const NO_ACCESS_OFF = { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } };
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.', code: 'no_access' } };
+  const NO_ACCESS_OFF = { status: 403, data: { error: 'Enter an invite code to use VantraRun.', code: 'no_access' } };
   let open; // the API with SUBSCRIPTIONS=on
   const on = (method, url, options = {}) => call(method, url, { ...options, origin: open.origin });
   const register = (body) => on('POST', '/api/auth/register', { body });
@@ -961,6 +963,15 @@ describe('sign-up when subscriptions are on', () => {
   const verify = (email, code, password = 'longenough1') =>
     on('POST', '/api/auth/verify-otp', { body: { email, otp_code: code, ...(password === null ? {} : { password }) } });
   const WRONG_CODE = { status: 400, data: { error: 'That code is wrong or has expired.' } };
+  // A sign-up with no invite code is not mailed a second code within a minute of the first
+  // (see 'open sign-up cannot be used to send mail'). Where a test needs the next email, a
+  // few minutes pass first: the codes this address was sent so far become that much older.
+  const aFewMinutesLater = (email) =>
+    db.query(
+      `update auth_codes set created_date = created_date - interval '5 minutes'
+        where user_id = (select id from users where email = $1) returning id`,
+      [email]
+    );
   // Sign-ups are limited per address; these tests come from their own (see TRUST_PROXY in src/lib/http.js).
   const from = (address) => ({ 'X-Forwarded-For': address });
   const withProxy = async (work) => {
@@ -1071,6 +1082,7 @@ describe('sign-up when subscriptions are on', () => {
     assert.equal((await signUp('victim-pass-V1', '198.51.100.1')).status, 200);
     // Before the victim types their code, someone else signs up with the same address
     // and their own password. The new code goes to the victim's inbox, not to them.
+    await aFewMinutesLater(email);
     const hijack = await signUp('attacker-pass-A1', '198.51.100.2');
     assert.equal(hijack.status, 200);
 
@@ -1089,6 +1101,7 @@ describe('sign-up when subscriptions are on', () => {
     assert.equal(await verified(), false);
 
     // The victim starts again with their own password and gets in.
+    await aFewMinutesLater(email);
     const again = await signUp('victim-pass-V1', '198.51.100.1');
     assert.equal(again.status, 200);
     const code = again.data.dev_code;
@@ -1138,6 +1151,7 @@ describe('sign-up when subscriptions are on', () => {
     const email = 'changed.mind@example.com';
     const code = await mintCode();
     await register({ email, password: 'longenough1', invite_code: code });
+    await aFewMinutesLater(email);
     const again = await register({ email, password: 'longenough1', invite_code: '  ' });
     assert.equal(again.status, 200, JSON.stringify(again.data));
     const ver = await verify(email, again.data.dev_code);
@@ -1148,7 +1162,7 @@ describe('sign-up when subscriptions are on', () => {
 });
 
 describe('the owner sees and controls access', () => {
-  const NO_ACCESS = { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } };
+  const NO_ACCESS = { status: 403, data: { error: 'Enter an invite code to use VantraRun.', code: 'no_access' } };
   const access = (who, body) => call('POST', '/api/functions/adminAccess', { token: who.token, body });
   const runs = (who) => call('POST', '/api/entities/Run/query', { token: who.token, body: {} });
   const find = async (email) => (await access(admin, { action: 'list', search: email })).data.people.find((p) => p.email === email);
@@ -1187,7 +1201,10 @@ describe('the owner sees and controls access', () => {
       {
         user_id: invited.user.id, email: 'ines.invited@example.com', full_name: 'ines.invited', role: 'user',
         allowed: true, reason: 'invite', source: 'invite', plan: null, expires_at: null, cancel_at_period_end: false,
-        entitlements: [{ source: 'invite', status: 'active', plan: null, expires_at: null, granted_by: inviteCode, note: null }],
+        entitlements: [{
+          source: 'invite', status: 'active', plan: null, expires_at: null, granted_by: inviteCode, note: null,
+          cancel_at_period_end: false, revoked_by: null, revoked_at: null,
+        }],
       }
     );
     assert.match(ines.entitlements[0].id, /^[0-9a-f-]{36}$/);
@@ -1373,11 +1390,11 @@ describe('ingestActivity (native contract)', () => {
   test('no accepted invite code -> 403, nothing stored', async () => {
     const lee = await legacyUser('lee@example.com');
     const res = await call('POST', '/api/functions/ingestActivity', { token: lee.token, body: run });
-    assert.deepEqual(res, { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } });
+    assert.deepEqual(res, { status: 403, data: { error: 'Enter an invite code to use VantraRun.', code: 'no_access' } });
     assert.equal((await db.query('select id from runs where created_by_id = $1', [lee.user.id])).length, 0);
     // and they cannot read runs either: the whole product is closed, not only the upload
     const mine = await call('POST', '/api/entities/Run/query', { token: lee.token, body: {} });
-    assert.deepEqual(mine, { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } });
+    assert.deepEqual(mine, { status: 403, data: { error: 'Enter an invite code to use VantraRun.', code: 'no_access' } });
   });
 
   test('admins upload without a code', async () => {
@@ -1833,5 +1850,1865 @@ describe('your data', () => {
     const [code] = await db.query(`select status, used_by_id from invite_codes where used_by_email = 'alice@example.com'`, []);
     assert.equal(code.status, 'used');
     assert.equal(code.used_by_id ?? null, null, 'invite history keeps the code but forgets the user');
+  });
+});
+
+// ---------------------------------------------------------------- Stripe (stage 2)
+// Every app in these tests gets a fake Stripe (test/stripe-fake.js): nothing here
+// reaches the network. `shop()` is the API as it runs when it is selling.
+const SELLING = { subscriptions: true, selling: true, stripe: TEST_STRIPE };
+const UNAVAILABLE = { status: 503, data: { error: 'Subscriptions are not available right now.' } };
+const PROVIDER_DOWN = { status: 502, data: { error: 'We could not reach the payment provider. Try again in a moment.' } };
+
+async function shop(overrides = {}, fakeOptions = {}) {
+  const fake = createFakeStripe(fakeOptions);
+  const app = await startApp({ ...SELLING, ...overrides }, { stripe: fake });
+  const on = (method, url, options = {}) => call(method, url, { ...options, origin: app.origin });
+  return {
+    ...app,
+    fake,
+    on,
+    subscription: (who, body) => on('POST', '/api/functions/subscription', { token: who.token, body }),
+    access: (who) => on('POST', '/api/functions/inviteAccess', { token: who.token, body: { action: 'status' } }),
+    runs: (who) => on('POST', '/api/entities/Run/query', { token: who.token, body: {} }),
+    // The newest checkout session the fake holds for this account.
+    sessionOf: (who) => [...fake.state.sessions.values()].filter((s) => s.client_reference_id === who.user.id).at(-1),
+    // Checkout and Stripe's page, with no webhook: returns the fake's subscription.
+    async subscribe(who, plan = 'monthly') {
+      const res = await on('POST', '/api/functions/subscription', { token: who.token, body: { action: 'checkout', plan } });
+      assert.equal(res.status, 200, JSON.stringify(res.data));
+      return fake.completeCheckout(this.sessionOf(who).id);
+    },
+  };
+}
+
+describe('subscribing on the website', () => {
+  let store;
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.', code: 'no_access' } };
+
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('status says whether the server is selling', async () => {
+    const pia = await legacyUser('pia.status@example.com');
+    const fresh = { trial_available: true, customer: false, subscription: null, duplicate: false };
+    assert.deepEqual(await call('POST', '/api/functions/subscription', { token: pia.token, body: { action: 'status' } }), {
+      status: 200, data: { selling: false, ...fresh },
+    });
+    const switchOnly = await startApp({ subscriptions: true });
+    try {
+      const res = await call('POST', '/api/functions/subscription', { token: pia.token, body: {}, origin: switchOnly.origin });
+      assert.deepEqual(res, { status: 200, data: { selling: false, ...fresh } });
+    } finally {
+      await switchOnly.close();
+    }
+    assert.deepEqual(await store.subscription(pia, { action: 'status' }), { status: 200, data: { selling: true, ...fresh } });
+    assert.equal(store.fake.calls.length, 0, 'reading the status never calls Stripe');
+    assert.equal((await store.subscription(pia, { action: 'dance' })).status, 400);
+  });
+
+  test('checkout returns the address at Stripe and asks for a 7-day trial once', async () => {
+    const tom = await legacyUser('tom.trial@example.com');
+    const first = await store.subscription(tom, { action: 'checkout', plan: 'monthly' });
+    assert.equal(first.status, 200, JSON.stringify(first.data));
+    const session = store.sessionOf(tom);
+    assert.deepEqual(first.data, { url: session.url });
+    const [made] = store.fake.callsTo('createCheckoutSession').filter((c) => c.args.userId === tom.user.id);
+    assert.equal(made.args.trialDays, 7);
+    assert.equal(made.args.priceId, TEST_STRIPE.prices.monthly);
+    assert.equal(made.args.successUrl, `${testConfig.appUrl}/?checkout=success`);
+    assert.equal(made.args.cancelUrl, `${testConfig.appUrl}/?checkout=cancelled`);
+    assert.equal(session.client_reference_id, tom.user.id);
+    const row = await userRow(tom.user.id);
+    assert.match(row.stripe_customer_id, /^cus_/);
+    assert.equal(row.stripe_customer_id, session.customer);
+    assert.equal(row.trial_used_at, null, 'opening checkout does not use up the trial');
+    assert.equal((await store.subscription(tom, { action: 'status' })).data.customer, true);
+
+    // once the trial has been had, on either platform, the next checkout starts paid
+    await db.query('update users set trial_used_at = now() where id = $1 returning id', [tom.user.id]);
+    assert.equal((await store.subscription(tom, { action: 'status' })).data.trial_available, false);
+    const second = await store.subscription(tom, { action: 'checkout', plan: 'annual' });
+    assert.equal(second.status, 200, JSON.stringify(second.data));
+    const again = store.fake.callsTo('createCheckoutSession').filter((c) => c.args.userId === tom.user.id).at(-1);
+    assert.equal(again.args.trialDays, 0);
+    assert.equal(again.args.priceId, TEST_STRIPE.prices.annual);
+    assert.equal(again.args.customerId, row.stripe_customer_id, 'the same customer is used again');
+  });
+
+  test('the plan must be one of the two', async () => {
+    const pat = await legacyUser('pat.plan@example.com');
+    for (const plan of [undefined, 'weekly', 'price_monthly_test', 42]) {
+      assert.deepEqual(await store.subscription(pat, { action: 'checkout', plan }), {
+        status: 400, data: { error: 'Choose the monthly or the annual plan.' },
+      });
+    }
+    assert.equal(store.sessionOf(pat), undefined);
+  });
+
+  test('checkout is not offered while the switch is off or the keys are missing', async () => {
+    const olga = await legacyUser('olga.off@example.com');
+    const fake = createFakeStripe();
+    // keys present, switch off
+    const switchOff = await startApp({ stripe: TEST_STRIPE }, { stripe: fake });
+    // switch on, keys missing
+    const noKeys = await startApp({ subscriptions: true }, { stripe: fake });
+    try {
+      for (const app of [switchOff, noKeys]) {
+        const res = await call('POST', '/api/functions/subscription', { token: olga.token, body: { action: 'checkout', plan: 'monthly' }, origin: app.origin });
+        assert.deepEqual(res, UNAVAILABLE);
+      }
+      assert.deepEqual(await call('POST', '/api/functions/subscription', { token: olga.token, body: { action: 'checkout', plan: 'monthly' } }), UNAVAILABLE);
+    } finally {
+      await switchOff.close();
+      await noKeys.close();
+    }
+    assert.equal(fake.calls.length, 0, 'Stripe was never called');
+    assert.equal((await userRow(olga.user.id)).stripe_customer_id, null);
+  });
+
+  test('a price at Stripe that does not match the plan stops checkout', async () => {
+    const mia = await legacyUser('mia.mismatch@example.com');
+    const wrongAmount = { ...TEST_PRICES, [TEST_STRIPE.prices.monthly]: { ...TEST_PRICES[TEST_STRIPE.prices.monthly], unit_amount: 599 } };
+    const wrongInterval = { ...TEST_PRICES, [TEST_STRIPE.prices.annual]: { ...TEST_PRICES[TEST_STRIPE.prices.annual], recurring: { interval: 'month', interval_count: 1 } } };
+    const wrongCurrency = { ...TEST_PRICES, [TEST_STRIPE.prices.annual]: { ...TEST_PRICES[TEST_STRIPE.prices.annual], currency: 'eur' } };
+    for (const prices of [wrongAmount, wrongInterval, wrongCurrency]) {
+      const bad = await shop({}, { prices });
+      try {
+        // either plan is refused: nobody is sent to checkout while one price is wrong
+        assert.deepEqual(await bad.subscription(mia, { action: 'checkout', plan: 'annual' }), UNAVAILABLE);
+        assert.deepEqual(await bad.subscription(mia, { action: 'checkout', plan: 'monthly' }), UNAVAILABLE);
+        assert.equal(bad.fake.state.sessions.size, 0);
+        assert.equal(bad.fake.state.customers.size, 0);
+      } finally {
+        await bad.close();
+      }
+    }
+    // the owner is told, in the error reports
+    let reports = [];
+    for (let i = 0; i < 40 && !reports.length; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      reports = await db.query(`select message, context from client_errors where platform = 'server' and message like 'The Stripe price for the%'`, []);
+    }
+    assert.ok(reports.length >= 1, 'a mismatch is written to the error reports');
+    assert.match(reports[0].message, /does not match/);
+    await db.query(`delete from client_errors where platform = 'server' returning id`, []);
+  });
+
+  test('someone with an invite code or a free pass is never sent to checkout', async () => {
+    const ALREADY = { status: 409, data: { error: 'You already have access, so there is nothing to pay.' } };
+    const ivy = await invitedUser('ivy.invited@example.com');
+    const gus = await legacyUser('gus.granted@example.com');
+    await db.tx((tx) => grantFree(tx, { userId: gus.user.id, source: 'admin', grantedBy: 'owner@example.com' }));
+    for (const who of [ivy, gus, admin]) {
+      assert.deepEqual(await store.subscription(who, { action: 'checkout', plan: 'monthly' }), ALREADY);
+      assert.equal((await userRow(who.user.id)).stripe_customer_id, null);
+    }
+    assert.equal(store.fake.callsTo('createCustomer').filter((c) => [ivy, gus, admin].some((w) => w.user.id === c.args.userId)).length, 0);
+  });
+
+  test('two checkouts at once share one Stripe customer and leave one open session', async () => {
+    const twin = await shop();
+    try {
+      const tab = await legacyUser('tab.twice@example.com');
+      const [a, b] = await Promise.all([
+        twin.subscription(tab, { action: 'checkout', plan: 'monthly' }),
+        twin.subscription(tab, { action: 'checkout', plan: 'annual' }),
+      ]);
+      assert.deepEqual([a.status, b.status], [200, 200], JSON.stringify([a.data, b.data]));
+      assert.equal(twin.fake.state.customers.size, 1);
+      const statuses = [...twin.fake.state.sessions.values()].map((s) => s.status).sort();
+      assert.deepEqual(statuses, ['expired', 'open']);
+      // and a third, later, leaves still only one open
+      await twin.subscription(tab, { action: 'checkout', plan: 'monthly' });
+      assert.equal([...twin.fake.state.sessions.values()].filter((s) => s.status === 'open').length, 1);
+      assert.equal(twin.fake.state.customers.size, 1);
+    } finally {
+      await twin.close();
+    }
+  });
+
+  test('checkout is refused once a subscription exists at Stripe, even before its webhook', async () => {
+    const SUBSCRIBED = { status: 409, data: { error: 'You already have a subscription. Manage it in Settings.' } };
+    const paz = await legacyUser('paz.paid@example.com');
+    assert.deepEqual(await store.runs(paz), NO_ACCESS);
+    await store.subscribe(paz, 'monthly');
+    // no webhook has arrived; a second tab tries to pay again
+    assert.deepEqual(await store.subscription(paz, { action: 'checkout', plan: 'monthly' }), SUBSCRIBED);
+    assert.equal((await store.runs(paz)).status, 200, 'and the check let the person in');
+    assert.equal([...store.fake.state.sessions.values()].filter((s) => s.client_reference_id === paz.user.id).length, 1);
+    const [row] = await entitlementsOf(paz.user.id);
+    assert.deepEqual([row.source, row.status, row.plan], ['stripe', 'trial', 'monthly']);
+    // with the row in place the refusal needs no call to Stripe at all
+    const before = store.fake.calls.length;
+    assert.deepEqual(await store.subscription(paz, { action: 'checkout', plan: 'annual' }), SUBSCRIBED);
+    assert.equal(store.fake.calls.length, before);
+  });
+
+  test('a Stripe failure is a clear 502 and nothing is half-made', async () => {
+    const fay = await legacyUser('fay.fail@example.com');
+    for (const method of ['createCustomer', 'listOpenCheckoutSessions', 'createCheckoutSession']) {
+      store.fake.failNext(method);
+      assert.deepEqual(await store.subscription(fay, { action: 'checkout', plan: 'monthly' }), PROVIDER_DOWN, method);
+      assert.equal(store.sessionOf(fay), undefined, `no session after ${method} failed`);
+    }
+    const ok = await store.subscription(fay, { action: 'checkout', plan: 'monthly' });
+    assert.equal(ok.status, 200, JSON.stringify(ok.data));
+    assert.equal([...store.fake.state.customers.values()].filter((c) => c.metadata.user_id === fay.user.id).length, 1);
+    assert.equal((await entitlementsOf(fay.user.id)).length, 0);
+  });
+
+  test('the subscription function is open to an account without access, and closed to nobody signed in', async () => {
+    const lee = await legacyUser('lee.locked@example.com');
+    assert.deepEqual(await store.runs(lee), NO_ACCESS);
+    assert.equal((await store.subscription(lee, { action: 'status' })).status, 200);
+    assert.deepEqual(await store.on('POST', '/api/functions/subscription', { body: { action: 'status' } }), { status: 401, data: { error: 'Unauthorized' } });
+  });
+
+  test('a person is stopped after ten checkouts in an hour', async () => {
+    const rex = await legacyUser('rex.repeat@example.com');
+    let last;
+    for (let i = 0; i < 11; i++) last = await store.subscription(rex, { action: 'checkout', plan: 'monthly' });
+    assert.equal(last.status, 429);
+    assert.equal(store.fake.callsTo('createCheckoutSession').filter((c) => c.args.userId === rex.user.id).length, 10);
+  });
+});
+
+describe('Stripe webhook', () => {
+  let store;
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.', code: 'no_access' } };
+  const RECEIVED = { status: 200, data: { received: true } };
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const near = (actual, expectedMs, message) =>
+    assert.ok(Math.abs(new Date(actual).getTime() - expectedMs) < 2 * 60 * 1000, `${message}: ${new Date(actual).toISOString()}`);
+
+  // Posts a delivery exactly as Stripe would: the raw body and its signature header.
+  const deliver = (event, { secret = TEST_STRIPE.webhookSecret, at, body, header } = {}) => {
+    const signed = signedEvent(secret, event, { at });
+    return store.on('POST', '/api/stripe/webhook', {
+      raw: body ?? signed.body,
+      headers: { 'Content-Type': 'application/json', ...(header === null ? {} : { 'Stripe-Signature': header ?? signed.header }) },
+    });
+  };
+  const customerOf = async (who) => (await userRow(who.user.id)).stripe_customer_id;
+  // A notice about the account's customer. Only the type and the customer are read from it.
+  const notify = async (who, type, extra = {}) => deliver({ type, object: { id: 'obj_ignored', customer: await customerOf(who), ...extra } });
+  const eventCount = async () => (await db.query('select count(*)::int as n from stripe_events', []))[0].n;
+  const stripeRows = async (who) => (await entitlementsOf(who.user.id)).filter((r) => r.source === 'stripe');
+
+  // Someone who went through checkout and whose first notice has arrived.
+  async function subscriber(email, plan = 'monthly') {
+    const who = await legacyUser(email);
+    const sub = await store.subscribe(who, plan);
+    assert.deepEqual(await notify(who, 'checkout.session.completed'), RECEIVED);
+    return { who, sub };
+  }
+
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+    await new Promise((r) => setTimeout(r, 100));
+    await db.query(`delete from client_errors where platform = 'server' returning id`, []);
+  });
+
+  test('an unsigned or wrongly signed notice is refused and changes nothing', async () => {
+    const INVALID = { status: 400, data: { error: 'Invalid signature.' } };
+    const uma = await legacyUser('uma.unsigned@example.com');
+    await store.subscribe(uma);
+    const event = { type: 'checkout.session.completed', object: { customer: await customerOf(uma) } };
+    const before = await eventCount();
+
+    assert.deepEqual(await deliver(event, { header: null }), INVALID);
+    assert.deepEqual(await deliver(event, { header: 'nonsense' }), INVALID);
+    assert.deepEqual(await deliver(event, { secret: 'whsec_someone_else' }), INVALID);
+    assert.deepEqual(await deliver(event, { at: Date.now() - 10 * 60 * 1000 }), INVALID, 'a delivery replayed ten minutes later');
+    // a correct signature, but over a different body
+    const other = signedEvent(TEST_STRIPE.webhookSecret, { type: 'invoice.paid', object: { customer: 'cus_other' } });
+    assert.deepEqual(await deliver(event, { header: other.header }), INVALID);
+    // a body that does not match its signature is refused on the signature, before anything is read from it
+    assert.deepEqual(await deliver(event, { body: 'not json' }), INVALID);
+    // and one that is signed correctly but is not JSON is refused as not being an event
+    const junk = 'this is not JSON {';
+    assert.deepEqual(await deliver(event, { body: junk, header: signBody(TEST_STRIPE.webhookSecret, junk) }), {
+      status: 400, data: { error: 'That is not a Stripe event.' },
+    });
+    const noId = JSON.stringify({ type: 'invoice.paid', data: { object: {} } });
+    assert.deepEqual(await deliver(event, { body: noId, header: signBody(TEST_STRIPE.webhookSecret, noId) }), {
+      status: 400, data: { error: 'That is not a Stripe event.' },
+    });
+
+    assert.equal((await stripeRows(uma)).length, 0);
+    assert.equal(await eventCount(), before);
+    assert.deepEqual(await store.runs(uma), NO_ACCESS);
+    assert.equal(store.fake.callsTo('listSubscriptions').length, 0);
+  });
+
+  test('the webhook is not there without the keys', async () => {
+    const { body, header } = signedEvent(TEST_STRIPE.webhookSecret, { type: 'invoice.paid', object: { customer: 'cus_x' } });
+    const res = await call('POST', '/api/stripe/webhook', { raw: body, headers: { 'Content-Type': 'application/json', 'Stripe-Signature': header } });
+    assert.deepEqual(res, { status: 404, data: { error: 'Not found' } });
+  });
+
+  test('checkout completed opens the account', async () => {
+    const cleo = await legacyUser('cleo.checkout@example.com');
+    await store.subscribe(cleo, 'monthly');
+    assert.deepEqual(await store.runs(cleo), NO_ACCESS);
+    assert.deepEqual(await notify(cleo, 'checkout.session.completed'), RECEIVED);
+
+    const [row] = await stripeRows(cleo);
+    assert.deepEqual([row.status, row.plan, row.cancel_at_period_end], ['trial', 'monthly', false]);
+    assert.match(row.external_id, /^sub_/);
+    near(row.expires_at, Date.now() + 7 * DAY_MS, 'the trial ends in 7 days');
+    assert.ok((await userRow(cleo.user.id)).trial_used_at, 'the free trial is used up');
+    assert.equal((await store.runs(cleo)).status, 200);
+    const access = (await store.access(cleo)).data;
+    assert.deepEqual([access.allowed, access.reason, access.source, access.plan], [true, 'trial', 'stripe', 'monthly']);
+    const status = (await store.subscription(cleo, { action: 'status' })).data;
+    assert.deepEqual([status.trial_available, status.customer, status.subscription.status, status.duplicate], [false, true, 'trial', false]);
+  });
+
+  test('renewal moves the end date and clears grace', async () => {
+    const { who, sub } = await subscriber('rene.renews@example.com', 'annual');
+    store.fake.setSubscription(sub.id, { status: 'active', current_period_start: daysFromNowUnix(0), current_period_end: daysFromNowUnix(365) });
+    assert.deepEqual(await notify(who, 'invoice.paid'), RECEIVED);
+    let [row] = await stripeRows(who);
+    assert.deepEqual([row.status, row.plan], ['active', 'annual']);
+    near(row.expires_at, Date.now() + 365 * DAY_MS, 'the paid year');
+
+    store.fake.setSubscription(sub.id, { status: 'past_due', current_period_start: daysFromNowUnix(-1), current_period_end: daysFromNowUnix(364) });
+    await notify(who, 'invoice.payment_failed');
+    [row] = await stripeRows(who);
+    assert.equal(row.status, 'grace');
+
+    store.fake.setSubscription(sub.id, { status: 'active' });
+    await notify(who, 'invoice.paid');
+    [row] = await stripeRows(who);
+    assert.equal(row.status, 'active');
+    near(row.expires_at, Date.now() + 364 * DAY_MS, 'the new period end');
+    assert.equal((await store.access(who)).data.reason, 'subscription');
+  });
+
+  test('a failed payment keeps access for three days and no longer', async () => {
+    const { who, sub } = await subscriber('fern.failed@example.com');
+    // the period that was paid for ended two days ago, and the charge for the next one failed
+    store.fake.setSubscription(sub.id, { status: 'past_due', current_period_start: daysFromNowUnix(-2), current_period_end: daysFromNowUnix(28) });
+    assert.deepEqual(await notify(who, 'invoice.payment_failed'), RECEIVED);
+    let [row] = await stripeRows(who);
+    assert.equal(row.status, 'grace');
+    near(row.expires_at, Date.now() - 2 * DAY_MS, 'the end of what was paid for');
+    assert.equal((await store.runs(who)).status, 200, `inside the ${GRACE_DAYS}-day allowance`);
+
+    store.fake.setSubscription(sub.id, { current_period_start: daysFromNowUnix(-4), current_period_end: daysFromNowUnix(26) });
+    await notify(who, 'customer.subscription.updated');
+    [row] = await stripeRows(who);
+    assert.equal(row.status, 'grace');
+    assert.deepEqual(await store.runs(who), NO_ACCESS);
+    // the paywall can still see why
+    assert.equal((await store.subscription(who, { action: 'status' })).data.subscription.status, 'grace');
+  });
+
+  test('cancel at period end, then resume', async () => {
+    const { who, sub } = await subscriber('cara.cancels@example.com');
+    store.fake.setSubscription(sub.id, { cancel_at_period_end: true });
+    await notify(who, 'customer.subscription.updated');
+    let [row] = await stripeRows(who);
+    assert.deepEqual([row.status, row.cancel_at_period_end], ['trial', true]);
+    assert.equal((await store.runs(who)).status, 200, 'access runs to the end of the period');
+    assert.equal((await store.access(who)).data.cancel_at_period_end, true);
+
+    store.fake.setSubscription(sub.id, { cancel_at_period_end: false });
+    await notify(who, 'customer.subscription.updated');
+    [row] = await stripeRows(who);
+    assert.deepEqual([row.status, row.cancel_at_period_end], ['trial', false]);
+  });
+
+  test('final cancellation ends access', async () => {
+    const { who, sub } = await subscriber('enzo.ends@example.com');
+    store.fake.setSubscription(sub.id, { status: 'canceled', canceled_at: daysFromNowUnix(0), ended_at: daysFromNowUnix(0) });
+    assert.deepEqual(await notify(who, 'customer.subscription.deleted'), RECEIVED);
+    const [row] = await stripeRows(who);
+    assert.equal(row.status, 'expired');
+    assert.deepEqual(await store.runs(who), NO_ACCESS);
+    const status = (await store.subscription(who, { action: 'status' })).data;
+    assert.deepEqual([status.subscription, status.trial_available], [null, false]);
+  });
+
+  test('a refund without a free pass ends access immediately', async () => {
+    const { who, sub } = await subscriber('rafa.refund@example.com', 'annual');
+    store.fake.setSubscription(sub.id, { status: 'active', current_period_end: daysFromNowUnix(350) });
+    await notify(who, 'invoice.paid');
+    assert.equal((await store.runs(who)).status, 200);
+
+    const charge = store.fake.chargeFor(sub.id);
+    const refund = await deliver({ type: 'charge.refunded', object: { id: charge, customer: await customerOf(who), refunded: true } });
+    assert.deepEqual(refund, RECEIVED);
+    const [row] = await stripeRows(who);
+    assert.deepEqual([row.status, row.note, row.cancel_at_period_end], ['revoked', 'Refunded', false]);
+    near(row.expires_at, Date.now(), 'ended now');
+    assert.deepEqual(store.fake.callsTo('cancelSubscription').map((c) => c.args.subscriptionId).filter((id) => id === sub.id), [sub.id]);
+    assert.equal(store.fake.state.subscriptions.get(sub.id).status, 'canceled');
+    assert.deepEqual(await store.runs(who), NO_ACCESS, 'no three-day allowance after a refund');
+    assert.equal((await store.subscription(who, { action: 'status' })).data.subscription, null);
+  });
+
+  test('a refund ends the paid row and leaves a free pass standing', async () => {
+    const { who, sub } = await subscriber('pola.pass@example.com');
+    await db.tx((tx) => grantFree(tx, { userId: who.user.id, source: 'invite', grantedBy: 'FP-GIFT-0001' }));
+    assert.equal((await store.access(who)).data.reason, 'trial');
+
+    const charge = store.fake.chargeFor(sub.id);
+    await deliver({ type: 'charge.refunded', object: { id: charge, customer: await customerOf(who), refunded: true } });
+    assert.deepEqual((await entitlementsOf(who.user.id)).map((r) => [r.source, r.status]).sort(), [['invite', 'active'], ['stripe', 'revoked']]);
+    const access = (await store.access(who)).data;
+    assert.deepEqual([access.allowed, access.reason, access.source], [true, 'invite', 'invite']);
+    assert.equal((await store.runs(who)).status, 200);
+  });
+
+  test('two subscriptions on one account: refunding one leaves the other', async () => {
+    const { who, sub: first } = await subscriber('dora.double@example.com');
+    const second = store.fake.addSubscription({ customerId: await customerOf(who), priceId: TEST_STRIPE.prices.annual, status: 'active' });
+    await notify(who, 'customer.subscription.created');
+    assert.deepEqual((await stripeRows(who)).map((r) => [r.external_id, r.status]).sort(), [[first.id, 'trial'], [second.id, 'active']].sort());
+    assert.equal((await store.subscription(who, { action: 'status' })).data.duplicate, true);
+    const listed = (await call('POST', '/api/functions/adminAccess', { token: admin.token, body: { action: 'list', search: 'dora.double@' } })).data.people[0];
+    assert.equal(listed.entitlements.filter((e) => e.source === 'stripe').length, 2, 'the owner sees both');
+
+    const charge = store.fake.chargeFor(first.id);
+    await deliver({ type: 'charge.refunded', object: { id: charge, customer: await customerOf(who), refunded: true } });
+    assert.deepEqual((await stripeRows(who)).map((r) => [r.external_id, r.status]).sort(), [[first.id, 'revoked'], [second.id, 'active']].sort());
+    assert.equal(store.fake.state.subscriptions.get(second.id).status, 'active', 'the other one was not cancelled at Stripe');
+    const access = (await store.access(who)).data;
+    assert.deepEqual([access.allowed, access.reason, access.plan], [true, 'subscription', 'annual']);
+    assert.equal((await store.subscription(who, { action: 'status' })).data.duplicate, false);
+  });
+
+  test('a refund Stripe cannot trace ends the only subscription, and neither of two', async () => {
+    const { who: one, sub: only } = await subscriber('una.untraced@example.com');
+    const lost = store.fake.chargeFor(only.id, { traceable: false });
+    await deliver({ type: 'charge.refunded', object: { id: lost, customer: await customerOf(one), refunded: true } });
+    assert.deepEqual((await stripeRows(one)).map((r) => r.status), ['revoked']);
+
+    const { who: two, sub: first } = await subscriber('tess.two@example.com');
+    const customer = await customerOf(two);
+    store.fake.addSubscription({ customerId: customer, priceId: TEST_STRIPE.prices.annual, status: 'active' });
+    const unknown = store.fake.chargeFor(first.id, { traceable: false });
+    assert.deepEqual(await deliver({ type: 'charge.refunded', object: { id: unknown, customer, refunded: true } }), RECEIVED);
+    assert.deepEqual((await stripeRows(two)).map((r) => r.status).sort(), ['active', 'trial'], 'neither was ended');
+    let reports = [];
+    for (let i = 0; i < 40 && !reports.length; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      reports = await db.query(`select message from client_errors where platform = 'server' and message like 'Refund received for%'`, []);
+    }
+    assert.equal(reports[0]?.message, `Refund received for ${customer} but the subscription could not be identified. Cancel it in Stripe.`);
+  });
+
+  test('a repeated event changes nothing', async () => {
+    const dee = await legacyUser('dee.duplicate@example.com');
+    await store.subscribe(dee);
+    const customer = await customerOf(dee);
+    const event = { id: 'evt_test_repeat_0001', type: 'checkout.session.completed', object: { customer } };
+    assert.deepEqual(await deliver(event), RECEIVED);
+    const [first] = await stripeRows(dee);
+    const calls = store.fake.callsTo('listSubscriptions').filter((c) => c.args.customerId === customer).length;
+
+    assert.deepEqual(await deliver(event), { status: 200, data: { received: true, duplicate: true } });
+    const [second] = await stripeRows(dee);
+    assert.equal(new Date(second.updated_date).getTime(), new Date(first.updated_date).getTime());
+    assert.equal(store.fake.callsTo('listSubscriptions').filter((c) => c.args.customerId === customer).length, calls, 'Stripe was not asked again');
+    assert.equal(calls, 1);
+    // a different event that finds nothing new leaves the row as it was, too
+    await notify(dee, 'customer.subscription.updated');
+    const [third] = await stripeRows(dee);
+    assert.equal(new Date(third.updated_date).getTime(), new Date(first.updated_date).getTime());
+  });
+
+  test('an old notice arriving after cancellation does not reopen access', async () => {
+    const { who, sub } = await subscriber('otto.order@example.com');
+    store.fake.setSubscription(sub.id, { status: 'canceled', canceled_at: daysFromNowUnix(0), ended_at: daysFromNowUnix(0) });
+    await notify(who, 'customer.subscription.deleted');
+    // the notice that the subscription was created turns up late, still saying "trialing"
+    assert.deepEqual(await notify(who, 'customer.subscription.created', { status: 'trialing', id: sub.id }), RECEIVED);
+    assert.deepEqual((await stripeRows(who)).map((r) => r.status), ['expired']);
+    assert.deepEqual(await store.runs(who), NO_ACCESS);
+
+    // after a refund the row stays ended whatever Stripe says about the subscription later
+    const { who: back, sub: paid } = await subscriber('rory.reopened@example.com');
+    await deliver({ type: 'charge.refunded', object: { id: store.fake.chargeFor(paid.id), customer: await customerOf(back), refunded: true } });
+    store.fake.setSubscription(paid.id, { status: 'active', canceled_at: null, ended_at: null, current_period_end: daysFromNowUnix(30) });
+    await notify(back, 'customer.subscription.updated');
+    assert.deepEqual((await stripeRows(back)).map((r) => [r.status, r.note]), [['revoked', 'Refunded']]);
+    assert.deepEqual(await store.runs(back), NO_ACCESS);
+  });
+
+  test('a notice is asked for again when Stripe cannot be reached', async () => {
+    const ned = await legacyUser('ned.network@example.com');
+    await store.subscribe(ned);
+    const event = { id: 'evt_test_retry_0001', type: 'checkout.session.completed', object: { customer: await customerOf(ned) } };
+    store.fake.failNext('listSubscriptions');
+    const failed = await deliver(event);
+    assert.equal(failed.status, 500);
+    assert.equal((await db.query('select id from stripe_events where id = $1', [event.id])).length, 0);
+    assert.equal((await stripeRows(ned)).length, 0);
+
+    assert.deepEqual(await deliver(event), RECEIVED, 'the same event, sent again, is handled');
+    assert.deepEqual((await stripeRows(ned)).map((r) => r.status), ['trial']);
+    assert.equal((await db.query('select type from stripe_events where id = $1', [event.id]))[0].type, 'checkout.session.completed');
+  });
+
+  test('a notice for a customer we do not know is accepted and ignored', async () => {
+    const [{ n: before }] = await db.query('select count(*)::int as n from entitlements', []);
+    const calls = store.fake.calls.length;
+    assert.deepEqual(await deliver({ type: 'customer.subscription.updated', object: { customer: 'cus_nobody_here' } }), RECEIVED);
+    assert.deepEqual(await deliver({ type: 'charge.refunded', object: { id: 'ch_unknown', customer: 'cus_nobody_here', refunded: true } }), RECEIVED);
+    assert.deepEqual(await deliver({ type: 'invoice.paid', object: {} }), RECEIVED, 'no customer at all');
+    assert.deepEqual(await deliver({ type: 'customer.created', object: { id: 'cus_new' } }), RECEIVED, 'a type we do not act on');
+    assert.equal((await db.query('select count(*)::int as n from entitlements', []))[0].n, before);
+    assert.equal(store.fake.calls.length, calls, 'Stripe was not called');
+  });
+
+  test('a partial refund changes nothing', async () => {
+    const { who, sub } = await subscriber('pru.partial@example.com');
+    const cancels = store.fake.callsTo('cancelSubscription').length;
+    const charge = store.fake.chargeFor(sub.id);
+    assert.deepEqual(await deliver({ type: 'charge.refunded', object: { id: charge, customer: await customerOf(who), refunded: false, amount_refunded: 100 } }), RECEIVED);
+    assert.deepEqual((await stripeRows(who)).map((r) => [r.status, r.note]), [['trial', null]]);
+    assert.equal(store.fake.callsTo('cancelSubscription').length, cancels);
+    assert.equal((await store.runs(who)).status, 200);
+  });
+
+  test('old event ids are cleared out as new ones arrive', async () => {
+    await db.query(`insert into stripe_events (id, type, received_at) values ('evt_test_ancient', 'invoice.paid', now() - interval '31 days'), ('evt_test_recent', 'invoice.paid', now() - interval '29 days') returning id`, []);
+    await deliver({ type: 'customer.created', object: {} });
+    const left = (await db.query(`select id from stripe_events where id in ('evt_test_ancient', 'evt_test_recent')`, [])).map((r) => r.id);
+    assert.deepEqual(left, ['evt_test_recent']);
+  });
+
+  test('no card details are stored', async () => {
+    const { who, sub } = await subscriber('nina.nocard@example.com', 'annual');
+    await deliver({ type: 'charge.refunded', object: { id: store.fake.chargeFor(sub.id), customer: await customerOf(who), refunded: true, payment_method_details: { card: { last4: '4242', brand: 'visa' } } } });
+    const columns = async (table) =>
+      (await db.query('select column_name from information_schema.columns where table_schema = current_schema() and table_name = $1', [table])).map((r) => r.column_name).sort();
+    assert.deepEqual(await columns('stripe_events'), ['id', 'received_at', 'type']);
+    for (const table of ['users', 'entitlements', 'stripe_events']) {
+      assert.equal((await columns(table)).some((name) => /card|payment_method|last4|iban/.test(name)), false, table);
+    }
+    // the only things from Stripe on the account are its customer id and its subscription id
+    const user = await userRow(who.user.id);
+    const fromStripe = (row) => Object.entries(row).filter(([, v]) => typeof v === 'string' && /^(cus|sub|evt|ch|pi|pm|cs|in|card|price)_/.test(v));
+    assert.deepEqual(fromStripe(user).map(([k, v]) => [k, v.slice(0, 4)]), [['stripe_customer_id', 'cus_']]);
+    for (const row of await entitlementsOf(who.user.id)) {
+      assert.deepEqual(fromStripe(row).map(([k, v]) => [k, v.slice(0, 4)]), [['external_id', 'sub_']]);
+    }
+    const events = await db.query('select * from stripe_events', []);
+    assert.ok(events.length > 0);
+    for (const event of events) assert.match(event.id, /^evt_/);
+    assert.equal(JSON.stringify([user, await entitlementsOf(who.user.id), events]).includes('4242'), false);
+  });
+});
+
+describe('when the webhook is late', () => {
+  let store;
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.', code: 'no_access' } };
+  const customerOf = async (who) => (await userRow(who.user.id)).stripe_customer_id;
+  const stripeRows = async (who) => (await entitlementsOf(who.user.id)).filter((r) => r.source === 'stripe');
+  const listCalls = (fake, customer) => fake.callsTo('listSubscriptions').filter((c) => c.args.customerId === customer).length;
+
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('a payer whose webhook never arrives is let in on return from checkout', async () => {
+    const wes = await legacyUser('wes.waiting@example.com');
+    await store.subscribe(wes, 'annual');
+    assert.deepEqual(await store.runs(wes), NO_ACCESS);
+
+    const res = await store.subscription(wes, { action: 'refresh' });
+    assert.equal(res.status, 200, JSON.stringify(res.data));
+    assert.equal(res.data.allowed, true);
+    assert.deepEqual(
+      [res.data.selling, res.data.trial_available, res.data.customer, res.data.duplicate, res.data.subscription.status, res.data.subscription.plan],
+      [true, false, true, false, 'trial', 'annual']
+    );
+    assert.equal((await store.runs(wes)).status, 200);
+    assert.ok((await userRow(wes.user.id)).trial_used_at);
+  });
+
+  test('refresh for someone who abandoned checkout stays closed', async () => {
+    const abe = await legacyUser('abe.abandoned@example.com');
+    assert.equal((await store.subscription(abe, { action: 'checkout', plan: 'monthly' })).status, 200);
+    const res = await store.subscription(abe, { action: 'refresh' });
+    assert.deepEqual(res, {
+      status: 200,
+      data: { selling: true, trial_available: true, customer: true, subscription: null, duplicate: false, allowed: false },
+    });
+    assert.equal((await stripeRows(abe)).length, 0);
+    assert.deepEqual(await store.runs(abe), NO_ACCESS);
+    // someone who never started checkout: nothing to ask Stripe about
+    const nell = await legacyUser('nell.never@example.com');
+    const calls = store.fake.calls.length;
+    assert.equal((await store.subscription(nell, { action: 'refresh' })).data.allowed, false);
+    assert.equal(store.fake.calls.length, calls);
+  });
+
+  test("refresh cannot be pointed at someone else's subscription", async () => {
+    const payer = await legacyUser('vera.victim@example.com');
+    const paid = await store.subscribe(payer);
+    const session = store.sessionOf(payer);
+    const thief = await legacyUser('theo.thief@example.com');
+    await store.subscription(thief, { action: 'checkout', plan: 'monthly' });
+
+    const res = await store.subscription(thief, {
+      action: 'refresh',
+      subscription_id: paid.id, subscription: paid.id, customer: session.customer, customer_id: session.customer,
+      session_id: session.id, user_id: payer.user.id,
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.data.allowed, false);
+    assert.equal((await stripeRows(thief)).length, 0);
+    assert.deepEqual(await store.runs(thief), NO_ACCESS);
+    assert.equal(listCalls(store.fake, session.customer), 0, "the payer's customer was never asked about");
+    // and the payer still gets what they paid for
+    assert.equal((await store.subscription(payer, { action: 'refresh' })).data.allowed, true);
+    assert.deepEqual((await stripeRows(payer)).map((r) => r.external_id), [paid.id]);
+  });
+
+  test('a lost renewal is repaired when the phone asks for its status', async () => {
+    const lola = await legacyUser('lola.lost@example.com');
+    const sub = await store.subscribe(lola);
+    await store.subscription(lola, { action: 'refresh' });
+    // the period ended five days ago as far as we know; the renewal notice never came
+    await db.query(`update entitlements set status = 'active', expires_at = $2 where user_id = $1 and source = 'stripe' returning id`, [lola.user.id, daysFromNow(-5)]);
+    assert.deepEqual(await store.runs(lola), NO_ACCESS);
+    store.fake.setSubscription(sub.id, { status: 'active', current_period_start: daysFromNowUnix(-5), current_period_end: daysFromNowUnix(25) });
+
+    const customer = await customerOf(lola);
+    const before = listCalls(store.fake, customer);
+    const status = await store.access(lola);
+    assert.equal(status.status, 200);
+    assert.deepEqual(Object.keys(status.data).sort(), ['allowed', 'cancel_at_period_end', 'expires_at', 'plan', 'reason', 'source', 'subscriptions'], 'the shape the phone knows');
+    assert.deepEqual([status.data.allowed, status.data.reason, status.data.source], [true, 'subscription', 'stripe']);
+    const [row] = await stripeRows(lola);
+    assert.ok(new Date(row.expires_at).getTime() > Date.now() + 24 * 24 * 60 * 60 * 1000, 'the row has the new end date');
+    assert.equal(listCalls(store.fake, customer), before + 1);
+    // someone who has access is never a reason to call Stripe
+    await store.access(lola);
+    assert.equal(listCalls(store.fake, customer), before + 1);
+  });
+
+  test('a status check asks Stripe at most once in five minutes, and only for an account that has a customer', async () => {
+    const gone = await legacyUser('gil.gone@example.com');
+    const sub = await store.subscribe(gone);
+    store.fake.setSubscription(sub.id, { status: 'canceled', canceled_at: daysFromNowUnix(0), ended_at: daysFromNowUnix(0) });
+    const customer = await customerOf(gone);
+    assert.equal((await store.access(gone)).data.allowed, false);
+    assert.equal(listCalls(store.fake, customer), 1);
+    assert.equal((await store.access(gone)).data.allowed, false);
+    assert.equal((await store.access(gone)).data.allowed, false);
+    assert.equal(listCalls(store.fake, customer), 1, 'the second and third checks made no call');
+
+    const never = await legacyUser('nora.nocustomer@example.com');
+    const calls = store.fake.calls.length;
+    assert.equal((await store.access(never)).data.allowed, false);
+    assert.equal(store.fake.calls.length, calls);
+  });
+
+  test('the status check still answers when Stripe is down', async () => {
+    const dot = await legacyUser('dot.down@example.com');
+    await store.subscribe(dot);
+    store.fake.failNext('listSubscriptions');
+    const res = await store.access(dot);
+    assert.equal(res.status, 200);
+    assert.equal(res.data.allowed, false);
+    assert.equal(res.data.subscriptions, true);
+  });
+
+  test('looking after a subscription needs the keys, not the switch', async () => {
+    const kit = await legacyUser('kit.keys@example.com');
+    const sub = await store.subscribe(kit);
+    // the owner has switched SUBSCRIPTIONS off again; the keys are still there
+    const keysOnly = await startApp({ stripe: TEST_STRIPE }, { stripe: store.fake });
+    // and here the keys are gone altogether
+    const noKeys = await startApp({ subscriptions: true }, { stripe: store.fake });
+    const ask = (app, body) => call('POST', '/api/functions/subscription', { token: kit.token, body, origin: app.origin });
+    try {
+      const refreshed = await ask(keysOnly, { action: 'refresh' });
+      assert.deepEqual([refreshed.status, refreshed.data.allowed, refreshed.data.selling], [200, true, false]);
+      assert.equal((await ask(keysOnly, { action: 'portal' })).status, 200);
+      assert.deepEqual((await stripeRows(kit)).map((r) => r.external_id), [sub.id]);
+
+      for (const action of ['refresh', 'portal', 'resume']) {
+        assert.deepEqual(await ask(noKeys, { action }), UNAVAILABLE, action);
+      }
+    } finally {
+      await keysOnly.close();
+      await noKeys.close();
+    }
+  });
+
+  test("the portal link is made for the account's own customer", async () => {
+    const mo = await legacyUser('mo.manages@example.com');
+    await store.subscribe(mo);
+    await store.subscription(mo, { action: 'refresh' });
+    const res = await store.subscription(mo, { action: 'portal', customer: 'cus_someone_else', return_url: 'https://evil.example/' });
+    assert.equal(res.status, 200, JSON.stringify(res.data));
+    const made = store.fake.callsTo('createPortalSession').at(-1).args;
+    assert.equal(made.customerId, await customerOf(mo));
+    assert.equal(made.returnUrl, `${testConfig.appUrl}/settings?billing=updated`);
+    assert.equal(made.cancelSubscriptionId ?? null, null);
+    assert.deepEqual(res.data, { url: store.fake.state.portals.at(-1).url });
+  });
+
+  test("the cancel link names the account's subscription", async () => {
+    const cy = await legacyUser('cy.cancel@example.com');
+    const sub = await store.subscribe(cy);
+    await store.subscription(cy, { action: 'refresh' });
+    const res = await store.subscription(cy, { action: 'portal', flow: 'cancel', subscription: 'sub_someone_else' });
+    assert.equal(res.status, 200, JSON.stringify(res.data));
+    const made = store.fake.callsTo('createPortalSession').at(-1).args;
+    assert.deepEqual([made.customerId, made.cancelSubscriptionId], [await customerOf(cy), sub.id]);
+  });
+
+  test('no customer, no portal', async () => {
+    const ann = await legacyUser('ann.nothing@example.com');
+    const calls = store.fake.calls.length;
+    for (const body of [{ action: 'portal' }, { action: 'portal', flow: 'cancel' }]) {
+      assert.deepEqual(await store.subscription(ann, body), { status: 404, data: { error: 'You do not have a subscription to manage.' } });
+    }
+    assert.equal(store.fake.calls.length, calls);
+  });
+
+  test('resume clears the end date at Stripe and here', async () => {
+    const ray = await legacyUser('ray.resumes@example.com');
+    const sub = await store.subscribe(ray);
+    store.fake.setSubscription(sub.id, { cancel_at_period_end: true });
+    assert.equal((await store.subscription(ray, { action: 'refresh' })).data.subscription.cancel_at_period_end, true);
+
+    const res = await store.subscription(ray, { action: 'resume' });
+    assert.equal(res.status, 200, JSON.stringify(res.data));
+    assert.deepEqual([res.data.subscription.status, res.data.subscription.cancel_at_period_end], ['trial', false]);
+    assert.deepEqual(store.fake.callsTo('setCancelAtPeriodEnd').at(-1).args, { subscriptionId: sub.id, value: false });
+    assert.equal(store.fake.state.subscriptions.get(sub.id).cancel_at_period_end, false);
+    assert.equal((await stripeRows(ray))[0].cancel_at_period_end, false);
+  });
+
+  test('resume with nothing to resume', async () => {
+    const NOTHING = { status: 400, data: { error: 'Your subscription is not set to end, so there is nothing to resume.' } };
+    const sam = await legacyUser('sam.steady@example.com');
+    assert.deepEqual(await store.subscription(sam, { action: 'resume' }), NOTHING, 'no subscription at all');
+    await store.subscribe(sam);
+    await store.subscription(sam, { action: 'refresh' });
+    const calls = store.fake.callsTo('setCancelAtPeriodEnd').length;
+    assert.deepEqual(await store.subscription(sam, { action: 'resume' }), NOTHING, 'one that is not ending');
+    assert.equal(store.fake.callsTo('setCancelAtPeriodEnd').length, calls);
+  });
+
+  test('a Stripe failure in any of them is the same clear 502', async () => {
+    const zed = await legacyUser('zed.zapped@example.com');
+    const sub = await store.subscribe(zed);
+    await store.subscription(zed, { action: 'refresh' });
+    store.fake.setSubscription(sub.id, { cancel_at_period_end: true });
+    await store.subscription(zed, { action: 'refresh' });
+
+    store.fake.failNext('listSubscriptions');
+    assert.deepEqual(await store.subscription(zed, { action: 'refresh' }), PROVIDER_DOWN);
+    store.fake.failNext('createPortalSession');
+    assert.deepEqual(await store.subscription(zed, { action: 'portal' }), PROVIDER_DOWN);
+    store.fake.failNext('setCancelAtPeriodEnd');
+    assert.deepEqual(await store.subscription(zed, { action: 'resume' }), PROVIDER_DOWN);
+    assert.equal((await stripeRows(zed))[0].cancel_at_period_end, true, 'nothing changed here');
+  });
+});
+
+describe('your data: an account with a subscription', () => {
+  let store;
+  const NOT_DELETED = {
+    status: 502,
+    data: { error: 'We could not cancel your subscription, so your account was not deleted. Try again in a few minutes, or email info@dtisys.com.' },
+  };
+  const remove = (app, who, password = 'correct-horse-1') =>
+    call('DELETE', '/api/auth/me', { token: who.token, body: { password }, origin: app.origin });
+  const login = (email) => call('POST', '/api/auth/login', { body: { email, password: 'correct-horse-1' } });
+
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('deleting an account deletes its Stripe customer first', async () => {
+    const del = await legacyUser('del.deletes@example.com');
+    const sub = await store.subscribe(del);
+    await store.subscription(del, { action: 'refresh' });
+    const customer = (await userRow(del.user.id)).stripe_customer_id;
+    // the customer is deleted while the account still exists: the fake looks when it is called
+    let accountThere = null;
+    const real = store.fake.deleteCustomer;
+    store.fake.deleteCustomer = async (id) => {
+      accountThere = Boolean(await userRow(del.user.id));
+      return real(id);
+    };
+    try {
+      assert.deepEqual(await remove(store, del), { status: 200, data: { ok: true, deleted: true } });
+    } finally {
+      store.fake.deleteCustomer = real;
+    }
+    assert.equal(accountThere, true);
+    assert.deepEqual(store.fake.callsTo('deleteCustomer').at(-1).args, { customerId: customer });
+    assert.equal(store.fake.state.customers.get(customer).deleted, true);
+    assert.equal(store.fake.state.subscriptions.get(sub.id).status, 'canceled', 'so nothing is billed again');
+    assert.equal(await userRow(del.user.id), undefined);
+    assert.equal((await entitlementsOf(del.user.id)).length, 0);
+    assert.equal((await login('del.deletes@example.com')).status, 401);
+  });
+
+  test('the account is kept when Stripe cannot be reached', async () => {
+    const kay = await legacyUser('kay.kept@example.com');
+    const sub = await store.subscribe(kay);
+    await store.subscription(kay, { action: 'refresh' });
+    store.fake.failNext('deleteCustomer');
+    assert.deepEqual(await remove(store, kay), NOT_DELETED);
+    assert.ok(await userRow(kay.user.id));
+    assert.equal((await login('kay.kept@example.com')).status, 200, 'the person can still sign in');
+    assert.equal((await store.runs(kay)).status, 200, 'and still has what they pay for');
+    assert.equal(store.fake.state.subscriptions.get(sub.id).status, 'trialing');
+
+    assert.deepEqual(await remove(store, kay), { status: 200, data: { ok: true, deleted: true } }, 'trying again succeeds');
+    assert.equal(await userRow(kay.user.id), undefined);
+    assert.equal(store.fake.state.subscriptions.get(sub.id).status, 'canceled');
+  });
+
+  test('the account is kept when the keys have been removed', async () => {
+    const ken = await legacyUser('ken.keyless@example.com');
+    await store.subscribe(ken);
+    const calls = store.fake.callsTo('deleteCustomer').length;
+    // the main app has no Stripe settings at all
+    assert.deepEqual(await call('DELETE', '/api/auth/me', { token: ken.token, body: { password: 'correct-horse-1' } }), NOT_DELETED);
+    assert.ok(await userRow(ken.user.id));
+    assert.equal(store.fake.callsTo('deleteCustomer').length, calls);
+    // with the switch off but the keys present, it works
+    const keysOnly = await startApp({ stripe: TEST_STRIPE }, { stripe: store.fake });
+    try {
+      assert.equal((await remove(keysOnly, ken)).status, 200);
+    } finally {
+      await keysOnly.close();
+    }
+    assert.equal(await userRow(ken.user.id), undefined);
+  });
+
+  test('a wrong password never reaches Stripe', async () => {
+    const wyn = await legacyUser('wyn.wrong@example.com');
+    await store.subscribe(wyn);
+    const calls = store.fake.callsTo('deleteCustomer').length;
+    assert.deepEqual(await remove(store, wyn, 'not-the-password'), { status: 401, data: { error: 'Enter your current password to delete your account.' } });
+    assert.equal(store.fake.callsTo('deleteCustomer').length, calls);
+    assert.ok(await userRow(wyn.user.id));
+  });
+
+  test('an account that never subscribed is deleted with no Stripe call', async () => {
+    const nan = await legacyUser('nan.never@example.com');
+    const calls = store.fake.calls.length;
+    assert.deepEqual(await remove(store, nan), { status: 200, data: { ok: true, deleted: true } });
+    assert.equal(store.fake.calls.length, calls);
+    assert.equal(await userRow(nan.user.id), undefined);
+  });
+
+  test('the cancellation notice that follows a deleted account is accepted', async () => {
+    const bye = await legacyUser('bye.bye@example.com');
+    const sub = await store.subscribe(bye);
+    const customer = (await userRow(bye.user.id)).stripe_customer_id;
+    assert.equal((await remove(store, bye)).status, 200);
+    const calls = store.fake.callsTo('listSubscriptions').length;
+    const { body, header } = signedEvent(TEST_STRIPE.webhookSecret, { type: 'customer.subscription.deleted', object: { id: sub.id, customer, status: 'canceled' } });
+    const res = await store.on('POST', '/api/stripe/webhook', { raw: body, headers: { 'Content-Type': 'application/json', 'Stripe-Signature': header } });
+    assert.deepEqual(res, { status: 200, data: { received: true } });
+    assert.equal(store.fake.callsTo('listSubscriptions').length, calls);
+    assert.equal((await db.query(`select id from entitlements where external_id = $1`, [sub.id])).length, 0);
+  });
+});
+
+describe('trial reminder', () => {
+  const HOUR_MS = 60 * 60 * 1000;
+  let seq = 0;
+  // An account with one Stripe row, written straight into the table.
+  async function withRow(name, { status = 'trial', plan = 'monthly', endsInHours = 36, cancelled = false, source = 'stripe' } = {}) {
+    const who = await legacyUser(`${name}@example.com`);
+    seq += 1;
+    await db.query(
+      `insert into entitlements (user_id, source, status, plan, expires_at, cancel_at_period_end, external_id)
+       values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+      [who.user.id, source, status, source === 'stripe' ? plan : null, source === 'stripe' ? new Date(Date.now() + endsInHours * HOUR_MS).toISOString() : null, cancelled, source === 'stripe' ? `sub_reminder_${seq}` : null]
+    );
+    return who;
+  }
+  // Collects what would have been mailed; `answer` is what the mail provider said.
+  function outbox(answer = { delivered: true }) {
+    const sent = [];
+    return { sent, send: async (_config, message) => (sent.push(message), answer), to: (who) => sent.filter((m) => m.to === who.user.email) };
+  }
+  const sweep = (box, config = testConfig, now = new Date()) => sendTrialReminders({ db, config, now, send: box.send });
+  const claimed = async (who) => (await entitlementsOf(who.user.id))[0].trial_reminder_sent_at;
+
+  test('a trial ending within two days gets one reminder', async () => {
+    const mona = await withRow('mona.monthly', { plan: 'monthly', endsInHours: 36 });
+    const anna = await withRow('anna.annual', { plan: 'annual', endsInHours: 47 });
+    const box = outbox();
+    const count = await sweep(box);
+    assert.ok(count >= 2);
+
+    const [monthly] = box.to(mona);
+    const [row] = await entitlementsOf(mona.user.id);
+    const day = formatDay(row.expires_at);
+    assert.match(day, /^[A-Z][a-z]+ \d{1,2}, \d{4}$/);
+    assert.equal(monthly.subject, `Your VantraRun free trial ends on ${day}`);
+    assert.equal(
+      monthly.text,
+      `Your VantraRun free trial ends on ${day}. On that day your card will be charged $4.99 for the monthly plan, and it renews every month at that price until you cancel.\n\n` +
+        `To cancel before you are charged, sign in at ${testConfig.appUrl}/settings and choose "Cancel subscription". You keep access until the trial ends and pay nothing.\n\n` +
+        'Questions: info@dtisys.com'
+    );
+    const [annual] = box.to(anna);
+    assert.match(annual.text, /your card will be charged \$49\.99 for the annual plan, and it renews every year at that price until you cancel\./);
+    assert.ok(await claimed(mona));
+
+    // a second sweep, and a third an hour later, send nothing more
+    const again = outbox();
+    assert.equal(await sweep(again), 0);
+    assert.equal(await sweep(again, testConfig, new Date(Date.now() + HOUR_MS)), 0);
+    assert.equal(again.sent.length, 0);
+    assert.equal(box.to(mona).length, 1);
+  });
+
+  test('no reminder three days out, none after the trial has ended', async () => {
+    const early = await withRow('earl.early', { endsInHours: 72 });
+    const late = await withRow('lane.late', { endsInHours: -1 });
+    const box = outbox();
+    await sweep(box);
+    assert.equal(box.to(early).length, 0);
+    assert.equal(box.to(late).length, 0);
+    assert.equal(await claimed(early), null);
+    // a day later the first one is inside the two days
+    await sweep(box, testConfig, new Date(Date.now() + 25 * HOUR_MS));
+    assert.equal(box.to(early).length, 1);
+  });
+
+  test('no reminder for a trial already cancelled, an active subscription or a free pass', async () => {
+    const cancelled = await withRow('cal.cancelled', { cancelled: true });
+    const active = await withRow('ada.active', { status: 'active' });
+    const free = await withRow('finn.free', { source: 'admin', status: 'active' });
+    const expired = await withRow('exa.expired', { status: 'expired' });
+    const box = outbox();
+    await sweep(box);
+    for (const who of [cancelled, active, free, expired]) {
+      assert.equal(box.to(who).length, 0, who.user.email);
+      assert.equal(await claimed(who), null);
+    }
+  });
+
+  test('a refused message is tried again', async () => {
+    const rita = await withRow('rita.refused');
+    const withKey = { ...testConfig, mail: { ...testConfig.mail, resendApiKey: 're_test_not_real' } };
+    const refused = outbox({ delivered: false });
+    const before = await sweep(refused, withKey);
+    assert.equal(refused.to(rita).length, 1, 'it was attempted');
+    assert.equal(before, 0, 'and not counted as sent');
+    assert.equal(await claimed(rita), null, 'the claim was cleared');
+
+    const broken = { sent: [], send: async () => { throw new Error('mail provider timed out'); } };
+    assert.equal(await sweep(broken, withKey), 0);
+    assert.equal(await claimed(rita), null);
+
+    const ok = outbox();
+    assert.equal(await sweep(ok, withKey), 1);
+    assert.equal(ok.to(rita).length, 1);
+    assert.ok(await claimed(rita));
+  });
+
+  test('without a mail key the reminder is printed like every other email, once', async () => {
+    const dev = await withRow('devon.dev');
+    // no key: sendMail answers { delivered: false } after printing, which is not a refusal
+    const box = outbox({ delivered: false });
+    assert.equal(await sweep(box), 1);
+    assert.ok(await claimed(dev));
+    assert.equal(await sweep(box), 0);
+  });
+});
+
+describe('who removed a free pass', () => {
+  const access = (body) => call('POST', '/api/functions/adminAccess', { token: admin.token, body });
+  const find = async (email) => (await access({ action: 'list', search: email })).data.people.find((p) => p.email === email);
+
+  test('a removed pass records who removed it and when', async () => {
+    const pam = await legacyUser('pam.pass@example.com');
+    await access({ action: 'grant', email: 'pam.pass@example.com' });
+    let listed = (await find('pam.pass@example.com')).entitlements[0];
+    assert.deepEqual([listed.revoked_by, listed.revoked_at, listed.cancel_at_period_end], [null, null, false]);
+    assert.equal('external_id' in listed, false, 'a free pass has no subscription id');
+
+    assert.equal((await access({ action: 'revoke', entitlement_id: listed.id })).status, 200);
+    const [row] = await entitlementsOf(pam.user.id);
+    assert.deepEqual([row.status, row.revoked_by], ['revoked', 'admin@example.com']);
+    assert.ok(Math.abs(new Date(row.revoked_at).getTime() - Date.now()) < 60 * 1000);
+    listed = (await find('pam.pass@example.com')).entitlements[0];
+    assert.equal(listed.revoked_by, 'admin@example.com');
+    assert.equal(new Date(listed.revoked_at).getTime(), new Date(row.revoked_at).getTime());
+
+    // removing it a second time keeps the first record
+    await db.query(`update entitlements set revoked_by = 'first.admin@example.com' where id = $1 returning id`, [row.id]);
+    assert.equal((await access({ action: 'revoke', entitlement_id: row.id })).status, 200);
+    assert.equal((await entitlementsOf(pam.user.id))[0].revoked_by, 'first.admin@example.com');
+  });
+
+  test('granting again clears that record', async () => {
+    const [before] = await db.query(`select e.* from entitlements e join users u on u.id = e.user_id where u.email = 'pam.pass@example.com'`, []);
+    assert.equal(before.status, 'revoked');
+    assert.equal((await access({ action: 'grant', email: 'pam.pass@example.com' })).status, 200);
+    const [row] = await db.query('select * from entitlements where id = $1', [before.id]);
+    assert.deepEqual([row.status, row.revoked_by, row.revoked_at], ['active', null, null]);
+    // and so does a new invite code after an invite pass was removed
+    const ian = await invitedUser('ian.invite@example.com');
+    const [pass] = await entitlementsOf(ian.user.id);
+    await access({ action: 'revoke', entitlement_id: pass.id });
+    assert.equal((await entitlementsOf(ian.user.id))[0].revoked_by, 'admin@example.com');
+    await call('POST', '/api/functions/inviteAccess', { token: ian.token, body: { action: 'redeem', code: await mintCode() } });
+    const [again] = await entitlementsOf(ian.user.id);
+    assert.deepEqual([again.status, again.revoked_by, again.revoked_at], ['active', null, null]);
+  });
+
+  test('a paid row is listed with its subscription id and whether it is ending', async () => {
+    const sue = await legacyUser('sue.subscribed@example.com');
+    await db.query(
+      `insert into entitlements (user_id, source, status, plan, expires_at, cancel_at_period_end, external_id)
+       values ($1, 'stripe', 'active', 'monthly', $2, true, 'sub_listed_0001') returning id`,
+      [sue.user.id, daysFromNow(20)]
+    );
+    const [listed] = (await find('sue.subscribed@example.com')).entitlements;
+    assert.deepEqual([listed.source, listed.external_id, listed.cancel_at_period_end, listed.revoked_by], ['stripe', 'sub_listed_0001', true, null]);
+    // only the owner sees it
+    assert.equal((await call('POST', '/api/functions/adminAccess', { token: sue.token, body: { action: 'list' } })).status, 403);
+  });
+});
+
+describe('AccessGrant is history only', () => {
+  test('nobody can write AccessGrant through the entity API', async () => {
+    const holder = await invitedUser('hal.holder@example.com');
+    const other = await legacyUser('olive.other@example.com');
+    const [grant] = await db.query('select * from access_grants where user_id = $1', [holder.user.id]);
+    const as = (who, method, url, body) => call(method, url, { token: who.token, body });
+    const fresh = { user_id: other.user.id, email: 'olive.other@example.com', code: 'FP-FAKE-0001' };
+
+    for (const who of [admin, holder]) {
+      assert.equal((await as(who, 'POST', '/api/entities/AccessGrant', fresh)).status, 403, 'create');
+      assert.equal((await as(who, 'POST', '/api/entities/AccessGrant/bulk', [fresh])).status, 403, 'bulk create');
+      assert.equal((await as(who, 'PUT', `/api/entities/AccessGrant/${grant.id}`, { code: 'FP-EDIT-0001' })).status, 403, 'update');
+      assert.equal((await as(who, 'PUT', '/api/entities/AccessGrant/bulk', [{ id: grant.id, code: 'FP-EDIT-0001' }])).status, 403, 'bulk update');
+      assert.equal((await as(who, 'DELETE', `/api/entities/AccessGrant/${grant.id}`)).status, 403, 'delete');
+      assert.deepEqual((await as(who, 'POST', '/api/entities/AccessGrant/delete-many', { q: { user_id: holder.user.id } })).data, { deleted: 0 }, 'deleteMany');
+      assert.deepEqual((await as(who, 'POST', '/api/entities/AccessGrant/update-many', { q: { user_id: holder.user.id }, data: { code: 'FP-EDIT-0001' } })).data, { updated: 0 }, 'updateMany');
+    }
+    const [after] = await db.query('select * from access_grants where user_id = $1', [holder.user.id]);
+    assert.deepEqual([after.id, after.code], [grant.id, grant.code], 'the row is as it was');
+    assert.equal((await db.query('select id from access_grants where user_id = $1', [other.user.id])).length, 0);
+    assert.equal(await hasAccess(db, other.user), false, 'and no access came of it');
+
+    // reading is unchanged: the owner sees every row, a runner only their own
+    const all = await as(admin, 'POST', '/api/entities/AccessGrant/query', {});
+    assert.ok(all.data.items.length > 1);
+    const own = await as(holder, 'POST', '/api/entities/AccessGrant/query', {});
+    assert.deepEqual(own.data.items.map((g) => g.user_id), [holder.user.id]);
+
+    // and redeeming a code still writes the row, because the server does that itself
+    const code = await mintCode();
+    assert.deepEqual((await as(other, 'POST', '/api/functions/inviteAccess', { action: 'redeem', code })).data, { allowed: true });
+    assert.deepEqual((await db.query('select code from access_grants where user_id = $1', [other.user.id])).map((g) => g.code), [code]);
+  });
+});
+
+describe('open sign-up cannot be used to send mail', () => {
+  let open; // SUBSCRIPTIONS=on
+  const BUSY_INBOX = { status: 429, data: { error: 'Too many emails requested. Try again later.' } };
+  // "Resend" for an open sign-up that will not be mailed: the answer an unknown address gets.
+  const QUIET = { status: 200, data: { ok: true } };
+  // Signing in before confirming: what is said when a code went out, and when none did.
+  const CODE_SENT = { status: 403, error: 'Verify your email first. We just sent you a new code.' };
+  const NO_CODE_SENT = {
+    status: 403,
+    data: { error: 'Verify your email first. Enter the latest code we emailed you; you can ask for a new one later.', needs_verification: true },
+  };
+  const from = (address) => ({ 'X-Forwarded-For': address });
+  const post = (app, path, body, address) => call('POST', path, { body, headers: address ? from(address) : {}, origin: app.origin });
+  const register = (app, email, address, extra = {}) => post(app, '/api/auth/register', { email, password: 'longenough1', ...extra }, address);
+  const resend = (app, email) => post(app, '/api/auth/resend-otp', { email });
+  const login = (app, email) => post(app, '/api/auth/login', { email, password: 'longenough1' });
+  // Time passes for one address: its codes so far were sent this long ago.
+  const later = (email, interval) =>
+    db.query(
+      `update auth_codes set created_date = created_date - $2::interval
+        where user_id = (select id from users where email = $1) returning id`,
+      [email, interval]
+    );
+  const codesSent = async (email) =>
+    (await db.query(`select count(*)::int as n from auth_codes c join users u on u.id = c.user_id where u.email = $1 and c.purpose = 'verify_email'`, [email]))[0].n;
+
+  before(async () => {
+    process.env.TRUST_PROXY = 'true'; // every sign-up here comes from its own address
+    open = await startApp({ subscriptions: true });
+  });
+  after(async () => {
+    delete process.env.TRUST_PROXY;
+    await open?.close();
+    await new Promise((r) => setTimeout(r, 100));
+    await db.query(`delete from client_errors where platform = 'server' returning id`, []);
+  });
+
+  test('a second code within a minute is not mailed', async () => {
+    const email = 'quick.again@example.com';
+    const first = await register(open, email, '203.0.113.1');
+    assert.equal(first.status, 200, JSON.stringify(first.data));
+    assert.ok(first.data.dev_code);
+    assert.deepEqual(await resend(open, email), { status: 200, data: { ok: true } }, 'the same answer, and no new code');
+    assert.deepEqual(await register(open, email, '203.0.113.1'), { status: 200, data: { ok: true } });
+    // signing in still says the email needs confirming, and does not claim a code was sent
+    assert.deepEqual(await login(open, email), NO_CODE_SENT);
+    assert.equal(await codesSent(email), 1);
+    // the one code that was mailed still works
+    const ok = await post(open, '/api/auth/verify-otp', { email, otp_code: first.data.dev_code, password: 'longenough1' });
+    assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  });
+
+  test('open sign-up mails one address at most three times an hour', async () => {
+    const email = 'three.an.hour@example.com';
+    const first = await register(open, email, '203.0.113.2');
+    assert.ok(first.data.dev_code);
+    await later(email, '2 minutes');
+    const second = await resend(open, email);
+    assert.ok(second.data.dev_code, 'a resend counts as the second');
+    await later(email, '2 minutes');
+    const third = await login(open, email);
+    assert.deepEqual([third.status, third.data.error, third.data.needs_verification], [CODE_SENT.status, CODE_SENT.error, true]);
+    assert.ok(third.data.dev_code, 'the sign-in that re-sends a code is the third');
+    await later(email, '2 minutes');
+
+    // "resend" says nothing either way (see the next test); sign-up with the address is refused
+    assert.deepEqual(await resend(open, email), QUIET);
+    assert.deepEqual(await register(open, email, '203.0.113.2'), BUSY_INBOX);
+    // signing in is not refused for it: the person is sent to enter the code they have
+    assert.deepEqual(await login(open, email), NO_CODE_SENT);
+    assert.equal(await codesSent(email), 3);
+    // an hour on, there is room again
+    await later(email, '1 hour');
+    assert.ok((await resend(open, email)).data.dev_code);
+  });
+
+  test('and at most eight times a day', async () => {
+    const email = 'eight.a.day@example.com';
+    await register(open, email, '203.0.113.3');
+    // six more went out earlier in the day
+    await db.query(
+      `insert into auth_codes (user_id, purpose, code_hash, expires_at, used_at, created_date)
+       select u.id, 'verify_email', 'x', now(), now(), now() - make_interval(hours => h)
+         from users u, generate_series(2, 7) as h where u.email = $1 returning id`,
+      [email]
+    );
+    await later(email, '2 minutes');
+    assert.ok((await resend(open, email)).data.dev_code, 'the eighth');
+    await later(email, '2 minutes');
+    assert.equal(await codesSent(email), 8);
+    assert.deepEqual(await resend(open, email), QUIET, 'the ninth in a day is not sent');
+    assert.equal(await codesSent(email), 8);
+  });
+
+  test('"resend" answers the same for an address with no account and for one that has had its share', async () => {
+    const known = 'has.account@example.com';
+    const unknown = 'no.account.at.all@example.com';
+    await register(open, known, '203.0.113.4');
+    // three codes in the hour: nothing more will be sent to this address
+    await db.query(
+      `insert into auth_codes (user_id, purpose, code_hash, expires_at, used_at, created_date)
+       select u.id, 'verify_email', 'x', now(), now(), now() - make_interval(mins => m)
+         from users u, generate_series(10, 20, 10) as m where u.email = $1 returning id`,
+      [known]
+    );
+    await later(known, '2 minutes');
+    assert.equal(await codesSent(known), 3);
+    // someone probing which addresses have accounts learns nothing from the answers
+    for (let i = 0; i < 4; i++) {
+      const a = await resend(open, known);
+      const b = await resend(open, unknown);
+      assert.deepEqual(a, QUIET, `known, try ${i + 1}`);
+      assert.deepEqual(b, QUIET, `unknown, try ${i + 1}`);
+    }
+    assert.equal(await codesSent(known), 3, 'and nothing was sent');
+  });
+
+  test('at most ten code-less sign-ups an hour from one network', async () => {
+    const cafe = '203.0.113.50';
+    for (let i = 0; i < 10; i++) {
+      const res = await register(open, `cafe.${i}@example.com`, cafe);
+      assert.equal(res.status, 200, `sign-up ${i + 1}: ${JSON.stringify(res.data)}`);
+    }
+    assert.deepEqual(await register(open, 'cafe.11@example.com', cafe), {
+      status: 429, data: { error: 'Too many sign-ups from this network. Try again later.' },
+    });
+    assert.equal((await db.query(`select id from users where email = 'cafe.11@example.com'`, [])).length, 0);
+    // another network is not affected, and neither is someone on this one who has an invite code
+    assert.equal((await register(open, 'elsewhere.1@example.com', '203.0.113.51')).status, 200);
+    assert.equal((await register(open, 'cafe.invited@example.com', cafe, { invite_code: await mintCode() })).status, 200);
+  });
+
+  test('the hourly ceiling for everyone holds', async () => {
+    const small = await startApp({ subscriptions: true, signup: { ...testConfig.signup, openMailsPerHour: 3 } });
+    try {
+      for (let i = 0; i < 3; i++) {
+        assert.equal((await register(small, `crowd.${i}@example.com`, `203.0.113.${60 + i}`)).status, 200);
+      }
+      const BUSY = { status: 429, data: { error: 'Sign-up is busy right now. Try again in an hour.' } };
+      assert.deepEqual(await register(small, 'crowd.3@example.com', '203.0.113.70'), BUSY);
+      assert.equal((await db.query(`select id from users where email = 'crowd.3@example.com'`, [])).length, 0, 'no account is made');
+      await later('crowd.0@example.com', '2 minutes');
+      assert.deepEqual(await resend(small, 'crowd.0@example.com'), QUIET, 'a resend is one of those emails too, and is quietly not sent');
+      assert.equal(await codesSent('crowd.0@example.com'), 1);
+      assert.deepEqual(await login(small, 'crowd.0@example.com'), NO_CODE_SENT, 'and so is the sign-in that would re-send one');
+      // a sign-up with an invite code is not part of the ceiling
+      assert.equal((await register(small, 'crowd.invited@example.com', '203.0.113.71', { invite_code: await mintCode() })).status, 200);
+      // the owner is told, once
+      let reports = [];
+      for (let i = 0; i < 40 && !reports.length; i++) {
+        await new Promise((r) => setTimeout(r, 25));
+        reports = await db.query(`select message from client_errors where platform = 'server' and message like 'Open sign-up reached%'`, []);
+      }
+      assert.equal(reports.length, 1);
+      assert.match(reports[0].message, /3 verification emails/);
+    } finally {
+      await small.close();
+    }
+  });
+
+  test('sign-up with an invite code keeps the old limits', async () => {
+    const email = 'coded.signup@example.com';
+    const first = await register(open, email, '203.0.113.80', { invite_code: await mintCode() });
+    assert.ok(first.data.dev_code);
+    // six emails an hour, with no wait between them, exactly as before
+    for (let i = 0; i < 5; i++) assert.ok((await resend(open, email)).data.dev_code, `resend ${i + 1}`);
+    assert.deepEqual(await resend(open, email), BUSY_INBOX);
+    assert.equal(await codesSent(email), 6);
+  });
+
+  test('with the switch off nothing changed', async () => {
+    const email = 'switch.off@example.com';
+    const off = (path, body, address) => call('POST', path, { body, headers: address ? from(address) : {} });
+    const first = await off('/api/auth/register', { email, password: 'longenough1', invite_code: await mintCode() }, '203.0.113.90');
+    assert.ok(first.data.dev_code);
+    for (let i = 0; i < 5; i++) assert.ok((await off('/api/auth/resend-otp', { email })).data.dev_code, `resend ${i + 1}`);
+    assert.deepEqual(await off('/api/auth/resend-otp', { email }), BUSY_INBOX);
+    // signing in before confirming still sends a code every time
+    const unverified = await off('/api/auth/login', { email, password: 'longenough1' });
+    assert.equal(unverified.status, 403);
+    assert.ok(unverified.data.dev_code);
+    assert.deepEqual(await off('/api/auth/register', { email: 'switch.off.nocode@example.com', password: 'longenough1' }, '203.0.113.90'), {
+      status: 400, data: { error: 'Enter your invite code.' },
+    });
+  });
+});
+
+describe('a refusal for lack of access says so in a way a screen can act on', () => {
+  test("the body is { error, code: 'no_access' } on an entity call, an upload and a function", async () => {
+    const nia = await legacyUser('nia.noaccess@example.com');
+    const REFUSED = { status: 403, data: { error: 'Enter an invite code to use VantraRun.', code: 'no_access' } };
+    assert.deepEqual(await call('POST', '/api/entities/Run/query', { token: nia.token, body: {} }), REFUSED);
+    assert.deepEqual(await call('POST', '/api/uploads', { token: nia.token, raw: 'x', headers: { 'Content-Type': 'image/png' } }), REFUSED);
+    assert.deepEqual(await call('POST', '/api/functions/socialFeed', { token: nia.token, body: {} }), REFUSED);
+
+    const open = await startApp({ subscriptions: true });
+    try {
+      assert.deepEqual(await call('POST', '/api/entities/Run/query', { token: nia.token, body: {}, origin: open.origin }), {
+        status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.', code: 'no_access' },
+      });
+    } finally {
+      await open.close();
+    }
+  });
+
+  test('no other 403 carries the code', async () => {
+    const member = await invitedUser('mel.member@example.com');
+    assert.deepEqual(await call('POST', '/api/functions/adminAccess', { token: member.token, body: { action: 'list' } }), {
+      status: 403, data: { error: 'Admins only' },
+    });
+    const [run] = (await call('POST', '/api/entities/Run/query', { token: admin.token, body: { limit: 1 } })).data.items;
+    const foreign = await call('DELETE', `/api/entities/InviteCode/${run?.id || '00000000-0000-4000-8000-000000000000'}`, { token: member.token });
+    assert.equal(foreign.data?.code, undefined);
+    const reg = await call('POST', '/api/auth/register', {
+      body: { email: 'una.unverified@example.com', password: 'longenough1', invite_code: await mintCode() },
+      headers: { 'X-Forwarded-For': '203.0.113.200' },
+    });
+    assert.equal(reg.status, 200, JSON.stringify(reg.data));
+    const unverified = await call('POST', '/api/auth/login', { body: { email: 'una.unverified@example.com', password: 'longenough1' } });
+    assert.equal(unverified.status, 403);
+    assert.equal(unverified.data.code, undefined);
+  });
+});
+
+describe('nothing waits on Stripe with a database connection in hand', () => {
+  let store;
+  const soon = (promise, ms = 1500) =>
+    Promise.race([promise.then(() => 'done'), new Promise((r) => setTimeout(() => r('still waiting'), ms))]);
+  const settle = (ms = 150) => new Promise((r) => setTimeout(r, ms));
+  // Would fail at once if any transaction were holding this user's row.
+  const rowIsFree = (userId) =>
+    db.tx((tx) => tx.query('select id from users where id = $1 for update nowait', [userId])).then((rows) => rows.length === 1);
+  const post = (event) => {
+    const { body, header } = signedEvent(TEST_STRIPE.webhookSecret, event);
+    return store.on('POST', '/api/stripe/webhook', { raw: body, headers: { 'Content-Type': 'application/json', 'Stripe-Signature': header } });
+  };
+
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('a queue of work for one key runs one at a time, in order, and a failure does not stop the next', async () => {
+    const order = [];
+    const step = (name, ms, fail = false) =>
+      serialised('test:queue', async () => {
+        order.push(`${name} starts`);
+        await new Promise((r) => setTimeout(r, ms));
+        order.push(`${name} ends`);
+        if (fail) throw new Error(`${name} failed`);
+        return name;
+      });
+    const results = await Promise.allSettled([step('a', 30), step('b', 1, true), step('c', 1), serialised('test:other', async () => 'other')]);
+    assert.deepEqual(order, ['a starts', 'a ends', 'b starts', 'b ends', 'c starts', 'c ends']);
+    assert.deepEqual(results.map((r) => r.status), ['fulfilled', 'rejected', 'fulfilled', 'fulfilled']);
+    assert.equal(results[2].value, 'c');
+  });
+
+  test('many notices for two customers while Stripe is slow leave the database free', async (t) => {
+    if (db.transactional === false) return t.skip('the psql test driver has no pool to exhaust');
+    const ann = await legacyUser('ann.slow@example.com');
+    const ben = await legacyUser('ben.slow@example.com');
+    const subs = { ann: await store.subscribe(ann), ben: await store.subscribe(ben) };
+    const customers = { ann: (await userRow(ann.user.id)).stripe_customer_id, ben: (await userRow(ben.user.id)).stripe_customer_id };
+
+    const release = store.fake.hold('listSubscriptions');
+    let deliveries;
+    try {
+      // more notices than the pool has connections, all stuck on Stripe
+      deliveries = [];
+      for (let i = 0; i < 8; i++) {
+        deliveries.push(post({ type: 'customer.subscription.updated', object: { customer: customers.ann } }));
+        deliveries.push(post({ type: 'invoice.paid', object: { customer: customers.ben } }));
+      }
+      await settle(300);
+      assert.ok(store.fake.callsTo('listSubscriptions').length >= 2, 'Stripe is being asked');
+      assert.equal(await soon(db.query('select 1 as ok', [])), 'done', 'an unrelated query is answered while they wait');
+      assert.equal(await soon(call('GET', '/api/health')), 'done');
+      assert.equal(await soon(rowIsFree(ann.user.id)), 'done', "nobody holds the customer's account row");
+      assert.equal(await soon(call('GET', '/api/auth/me', { token: ben.token })), 'done');
+    } finally {
+      release();
+    }
+    const answers = await Promise.all(deliveries);
+    assert.deepEqual([...new Set(answers.map((a) => a.status))], [200]);
+    // one customer's notices were handled one after another: Stripe was asked once per notice
+    assert.equal(store.fake.callsTo('listSubscriptions').filter((c) => c.args.customerId === customers.ann).length, 8);
+    assert.deepEqual((await entitlementsOf(ann.user.id)).map((r) => [r.external_id, r.status]), [[subs.ann.id, 'trial']]);
+    assert.deepEqual((await entitlementsOf(ben.user.id)).map((r) => [r.external_id, r.status]), [[subs.ben.id, 'trial']]);
+  });
+
+  test('the later answer from Stripe is the one that is kept', async () => {
+    const lia = await legacyUser('lia.later@example.com');
+    const sub = await store.subscribe(lia);
+    const customer = (await userRow(lia.user.id)).stripe_customer_id;
+    const release = store.fake.hold('listSubscriptions');
+    const first = post({ type: 'customer.subscription.created', object: { customer } });
+    await settle();
+    const second = post({ type: 'customer.subscription.deleted', object: { customer } });
+    await settle();
+    // Stripe ends the subscription while both notices are waiting; the first read is released first
+    store.fake.setSubscription(sub.id, { status: 'canceled', canceled_at: daysFromNowUnix(0), ended_at: daysFromNowUnix(0) });
+    release();
+    assert.deepEqual((await Promise.all([first, second])).map((a) => a.status), [200, 200]);
+    assert.deepEqual((await entitlementsOf(lia.user.id)).map((r) => r.status), ['expired']);
+  });
+
+  test('checkout holds nothing while Stripe makes the session', async (t) => {
+    if (db.transactional === false) return t.skip('the psql test driver has no row locks');
+    const cho = await legacyUser('cho.checkout@example.com');
+    for (const method of ['createCustomer', 'createCheckoutSession']) {
+      const release = store.fake.hold(method);
+      let pending;
+      try {
+        pending = store.subscription(cho, { action: 'checkout', plan: 'monthly' });
+        await settle(250);
+        assert.ok(store.fake.callsTo(method).some((c) => c.args.userId === cho.user.id), `${method} is waiting`);
+        assert.equal(await soon(rowIsFree(cho.user.id)), 'done', `row free during ${method}`);
+        assert.equal(await soon(call('PUT', '/api/auth/me', { token: cho.token, body: { full_name: 'Cho' } })), 'done');
+      } finally {
+        release();
+      }
+      assert.equal((await pending).status, 200);
+    }
+    assert.equal([...store.fake.state.customers.values()].filter((c) => c.metadata.user_id === cho.user.id).length, 1);
+  });
+
+  test('a refund holds nothing while Stripe cancels the subscription', async (t) => {
+    if (db.transactional === false) return t.skip('the psql test driver has no row locks');
+    const rob = await legacyUser('rob.refunded@example.com');
+    const sub = await store.subscribe(rob);
+    const customer = (await userRow(rob.user.id)).stripe_customer_id;
+    const release = store.fake.hold('cancelSubscription');
+    let pending;
+    try {
+      pending = post({ type: 'charge.refunded', object: { id: store.fake.chargeFor(sub.id), customer, refunded: true } });
+      await settle(300);
+      assert.equal(store.fake.callsTo('cancelSubscription').filter((c) => c.args.subscriptionId === sub.id).length, 1);
+      assert.equal(await soon(rowIsFree(rob.user.id)), 'done');
+    } finally {
+      release();
+    }
+    assert.equal((await pending).status, 200);
+    assert.deepEqual((await entitlementsOf(rob.user.id)).map((r) => [r.status, r.note]), [['revoked', 'Refunded']]);
+  });
+});
+
+describe('the owner can see which address the server counts a request against', () => {
+  const info = (who, headers = {}) => call('POST', '/api/functions/requestInfo', { token: who?.token, body: {}, headers });
+  const withEnv = async (env, work) => {
+    const before = { TRUST_PROXY: process.env.TRUST_PROXY, TRUSTED_PROXY_HOPS: process.env.TRUSTED_PROXY_HOPS };
+    Object.assign(process.env, env);
+    try {
+      await work();
+    } finally {
+      for (const [key, value] of Object.entries(before)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  };
+
+  test('only admins may ask', async () => {
+    const member = await invitedUser('rita.requestinfo@example.com');
+    assert.deepEqual(await info(member), { status: 403, data: { error: 'Admins only' } });
+    assert.equal((await info(null)).status, 401);
+  });
+
+  test('it shows the forwarded list, the socket address and the one that is used', async () => {
+    const plain = await info(admin, { 'X-Forwarded-For': '9.9.9.9, 203.0.113.7' });
+    assert.equal(plain.status, 200, JSON.stringify(plain.data));
+    assert.deepEqual(Object.keys(plain.data).sort(), ['client_ip', 'forwarded_for', 'socket', 'trusted_proxy_hops']);
+    assert.deepEqual(plain.data.forwarded_for, ['9.9.9.9', '203.0.113.7']);
+    assert.match(plain.data.socket, /127\.0\.0\.1|::1/);
+    assert.equal(plain.data.client_ip, plain.data.socket, 'no proxy is trusted in the test run');
+    assert.equal(plain.data.trusted_proxy_hops, null);
+
+    await withEnv({ TRUST_PROXY: 'true' }, async () => {
+      const leftmost = await info(admin, { 'X-Forwarded-For': '9.9.9.9, 203.0.113.7' });
+      assert.deepEqual([leftmost.data.client_ip, leftmost.data.trusted_proxy_hops], ['9.9.9.9', null]);
+    });
+    await withEnv({ TRUST_PROXY: 'true', TRUSTED_PROXY_HOPS: '1' }, async () => {
+      const real = await info(admin, { 'X-Forwarded-For': '9.9.9.9, 203.0.113.7' });
+      assert.deepEqual([real.data.client_ip, real.data.trusted_proxy_hops], ['203.0.113.7', 1]);
+    });
+  });
+
+  test('with TRUSTED_PROXY_HOPS set, a forged first entry no longer gets a fresh allowance', () =>
+    withEnv({ TRUST_PROXY: 'true', TRUSTED_PROXY_HOPS: '1' }, async () => {
+      // thirty sign-ups an hour from one network: the proxy appends the same real address each time
+      let last;
+      for (let i = 0; i < 31; i++) {
+        last = await call('POST', '/api/auth/register', {
+          body: { email: `forger.${i}@example.com`, password: 'longenough1', invite_code: 'FP-NOPE-NOPE' },
+          headers: { 'X-Forwarded-For': `198.18.0.${i}, 203.0.113.250` },
+        });
+      }
+      assert.deepEqual(last, { status: 429, data: { error: 'Too many sign-ups from this network. Try again later.' } });
+    }));
+});
+
+describe('deleting an account leaves nothing behind at Stripe', () => {
+  let store;
+  const remove = (who) => store.on('DELETE', '/api/auth/me', { token: who.token, body: { password: 'correct-horse-1' } });
+  const serverReports = async (like) => {
+    let rows = [];
+    for (let i = 0; i < 40 && !rows.length; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      rows = await db.query(`select message, context from client_errors where platform = 'server' and message like $1`, [like]);
+    }
+    return rows;
+  };
+
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+    await new Promise((r) => setTimeout(r, 100));
+    await db.query(`delete from client_errors where platform = 'server' returning id`, []);
+  });
+
+  test('an open checkout is expired before the customer is deleted', async () => {
+    const oda = await legacyUser('oda.open@example.com');
+    assert.equal((await store.subscription(oda, { action: 'checkout', plan: 'annual' })).status, 200);
+    const session = store.sessionOf(oda);
+    assert.equal(session.status, 'open');
+
+    assert.deepEqual(await remove(oda), { status: 200, data: { ok: true, deleted: true } });
+    assert.equal(store.fake.state.sessions.get(session.id).status, 'expired', 'nobody can pay into a deleted account');
+    const order = store.fake.calls.filter((c) => ['expireCheckoutSession', 'deleteCustomer'].includes(c.method) && (c.args.sessionId === session.id || c.args.customerId === session.customer)).map((c) => c.method);
+    assert.deepEqual(order, ['expireCheckoutSession', 'deleteCustomer']);
+    assert.equal(await userRow(oda.user.id), undefined);
+  });
+
+  test('a session that can no longer be expired does not stop the deletion; an unreachable Stripe does', async () => {
+    const eli = await legacyUser('eli.expire@example.com');
+    await store.subscription(eli, { action: 'checkout', plan: 'monthly' });
+    store.fake.failNext('listOpenCheckoutSessions');
+    assert.equal((await remove(eli)).status, 502);
+    assert.ok(await userRow(eli.user.id));
+    assert.equal(store.fake.callsTo('deleteCustomer').filter((c) => c.args.customerId === store.sessionOf(eli).customer).length, 0);
+    assert.equal((await remove(eli)).status, 200);
+  });
+
+  test('the customer id is read again at the moment of deleting, not taken from the sign-in', async () => {
+    const sal = await legacyUser('sal.stale@example.com');
+    // what a request read when it was authenticated: no customer yet
+    const asRead = await userRow(sal.user.id);
+    assert.equal(asRead.stripe_customer_id, null);
+    // meanwhile, in another tab, checkout made one and the person paid
+    const sub = await store.subscribe(sal);
+    const customer = (await userRow(sal.user.id)).stripe_customer_id;
+
+    await deleteAccount({ db, stripe: store.fake, config: { ...testConfig, ...SELLING }, user: asRead });
+    assert.deepEqual(store.fake.callsTo('deleteCustomer').at(-1).args, { customerId: customer });
+    assert.equal(store.fake.state.subscriptions.get(sub.id).status, 'canceled');
+    assert.equal(await userRow(sal.user.id), undefined);
+  });
+
+  test('if the account cannot be removed after its customer was, the customer id is cleared', async () => {
+    const hal = await legacyUser('hal.halfway@example.com');
+    await store.subscription(hal, { action: 'checkout', plan: 'monthly' });
+    const customer = (await userRow(hal.user.id)).stripe_customer_id;
+    // a database that fails exactly when the user row is deleted
+    const failing = {
+      ...db,
+      query: (sql, params) => (/^\s*delete from users/i.test(sql) ? Promise.reject(new Error('the database went away')) : db.query(sql, params)),
+    };
+    await assert.rejects(deleteAccount({ db: failing, stripe: store.fake, config: { ...testConfig, ...SELLING }, user: await userRow(hal.user.id) }), /went away/);
+    assert.equal(store.fake.state.customers.get(customer).deleted, true);
+    const row = await userRow(hal.user.id);
+    assert.ok(row, 'the account is still there');
+    assert.equal(row.stripe_customer_id, null, 'and no longer points at a customer that is gone');
+    // so the person is not stuck: they can check out again, or delete again
+    const again = await store.subscription(hal, { action: 'checkout', plan: 'monthly' });
+    assert.equal(again.status, 200, JSON.stringify(again.data));
+    assert.notEqual((await userRow(hal.user.id)).stripe_customer_id, customer);
+    assert.equal((await remove(hal)).status, 200);
+  });
+
+  test('a payment for a customer no account owns is reported to the owner, and still accepted', async () => {
+    const deliver = (type, object) => {
+      const { body, header } = signedEvent(TEST_STRIPE.webhookSecret, { type, object });
+      return store.on('POST', '/api/stripe/webhook', { raw: body, headers: { 'Content-Type': 'application/json', 'Stripe-Signature': header } });
+    };
+    assert.deepEqual(await deliver('checkout.session.completed', { customer: 'cus_orphan_checkout' }), { status: 200, data: { received: true } });
+    const [first] = await serverReports('%cus_orphan_checkout%');
+    assert.ok(first, 'a report was written');
+    assert.match(first.message, /payment arrived .* cus_orphan_checkout.* refund/i);
+    assert.equal(first.context, 'POST /api/stripe/webhook');
+
+    assert.deepEqual(await deliver('invoice.paid', { customer: 'cus_orphan_invoice' }), { status: 200, data: { received: true } });
+    assert.equal((await serverReports('%cus_orphan_invoice%')).length, 1);
+
+    // notices that are not about money arriving say nothing
+    await deliver('customer.subscription.deleted', { customer: 'cus_orphan_quiet' });
+    await deliver('invoice.payment_failed', { customer: 'cus_orphan_quiet' });
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal((await db.query(`select id from client_errors where message like '%cus_orphan_quiet%'`, [])).length, 0);
+  });
+});
+
+describe('the daily sweep puts overdue subscriptions right', () => {
+  let store;
+  const selling = () => ({ ...testConfig, ...SELLING });
+  const listCalls = (customer) => store.fake.callsTo('listSubscriptions').filter((c) => c.args.customerId === customer).length;
+  // A subscriber whose row is in place, then made to look as it would after missed notices.
+  async function subscriber(email, { status = 'active', endedDaysAgo }) {
+    const who = await legacyUser(email);
+    const sub = await store.subscribe(who);
+    await store.subscription(who, { action: 'refresh' });
+    await db.query(`update entitlements set status = $2, expires_at = $3 where user_id = $1 and source = 'stripe' returning id`, [
+      who.user.id, status, daysFromNow(-endedDaysAgo),
+    ]);
+    return { who, sub, customer: (await userRow(who.user.id)).stripe_customer_id };
+  }
+  const rowOf = async (who) => (await entitlementsOf(who.user.id)).find((r) => r.source === 'stripe');
+
+  before(async () => {
+    store = await shop();
+    // rows left by earlier tests are not this suite's business
+    await db.query(`update entitlements set expires_at = now() + interval '30 days' where source = 'stripe' and status in ('trial', 'active', 'grace') and expires_at < now() returning id`, []);
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('a renewal and a cancellation whose notices were lost are both picked up', async () => {
+    const renewed = await subscriber('rex.renewed@example.com', { endedDaysAgo: 5 });
+    store.fake.setSubscription(renewed.sub.id, { status: 'active', current_period_start: daysFromNowUnix(-5), current_period_end: daysFromNowUnix(25) });
+    const ended = await subscriber('eve.ended@example.com', { endedDaysAgo: 1 });
+    store.fake.setSubscription(ended.sub.id, { status: 'canceled', canceled_at: daysFromNowUnix(-1), ended_at: daysFromNowUnix(-1) });
+    const current = await subscriber('cai.current@example.com', { endedDaysAgo: -20 });
+    const before = listCalls(current.customer);
+
+    const result = await syncOverdue({ db, stripe: store.fake, config: selling() });
+    assert.deepEqual(result, { checked: 2, failed: 0 });
+    const fixed = await rowOf(renewed.who);
+    assert.equal(fixed.status, 'active');
+    assert.ok(new Date(fixed.expires_at).getTime() > Date.now() + 24 * 24 * 60 * 60 * 1000);
+    assert.equal((await store.runs(renewed.who)).status, 200);
+    assert.equal((await rowOf(ended.who)).status, 'expired');
+    assert.equal(listCalls(current.customer), before, 'a subscription that is not overdue is not asked about');
+    // nothing is overdue any more
+    assert.deepEqual(await syncOverdue({ db, stripe: store.fake, config: selling() }), { checked: 0, failed: 0 });
+  });
+
+  test('it does at most so many in one run, and one failure does not stop the rest', async () => {
+    const people = [];
+    for (const name of ['una', 'duo', 'tri']) people.push(await subscriber(`${name}.overdue@example.com`, { status: 'grace', endedDaysAgo: 6 }));
+    for (const person of people) store.fake.setSubscription(person.sub.id, { status: 'canceled', canceled_at: daysFromNowUnix(0), ended_at: daysFromNowUnix(0) });
+
+    assert.deepEqual(await syncOverdue({ db, stripe: store.fake, config: selling(), limit: 1 }), { checked: 1, failed: 0 });
+    assert.equal((await Promise.all(people.map((p) => rowOf(p.who)))).filter((r) => r.status === 'expired').length, 1);
+
+    store.fake.failNext('listSubscriptions');
+    assert.deepEqual(await syncOverdue({ db, stripe: store.fake, config: selling(), limit: 10 }), { checked: 1, failed: 1 });
+    assert.deepEqual(await syncOverdue({ db, stripe: store.fake, config: selling(), limit: 10 }), { checked: 1, failed: 0 });
+    assert.equal((await Promise.all(people.map((p) => rowOf(p.who)))).filter((r) => r.status === 'expired').length, 3);
+  });
+
+  test('without the Stripe settings it does nothing', async () => {
+    await subscriber('nia.nokeys@example.com', { endedDaysAgo: 2 });
+    const calls = store.fake.calls.length;
+    assert.deepEqual(await syncOverdue({ db, stripe: store.fake, config: testConfig }), { checked: 0, failed: 0 });
+    assert.equal(store.fake.calls.length, calls);
+  });
+});
+
+describe('a failed payment never extends access by being looked at again', () => {
+  let store;
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('past_due with no period start keeps the end date we already have, however often it is synced', async () => {
+    const gus = await legacyUser('gus.grace@example.com');
+    const sub = await store.subscribe(gus);
+    await store.subscription(gus, { action: 'refresh' });
+    // what was paid for ended two days ago
+    await db.query(`update entitlements set status = 'active', expires_at = $2 where user_id = $1 and source = 'stripe' returning id`, [gus.user.id, daysFromNow(-2)]);
+    const [before] = await entitlementsOf(gus.user.id);
+    // Stripe says the payment failed, and (unusually) gives no period start
+    store.fake.setSubscription(sub.id, { status: 'past_due', current_period_start: null });
+
+    for (let i = 0; i < 3; i++) {
+      const res = await store.subscription(gus, { action: 'refresh' });
+      assert.equal(res.status, 200, JSON.stringify(res.data));
+      const [row] = await entitlementsOf(gus.user.id);
+      assert.equal(row.status, 'grace');
+      assert.equal(new Date(row.expires_at).getTime(), new Date(before.expires_at).getTime(), `sync ${i + 1} left the end date alone`);
+    }
+    assert.equal((await store.runs(gus)).status, 200, 'inside the three days');
+    // and once the three days are up it is over, however many more times anyone looks
+    await db.query(`update entitlements set expires_at = $2 where user_id = $1 and source = 'stripe' returning id`, [gus.user.id, daysFromNow(-4)]);
+    await store.subscription(gus, { action: 'refresh' });
+    await store.subscription(gus, { action: 'refresh' });
+    assert.equal((await store.runs(gus)).status, 403);
+  });
+
+  test('a past_due subscription we have never seen, with no period start, gets no row at all', async () => {
+    const neo = await legacyUser('neo.new@example.com');
+    await store.subscription(neo, { action: 'checkout', plan: 'monthly' });
+    const customer = (await userRow(neo.user.id)).stripe_customer_id;
+    const sub = store.fake.addSubscription({ customerId: customer, priceId: TEST_STRIPE.prices.monthly, status: 'past_due' });
+    store.fake.setSubscription(sub.id, { current_period_start: null });
+    const res = await store.subscription(neo, { action: 'refresh' });
+    assert.equal(res.data.allowed, false);
+    assert.equal((await entitlementsOf(neo.user.id)).length, 0);
+  });
+});
+
+describe('the trial reminder asks Stripe before it writes to anyone', () => {
+  let store;
+  const HOUR_MS = 60 * 60 * 1000;
+  const selling = () => ({ ...testConfig, ...SELLING });
+  function outbox(answer = { delivered: true }) {
+    const sent = [];
+    return { sent, send: async (_config, message) => (sent.push(message), answer), to: (who) => sent.filter((m) => m.to === who.user.email) };
+  }
+  const sweep = (box, now = new Date()) => sendTrialReminders({ db, config: selling(), stripe: store.fake, now, send: box.send });
+  const rowOf = async (who) => (await entitlementsOf(who.user.id)).find((r) => r.source === 'stripe');
+  // Someone 36 hours from the end of their trial, here and at Stripe.
+  async function trialist(email) {
+    const who = await legacyUser(email);
+    const sub = await store.subscribe(who);
+    store.fake.setSubscription(sub.id, { trial_end: daysFromNowUnix(1.5), current_period_end: daysFromNowUnix(1.5) });
+    await store.subscription(who, { action: 'refresh' });
+    return { who, sub };
+  }
+
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('a trial cancelled at Stripe a moment ago, with the notice still on its way, gets no reminder', async () => {
+    const { who, sub } = await trialist('cass.cancelled@example.com');
+    store.fake.setSubscription(sub.id, { cancel_at_period_end: true });
+    assert.equal((await rowOf(who)).cancel_at_period_end, false, 'our copy has not heard yet');
+
+    const box = outbox();
+    await sweep(box);
+    assert.equal(box.to(who).length, 0);
+    const row = await rowOf(who);
+    assert.equal(row.cancel_at_period_end, true, 'and the sweep brought our copy up to date');
+    assert.equal(row.trial_reminder_sent_at, null);
+
+    // they change their mind: the reminder is due after all, and goes out once
+    store.fake.setSubscription(sub.id, { cancel_at_period_end: false });
+    await store.subscription(who, { action: 'refresh' });
+    await sweep(box);
+    await sweep(box);
+    assert.equal(box.to(who).length, 1);
+    assert.ok((await rowOf(who)).trial_reminder_sent_at);
+  });
+
+  test('a trial that Stripe has ended gets none either', async () => {
+    const { who, sub } = await trialist('enid.ended@example.com');
+    store.fake.setSubscription(sub.id, { status: 'canceled', canceled_at: daysFromNowUnix(0), ended_at: daysFromNowUnix(0) });
+    const box = outbox();
+    await sweep(box);
+    assert.equal(box.to(who).length, 0);
+    assert.equal((await rowOf(who)).status, 'expired');
+  });
+
+  test('the date in the email is the one Stripe has now', async () => {
+    const { who, sub } = await trialist('dana.date@example.com');
+    // the trial was extended at Stripe by a few hours; still inside the two days
+    store.fake.setSubscription(sub.id, { trial_end: daysFromNowUnix(1.9), current_period_end: daysFromNowUnix(1.9) });
+    const box = outbox();
+    await sweep(box);
+    const [mail] = box.to(who);
+    assert.ok(mail);
+    assert.ok(mail.subject.endsWith(formatDay(new Date(Date.now() + 1.9 * 24 * HOUR_MS))));
+  });
+
+  test('when Stripe cannot be asked nothing is sent, and the next sweep tries again', async () => {
+    const { who } = await trialist('una.unreachable@example.com');
+    const box = outbox();
+    store.fake.failNext('listSubscriptions', 100);
+    assert.equal(await sweep(box), 0);
+    assert.equal(box.to(who).length, 0);
+    const held = await rowOf(who);
+    assert.deepEqual([held.trial_reminder_sent_at, held.trial_reminder_claimed_at], [null, null]);
+    store.fake.failNext('listSubscriptions', 0);
+    await sweep(box);
+    assert.equal(box.to(who).length, 1);
+  });
+
+  test('a reminder is marked as sent only once it has been; a claim left by a sweep that died is retried after an hour', async () => {
+    const { who } = await trialist('cleo.claimed@example.com');
+    // a sweep claimed this row half an hour ago and never finished
+    await db.query(`update entitlements set trial_reminder_claimed_at = now() - interval '30 minutes' where id = $1 returning id`, [(await rowOf(who)).id]);
+    const box = outbox();
+    await sweep(box);
+    assert.equal(box.to(who).length, 0, 'another sweep may still be working on it');
+    await sweep(box, new Date(Date.now() + 35 * 60 * 1000));
+    assert.equal(box.to(who).length, 1, 'an hour after the claim it is taken up again');
+    const row = await rowOf(who);
+    assert.ok(row.trial_reminder_sent_at);
+    await sweep(box, new Date(Date.now() + 3 * HOUR_MS));
+    assert.equal(box.to(who).length, 1);
+  });
+
+  test('nothing in the database is held while Stripe is asked', async (t) => {
+    if (db.transactional === false) return t.skip('the psql test driver has no row locks');
+    const { who } = await trialist('hope.held@example.com');
+    const row = await rowOf(who);
+    const release = store.fake.hold('listSubscriptions');
+    const box = outbox();
+    let pending;
+    try {
+      pending = sweep(box);
+      await new Promise((r) => setTimeout(r, 250));
+      const free = await Promise.race([
+        db.tx((tx) => tx.query('select id from entitlements where id = $1 for update nowait', [row.id])).then(() => 'free'),
+        new Promise((r) => setTimeout(() => r('held'), 1500)),
+      ]);
+      assert.equal(free, 'free');
+    } finally {
+      release();
+    }
+    await pending;
+    assert.equal(box.to(who).length, 1);
+  });
+});
+
+describe('the prices at Stripe are checked again every ten minutes', () => {
+  test('a price changed at Stripe after the first sale stops checkout within ten minutes, and a fix is seen at once', async () => {
+    const prices = JSON.parse(JSON.stringify(TEST_PRICES));
+    const store = await shop({}, { prices });
+    const realNow = priceCheck.now;
+    try {
+      const checkout = async (email) => store.subscription(await legacyUser(email), { action: 'checkout', plan: 'monthly' });
+      assert.equal((await checkout('pri.one@example.com')).status, 200);
+      assert.equal(store.fake.callsTo('retrievePrice').length, 2, 'both prices were read before the first sale');
+
+      // someone edits the monthly price in the Stripe dashboard
+      prices[TEST_STRIPE.prices.monthly].unit_amount = 999;
+      assert.equal((await checkout('pri.two@example.com')).status, 200, 'inside ten minutes the earlier check still stands');
+      assert.equal(store.fake.callsTo('retrievePrice').length, 2);
+
+      priceCheck.now = () => realNow() + 11 * 60 * 1000;
+      assert.deepEqual(await checkout('pri.three@example.com'), UNAVAILABLE);
+      assert.ok(store.fake.callsTo('retrievePrice').length > 2, 'the prices were read again');
+      assert.deepEqual(await checkout('pri.four@example.com'), UNAVAILABLE, 'a mismatch is checked every time, not remembered');
+
+      // put right at Stripe: selling again straight away, and then quiet for another ten minutes
+      prices[TEST_STRIPE.prices.monthly].unit_amount = 499;
+      assert.equal((await checkout('pri.five@example.com')).status, 200);
+      const calls = store.fake.callsTo('retrievePrice').length;
+      assert.equal((await checkout('pri.six@example.com')).status, 200);
+      assert.equal(store.fake.callsTo('retrievePrice').length, calls);
+    } finally {
+      priceCheck.now = realNow;
+      await store.close();
+      await new Promise((r) => setTimeout(r, 100));
+      await db.query(`delete from client_errors where platform = 'server' returning id`, []);
+    }
+  });
+});
+
+describe('the admin list says how long the allowance is', () => {
+  test('grace_days comes from the server, so the screen never has its own copy', async () => {
+    const list = await call('POST', '/api/functions/adminAccess', { token: admin.token, body: { action: 'list', search: 'nobody-matches-this' } });
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.data, { people: [], grace_days: GRACE_DAYS });
+    assert.equal(GRACE_DAYS, 3);
   });
 });

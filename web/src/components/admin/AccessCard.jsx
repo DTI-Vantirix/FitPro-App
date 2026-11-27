@@ -13,7 +13,10 @@ function reasonLabel(person) {
   if (person.reason === 'admin') return 'Admin';
   if (person.reason === 'invite') return 'Invite code';
   if (person.reason === 'granted') return 'Granted by you';
-  if (person.reason === 'trial') return 'Trial';
+  if (person.reason === 'trial') {
+    const plan = PLAN_NAMES[person.plan];
+    return plan ? `Trial (${plan})` : 'Trial';
+  }
   if (person.reason === 'subscription') {
     const plan = PLAN_NAMES[person.plan];
     return plan ? `Subscribed (${plan})` : 'Subscribed';
@@ -21,12 +24,36 @@ function reasonLabel(person) {
   return 'Has access';
 }
 
+const PAID_SOURCES = ['stripe', 'apple'];
+const isPaid = (entitlement) => PAID_SOURCES.includes(entitlement.source);
+const DAY_MS = 24 * 60 * 60 * 1000;
+const endOf = (entitlement) => new Date(entitlement.expires_at).getTime();
+// `graceDays`: how long a paid period still counts after it ends. The server sends it with
+// the list (`grace_days`), so this screen has no copy of the number to fall out of step.
+const isLivePaid = (entitlement, graceDays) =>
+  isPaid(entitlement) &&
+  ['trial', 'active', 'grace'].includes(entitlement.status) &&
+  endOf(entitlement) + graceDays * DAY_MS >= Date.now();
+const day = (value) => new Date(value).toLocaleDateString();
+
+// Where a paid subscription stands, in plain words.
+function paidLine(entitlement, graceDays) {
+  const { status } = entitlement;
+  if (status === 'revoked') return `${entitlement.note === 'Refunded' ? 'Refunded' : 'Ended'} ${day(entitlement.expires_at)}`;
+  if (status === 'expired') return `Ended ${day(entitlement.expires_at)}`;
+  if (status === 'grace') return `Payment failed, access until ${day(endOf(entitlement) + graceDays * DAY_MS)}`;
+  if (entitlement.cancel_at_period_end) return `Ends ${day(entitlement.expires_at)}`;
+  return `${status === 'trial' ? 'Trial ends' : 'Renews'} ${day(entitlement.expires_at)}`;
+}
+
 const PASS_NAMES = { invite: 'invite code access', admin: 'free access' };
+const isRemovedPass = (entitlement) => PASS_NAMES[entitlement.source] && entitlement.status === 'revoked' && entitlement.revoked_by;
 const isLiveFreePass = (entitlement) => PASS_NAMES[entitlement.source] && entitlement.status === 'active';
 const messageOf = (err, fallback) => err?.response?.data?.error || fallback;
 
 export default function AccessCard() {
   const [people, setPeople] = useState(null);
+  const [graceDays, setGraceDays] = useState(0);
   const [search, setSearch] = useState('');
   const [email, setEmail] = useState('');
   const [note, setNote] = useState('');
@@ -40,7 +67,10 @@ export default function AccessCard() {
     const request = ++latest.current;
     const res = await api.functions.invoke('adminAccess', { action: 'list', search: term });
     // a slower, older search must not replace a newer one
-    if (request === latest.current) setPeople(res.data?.people || []);
+    if (request === latest.current) {
+      setGraceDays(Number(res.data?.grace_days) || 0);
+      setPeople(res.data?.people || []);
+    }
   };
 
   // First load decides whether the card shows at all; later searches wait for a pause in typing.
@@ -166,6 +196,8 @@ export default function AccessCard() {
               {rows.map((person) => {
                 const passes = person.entitlements.filter(isLiveFreePass);
                 const notes = passes.map((p) => p.note).filter(Boolean);
+                const paid = person.entitlements.filter(isPaid);
+                const removed = person.entitlements.filter(isRemovedPass);
                 return (
                   <tr key={person.user_id} className="border-t border-border align-top">
                     <td className="px-3 py-2">
@@ -174,11 +206,20 @@ export default function AccessCard() {
                     </td>
                     <td className="px-3 py-2">
                       <span className={person.allowed ? '' : 'text-muted-foreground'}>{reasonLabel(person)}</span>
-                      {person.expires_at && (
-                        <span className="block text-[10px] text-muted-foreground">
-                          {person.cancel_at_period_end ? 'Ends' : 'Renews'} {new Date(person.expires_at).toLocaleDateString()}
-                        </span>
+                      {paid.filter((entitlement) => isLivePaid(entitlement, graceDays)).length >= 2 && (
+                        <span className="block text-[10px] font-semibold text-destructive">Two subscriptions: refund one in Stripe</span>
                       )}
+                      {paid.map((entitlement) => (
+                        <span key={entitlement.id} className="block text-[10px] text-muted-foreground">
+                          {paidLine(entitlement, graceDays)}
+                          {entitlement.external_id && <span className="num block break-all text-[9px]">{entitlement.external_id}</span>}
+                        </span>
+                      ))}
+                      {removed.map((entitlement) => (
+                        <span key={entitlement.id} className="block text-[10px] text-muted-foreground">
+                          Free access removed by {entitlement.revoked_by} on {day(entitlement.revoked_at)}
+                        </span>
+                      ))}
                       {notes.length > 0 && <span className="block text-[10px] text-muted-foreground">{notes.join(' · ')}</span>}
                     </td>
                     <td className="px-3 py-2 text-right">

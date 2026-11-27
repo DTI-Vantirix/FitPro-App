@@ -1,6 +1,7 @@
 {
   "name": "AccessGrant",
   "type": "object",
+  "description": "History of redeemed invite codes. Read-only through the API: the server writes a row itself when a code is redeemed, and a rule of false lets nobody create, change or delete one, admins included. Access is decided from entitlements, not from this.",
   "properties": {
     "user_id": {
       "type": "string",
@@ -34,20 +35,8 @@
         }
       ]
     },
-    "create": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
-    "update": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
-    "delete": {
-      "user_condition": {
-        "role": "admin"
-      }
-    }
+    "create": false,
+    "update": false,
+    "delete": false
   }
 }

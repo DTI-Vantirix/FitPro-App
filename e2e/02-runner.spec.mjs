@@ -39,6 +39,25 @@ test('the sign-up form is the invite-only one while subscriptions are off', asyn
   expect((await res.json()).error).toBe('Enter your invite code.');
 });
 
+test('with subscriptions off, nothing offers terms or prices', async ({ browser }) => {
+  const visitor = await browser.newPage();
+  await visitor.goto('/register');
+  await expect(visitor.getByRole('button', { name: 'Create account' })).toBeVisible();
+  await expect(visitor.getByText(/By creating an account you agree/)).toHaveCount(0);
+  await expect(visitor.getByRole('link', { name: 'Terms of use' })).toHaveCount(0);
+
+  // the address exists, but says the terms are not in effect and shows no price
+  await visitor.goto('/terms');
+  await expect(visitor.getByRole('heading', { name: 'Terms of use' })).toBeVisible();
+  await expect(visitor.getByText('These terms are not yet in effect.')).toBeVisible();
+  await expect(visitor.getByText(/\$4\.99|\$49\.99|free trial|7 days/i)).toHaveCount(0);
+  await expect(visitor.getByText('Subscription and free trial')).toHaveCount(0);
+  // the privacy policy is still there for everyone
+  await visitor.goto('/privacy');
+  await expect(visitor.getByRole('heading', { name: 'Your data stays yours' })).toBeVisible();
+  await visitor.close();
+});
+
 test('the form makes the code optional once the server reports subscriptions on', async ({ browser }) => {
   // The test server runs with the switch off, so only the form is checked here: its
   // answer from /api/auth/options is replaced. The server side is covered in server/test.
@@ -151,7 +170,10 @@ test('the owner sees the runner listed with an invite code, and a runner cannot 
   const card = owner.locator('section', { has: owner.getByRole('heading', { name: 'Who has access' }) });
   await expect(card).toBeVisible();
   await expect(card.getByRole('row').filter({ hasText: RUNNER.email })).toContainText('Invite code');
-  await expect(card.getByRole('row').filter({ hasText: ADMIN.email })).toContainText('Admin');
+  // The row of the admin's own account: found by its Person cell, because another row can
+  // now name the admin too ("Free access removed by admin@... on ...").
+  const adminRow = card.getByRole('row').filter({ has: owner.locator('td:first-child', { hasText: ADMIN.email }) });
+  await expect(adminRow).toContainText('Admin');
 
   await card.getByLabel('Search by email').fill('runner@');
   await expect(card.getByRole('row').filter({ hasText: ADMIN.email })).toHaveCount(0);

@@ -1,4 +1,5 @@
 import { accessOf, grantFree, hasAccess } from '../access.js';
+import { syncCustomer } from '../billing/sync.js';
 import { HttpError, rateLimiter } from '../lib/http.js';
 
 // Invite codes: a single-use code from the owner opens the app for one athlete,
@@ -36,13 +37,39 @@ export async function claimInvite(tx, user, code) {
   return true;
 }
 
-export default async function inviteAccess({ db, user, body, config }) {
+// A payer whose renewal notice was lost would be locked out for good on the phone,
+// which only ever asks for this status. So when an account that has a Stripe customer
+// is about to be told "no", Stripe is asked first: at most once every five minutes per
+// account, and a failure there changes nothing (the stored answer stands).
+const RECONCILE_EVERY_MS = 5 * 60 * 1000;
+const lastReconcile = new Map();
+
+async function reconcileWithStripe({ db, user, config, stripe }) {
+  if (!stripe || !config?.stripe?.ready || !user.stripe_customer_id) return false;
+  const now = Date.now();
+  if (now - (lastReconcile.get(user.id) || 0) < RECONCILE_EVERY_MS) return false;
+  lastReconcile.set(user.id, now);
+  if (lastReconcile.size > 10000) {
+    for (const [id, at] of lastReconcile) if (now - at >= RECONCILE_EVERY_MS) lastReconcile.delete(id);
+  }
+  try {
+    await syncCustomer(db, stripe, config, user.stripe_customer_id);
+    return true;
+  } catch (error) {
+    console.error(`[billing] could not check Stripe for a locked-out account: ${error?.message || error}`);
+    return false;
+  }
+}
+
+export default async function inviteAccess({ db, user, body, config, stripe }) {
   const action = body?.action || 'status';
 
   if (action === 'status') {
+    let found = await accessOf(db, user);
+    if (!found.allowed && (await reconcileWithStripe({ db, user, config, stripe }))) found = await accessOf(db, user);
     // `admin` is only present for admins, as before. `subscriptions` tells the
     // screens whether to offer a subscription or only the invite code.
-    const { admin, ...access } = await accessOf(db, user);
+    const { admin, ...access } = found;
     return { ...access, ...(admin ? { admin: true } : {}), subscriptions: Boolean(config?.subscriptions) };
   }
 

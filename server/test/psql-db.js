@@ -55,6 +55,8 @@ export function createPsqlDb(url) {
   };
 
   const db = {
+    // tx(fn) below only runs fn: tests that need real locks or a rollback skip themselves on this.
+    transactional: false,
     async query(sql, params = []) {
       const statement = inline(sql.trim().replace(/;$/, ''), params);
       const isWrite = /^(insert|update|delete)\b/i.test(statement);

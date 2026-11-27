@@ -64,7 +64,9 @@ npm run check:watch    # the same, rerun every time a source file changes
 The browser flows in `e2e/` drive the built web app, served by the real API, as the
 owner (sign in, generate and revoke invite codes) and as a tester (sign up with a
 code, verify, consent, open every screen, sign out). They use their own database,
-`fitpro_e2e`, created on first run and wiped on every run. GitHub reruns all three
+`fitpro_e2e`, created on first run and wiped on every run. The subscribe flow
+(`e2e/05-subscribe.spec.mjs`) runs against a second server with `SUBSCRIPTIONS` on and a
+stand-in for Stripe, on `fitpro_e2e_subs`; no test reaches Stripe. GitHub reruns all three
 on every push and pull request (`.github/workflows/checks.yml`).
 
 ## How the pieces fit

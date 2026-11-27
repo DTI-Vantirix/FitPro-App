@@ -57,7 +57,9 @@ export class Router {
     this.routes = [];
   }
 
-  add(method, pattern, handler) {
+  // `raw`: the handler reads the request body itself (a webhook checks a signature over
+  // the exact bytes), so the app must not read or parse it first.
+  add(method, pattern, handler, { raw = false } = {}) {
     const keys = [];
     const source = pattern
       .split('/')
@@ -69,7 +71,7 @@ export class Router {
         return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       })
       .join('/');
-    this.routes.push({ method, regex: new RegExp(`^${source}/?$`), keys, handler });
+    this.routes.push({ method, regex: new RegExp(`^${source}/?$`), keys, handler, raw });
     return this;
   }
 
@@ -84,7 +86,7 @@ export class Router {
       route.keys.forEach((key, i) => {
         params[key] = decodeURIComponent(m[i + 1]);
       });
-      return { handler: route.handler, params };
+      return { handler: route.handler, params, raw: route.raw };
     }
     return pathMatched ? { methodNotAllowed: true } : null;
   }
@@ -111,11 +113,44 @@ export function rateLimiter({ windowMs, max, message = 'Too many attempts. Wait 
   };
 }
 
-export function clientIp(req) {
-  // Trust X-Forwarded-For only behind a proxy you control (TRUST_PROXY=true).
-  if (process.env.TRUST_PROXY === 'true') {
-    const fwd = req.headers['x-forwarded-for'];
-    if (fwd) return String(fwd).split(',')[0].trim();
-  }
-  return req.socket.remoteAddress || 'unknown';
+/** The entries of X-Forwarded-For as received, left to right. Empty when there is none. */
+export function forwardedFor(req) {
+  return String(req.headers?.['x-forwarded-for'] || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+/**
+ * TRUSTED_PROXY_HOPS: how many proxies we control stand between the internet and this
+ * process. null when unset; 0 when set to something that is not a whole number of 1 or
+ * more (which trusts no entry: a typo must never make the header more trusted).
+ */
+export function trustedProxyHops(env = process.env) {
+  const raw = String(env.TRUSTED_PROXY_HOPS ?? '').trim();
+  if (!raw) return null;
+  return /^[1-9]\d{0,2}$/.test(raw) ? Number(raw) : 0;
+}
+
+/**
+ * The address a request is counted against (rate limits).
+ *
+ * X-Forwarded-For is only read behind a proxy you control (TRUST_PROXY=true). Each proxy
+ * appends the address it received the request from, so the entries a client can forge
+ * are on the left and the ones our own proxies wrote are on the right.
+ *  - TRUSTED_PROXY_HOPS unset: the leftmost entry, as this server has always done. That
+ *    is only right when the proxy replaces the header instead of appending to it.
+ *  - TRUSTED_PROXY_HOPS=n: the nth entry from the right, the one written by the outermost
+ *    proxy we trust. A list shorter than n did not come through those proxies, so the
+ *    socket address is used.
+ * The `requestInfo` function shows an admin what arrives, to find the right n on a host.
+ */
+export function clientIp(req, env = process.env) {
+  const socket = req.socket?.remoteAddress || 'unknown';
+  if (env.TRUST_PROXY !== 'true') return socket;
+  const list = forwardedFor(req);
+  const hops = trustedProxyHops(env);
+  if (hops === null) return list[0] || socket;
+  if (hops < 1 || list.length < hops) return socket;
+  return list[list.length - hops];
 }

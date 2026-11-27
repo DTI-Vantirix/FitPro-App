@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { registerAuthRoutes } from './auth/routes.js';
 import { authenticate } from './auth/users.js';
+import { createStripe } from './billing/stripe.js';
+import { registerBillingRoutes } from './billing/webhook.js';
 import { registerEntityRoutes } from './entities/routes.js';
 import { recordServerError, registerErrorRoutes } from './errors.js';
 import { createEntityService } from './entities/service.js';
@@ -34,7 +36,8 @@ function databaseError(error) {
   return null;
 }
 
-export function createApp({ db, config, registry }) {
+// `stripe` is the one object that talks to Stripe (src/billing/stripe.js). Tests pass a fake.
+export function createApp({ db, config, registry, stripe = createStripe(config) }) {
   const entities = createEntityService(db, registry);
   const router = new Router();
 
@@ -45,9 +48,10 @@ export function createApp({ db, config, registry }) {
   // The old app asked Base44 for public app settings before anything else.
   router.add('GET', '/api/app/public-settings', async () => ({ id: 'fitpro', public_settings: {} }));
 
-  registerAuthRoutes(router);
+  registerAuthRoutes(router, config);
   registerEntityRoutes(router, entities);
   registerFunctionRoutes(router);
+  registerBillingRoutes(router);
   registerUploadRoutes(router);
   registerErrorRoutes(router);
   registerWellKnownRoutes(router);
@@ -123,7 +127,8 @@ export function createApp({ db, config, registry }) {
         params: match.params,
         db,
         config,
-        body: wantsJson ? await readJson(req) : {},
+        stripe,
+        body: wantsJson && !match.raw ? await readJson(req) : {},
         user: await authenticate(req, db, config),
       };
 

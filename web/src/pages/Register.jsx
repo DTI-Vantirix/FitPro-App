@@ -27,6 +27,23 @@ export default function Register() {
   // With subscriptions on, anyone can sign up and the invite code is optional.
   // Until the server says so, the form stays the invite-only one.
   const [subscriptions, setSubscriptions] = useState(false);
+  // A sign-up with no invite code is mailed at most one code a minute (the server skips a
+  // second one without saying so). So after a code is asked for, "Resend" waits a minute
+  // and says so, rather than promising an email that will not come.
+  const [resendAt, setResendAt] = useState(0);
+  const [clock, setClock] = useState(Date.now());
+  useEffect(() => {
+    if (resendAt <= Date.now()) return undefined;
+    const timer = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [resendAt]);
+  const resendWait = Math.max(0, Math.ceil((resendAt - clock) / 1000));
+  const openSignUp = subscriptions && !inviteCode.trim();
+  const startResendWait = () => {
+    if (!openSignUp) return;
+    setClock(Date.now());
+    setResendAt(Date.now() + 60000);
+  };
   useEffect(() => {
     let alive = true;
     api.auth
@@ -51,6 +68,7 @@ export default function Register() {
     setLoading(true);
     try {
       await api.auth.register({ email, password, invite_code: inviteCode });
+      startResendWait();
       setShowOtp(true);
     } catch (err) {
       setError(err.message || "Registration failed");
@@ -83,10 +101,18 @@ export default function Register() {
     setError("");
     try {
       await api.auth.resendOtp(email);
-      toast({
-        title: "Code sent",
-        description: "Check your email for the new code.",
-      });
+      startResendWait();
+      toast(
+        openSignUp
+          ? {
+              title: "Check your email",
+              description: "If no new code arrives, the one you already have still works.",
+            }
+          : {
+              title: "Code sent",
+              description: "Check your email for the new code.",
+            }
+      );
     } catch (err) {
       setError(err.message || "Failed to resend code");
     }
@@ -146,9 +172,13 @@ export default function Register() {
         </Button>
         <p className="text-center text-sm text-muted-foreground mt-4">
           Didn't receive the code?{" "}
-          <button onClick={handleResend} className="text-primary font-medium hover:underline">
-            Resend
-          </button>
+          {resendWait > 0 ? (
+            <span>You can ask for a new one in {resendWait} {resendWait === 1 ? "second" : "seconds"}.</span>
+          ) : (
+            <button onClick={handleResend} className="text-primary font-medium hover:underline">
+              Resend
+            </button>
+          )}
         </p>
         {(!subscriptions || inviteCode.trim()) && (
           <p className="text-center text-sm text-muted-foreground mt-2">
@@ -294,6 +324,19 @@ export default function Register() {
             "Create account"
           )}
         </Button>
+        {subscriptions && (
+        <p className="text-center text-xs text-muted-foreground">
+          By creating an account you agree to the{" "}
+          <Link to="/terms" className="text-primary hover:underline">
+            Terms of use
+          </Link>{" "}
+          and the{" "}
+          <Link to="/privacy" className="text-primary hover:underline">
+            Privacy policy
+          </Link>
+          .
+        </p>
+        )}
       </form>
     </AuthLayout>
   );
