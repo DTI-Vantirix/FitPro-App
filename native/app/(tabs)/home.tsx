@@ -1,7 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSession } from '../../src/auth/session';
 import { Action, Card, ErrorNotice, Heading, Icon, Label, Notice, StatBlock } from '../../src/components/Ui';
+import { listServerRuns, type ServerRun } from '../../src/run/api';
+import { mergeRuns, weekStats, type DashRun } from '../../src/run/dashboard';
 import { runStore } from '../../src/run/device/run-files';
 import { formatDuration, formatMiles } from '../../src/run/format';
 import { listRuns, type StoredRun } from '../../src/run/queue';
@@ -12,37 +15,24 @@ import { formatPace } from '../../src/run/zones';
 import { colors } from '../../src/theme';
 import { display, stat, type } from '../../src/typography';
 
-const STATUS_TEXT: Record<StoredRun['status'], string> = {
-  uploaded: 'Saved',
+const STATUS_TEXT: Record<DashRun['status'], string> = {
+  saved: 'Saved',
   pending: 'Waiting for a connection',
   needs_attention: 'Needs attention',
   local_only: 'On this phone only',
 };
 
-/** Monday 00:00 local time, the same week the website's dashboard uses. */
-function startOfWeek(now: Date): Date {
-  const d = new Date(now);
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-/** This week's totals from the runs kept on this phone. Runs too short to be saved to
- * VantraRun are left out, so the numbers match what the website will count. */
-function weekStats(runs: StoredRun[]) {
-  const from = startOfWeek(new Date()).getTime();
-  const week = runs.filter((item) => item.status !== 'local_only' && new Date(item.summary.startedAt).getTime() >= from);
-  const distance = week.reduce((sum, item) => sum + item.summary.distanceMi, 0);
-  const time = week.reduce((sum, item) => sum + item.summary.durationSec, 0);
-  return { runs: week.length, distance, time, avgPaceSec: distance > 0.1 ? time / distance : null };
-}
+/** The runs on this phone, and the runner's runs from the server; null when it could not be reached. */
+type Loaded = { stored: StoredRun[]; server: ServerRun[] | null; offline: boolean };
 
 function Home() {
   const router = useRouter();
+  const { accessToken } = useSession();
   const account = useRunAccount();
   const run = useRun();
   const waiting = useWaitingRuns();
-  const [runs, setRuns] = useState<StoredRun[]>([]);
+  const [loaded, setLoaded] = useState<Loaded>({ stored: [], server: null, offline: false });
+  const loadId = useRef(0);
   const [recovered, setRecovered] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -50,9 +40,28 @@ function Home() {
 
   const refresh = useCallback(async () => {
     if (!ownerId) return;
-    try { setRuns(await listRuns(runStore, ownerId)); }
-    catch (cause) { setError(`Could not read the runs saved on this phone: ${cause instanceof Error ? cause.message : String(cause)}`); }
-  }, [ownerId]);
+    const id = loadId.current + 1;
+    loadId.current = id;
+    // The phone's runs are read first: a run that finishes uploading while the server is being
+    // asked is then on both lists and counted once, never on neither.
+    let stored: StoredRun[] | null = null;
+    try {
+      stored = await listRuns(runStore, ownerId);
+    } catch (cause) {
+      setError(`Could not read the runs saved on this phone: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+    if (id !== loadId.current) return;
+    // Until the server answers for the first time, the phone's own runs are shown.
+    if (stored) { const fresh = stored; setLoaded((current) => (current.server === null ? { ...current, stored: fresh } : current)); }
+    let server: ServerRun[] | null = null;
+    try {
+      if (accessToken) server = await listServerRuns(accessToken, ownerId, { limit: 40 });
+    } catch {
+      // No connection, or the server refused: the phone's own runs are shown, with a note.
+    }
+    if (id !== loadId.current) return;
+    setLoaded((current) => ({ stored: stored ?? current.stored, server, offline: server === null }));
+  }, [ownerId, accessToken]);
 
   // A run cut short by the app closing is brought back, never silently dropped.
   useEffect(() => {
@@ -75,7 +84,9 @@ function Home() {
     setRetrying(false);
   }
 
-  const week = useMemo(() => weekStats(runs), [runs]);
+  const runs = useMemo(() => mergeRuns(loaded.server, loaded.stored), [loaded]);
+  const week = useMemo(() => weekStats(runs, new Date()), [runs]);
+  const up = week.deltaPct >= 0;
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 
   return <Screen>
@@ -95,7 +106,16 @@ function Home() {
     </View>}
 
     <Card style={local.distanceCard}>
-      <Label>Distance this week</Label>
+      <View style={local.distanceTop}>
+        <Label>Distance this week</Label>
+        <View style={local.delta} accessible accessibilityLabel={`${up ? 'Up' : 'Down'} ${Math.abs(week.deltaPct)} percent against last week`}>
+          <View style={local.deltaChip}>
+            <Icon name={up ? 'trending-up' : 'trending-down'} size={14} color={up ? colors.accent : colors.text} />
+            <Text style={[stat(15), { color: up ? colors.accent : colors.text }]}>{up ? '+' : '−'}{Math.abs(week.deltaPct)}%</Text>
+          </View>
+          <Label style={local.deltaLabel}>vs last week</Label>
+        </View>
+      </View>
       <View style={local.distanceRow}>
         <View style={local.baseline}>
           <Text style={display(84)}>{week.distance.toFixed(1)}</Text>
@@ -116,7 +136,7 @@ function Home() {
     <Card>
       <StatBlock label="Moving time" value={String(Math.round(week.time / 60))} unit="min" caption="This week" />
     </Card>
-    <Note>Counted from the runs recorded on this phone. Runs added on the website or imported from your watch are not included here yet.</Note>
+    {loaded.offline && <Note>VantraRun could not be reached, so these are the runs stored on this phone. Your full history returns with a connection.</Note>}
 
     {(waiting.pending > 0 || waiting.needsAttention > 0) && <Panel>
       <Heading>Not on the server yet</Heading>
@@ -130,24 +150,43 @@ function Home() {
     </Panel>}
 
     <Card style={local.recent}>
-      <Heading>Recent activity</Heading>
-      {runs.length === 0 && <Text style={styles.body}>No runs recorded on this phone yet.</Text>}
-      {runs.slice(0, 10).map((item, index) => <Pressable key={item.summary.externalId} accessibilityRole="button"
-        onPress={() => router.push({ pathname: '/run-summary', params: { id: item.summary.externalId } })}
-        style={({ pressed }) => [local.item, index > 0 && local.itemDivider, pressed && local.pressed]}>
-        <View style={local.itemText}>
-          <Text style={type.bodyStrong} numberOfLines={1}>{item.summary.routeName}</Text>
-          <Text style={type.small}>
-            {new Date(item.summary.startedAt).toLocaleDateString()} · {formatMiles(item.summary.distanceMi)} mi · {formatPace(item.summary.avgPaceSec)} /mi
-          </Text>
-          <Label style={item.status === 'needs_attention' ? local.attention : undefined}>{STATUS_TEXT[item.status]}</Label>
-        </View>
-        <View style={local.itemValue}>
-          <Text style={stat(24)}>{formatDuration(item.summary.durationSec)}</Text>
-          <Label>Time</Label>
-        </View>
-        <Icon name="chevron-right" size={18} color={colors.subtle} />
-      </Pressable>)}
+      <View style={local.recentHeader}>
+        <Heading>Recent activity</Heading>
+        <Pressable accessibilityRole="button" accessibilityLabel="Import runs" hitSlop={10} onPress={() => router.push('/activities')}
+          style={({ pressed }) => [local.link, pressed && local.pressed]}>
+          <Label>Import</Label>
+          <Icon name="arrow-right" size={12} color={colors.subtle} />
+        </Pressable>
+      </View>
+      {runs.length === 0 && <Text style={styles.body}>{loaded.offline ? 'No runs stored on this phone.' : 'No runs yet. Start one with the button below.'}</Text>}
+      {runs.slice(0, 10).map((item, index) => {
+        const row = <>
+          <View style={local.itemText}>
+            <Text style={type.bodyStrong} numberOfLines={1}>{item.routeName}</Text>
+            <Text style={type.small}>
+              {item.startedAt ? new Date(item.startedAt).toLocaleDateString() : 'No date'} · {formatMiles(item.distanceMi)} mi · {formatPace(item.avgPaceSec)} /mi
+            </Text>
+            <Label style={item.status === 'needs_attention' ? local.attention : undefined}>{STATUS_TEXT[item.status]}</Label>
+          </View>
+          <View style={local.itemValue}>
+            <Text style={stat(24)}>{formatDuration(item.durationSec)}</Text>
+            <Label>Time</Label>
+          </View>
+        </>;
+        // Only a run still kept on this phone has a summary to open.
+        const localId = item.localId;
+        return localId
+          ? <Pressable key={item.key} accessibilityRole="button"
+            onPress={() => router.push({ pathname: '/run-summary', params: { id: localId } })}
+            style={({ pressed }) => [local.item, index > 0 && local.itemDivider, pressed && local.pressed]}>
+            {row}
+            <Icon name="chevron-right" size={18} color={colors.subtle} />
+          </Pressable>
+          : <View key={item.key} style={[local.item, index > 0 && local.itemDivider]}>
+            {row}
+            <View style={local.noChevron} />
+          </View>;
+      })}
     </Card>
 
     <Note>Routes you draw in the Routes tab or on the website appear when you choose a pre-mapped run.</Note>
@@ -159,6 +198,10 @@ const local = StyleSheet.create({
   titleText: { flexShrink: 1, gap: 8 },
   resume: { marginBottom: 16 },
   distanceCard: { minHeight: 180, justifyContent: 'space-between' },
+  distanceTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  delta: { alignItems: 'flex-end', gap: 4 },
+  deltaChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.background, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
+  deltaLabel: { fontSize: 10 },
   distanceRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 },
   baseline: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
   distanceUnit: { fontSize: 12 },
@@ -166,6 +209,9 @@ const local = StyleSheet.create({
   grid: { flexDirection: 'row', gap: 14 },
   mini: { flex: 1 },
   recent: { marginTop: 8, gap: 4 },
+  recentHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  link: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  noChevron: { width: 18 },
   item: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
   itemDivider: { borderTopWidth: 1, borderTopColor: colors.panelBorder },
   itemText: { flex: 1, gap: 3 },

@@ -8,7 +8,7 @@ import type { Maneuver } from './directions';
 import { validLatLng, type LatLng } from './geo';
 import { classifyResponse, type SendResult } from './queue';
 import type { RouteRecord, SnapResult, Waypoint } from './route-draft';
-import { sortZones, zoneTemplate, type Profile, type Zone } from './zones';
+import { sortZones, zoneTemplate, type Profile, type Zone, type ZoneEdit } from './zones';
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number, readonly data: unknown = null) {
@@ -169,6 +169,9 @@ function toZone(row: Record<string, unknown>): Zone | null {
     hr_min_pct: num(row.hr_min_pct),
     hr_max_pct: num(row.hr_max_pct),
     ...(str(row.color) ? { color: str(row.color)! } : {}),
+    ...(str(row.intensity) ? { intensity: str(row.intensity)! } : {}),
+    ...(str(row.purpose) ? { purpose: str(row.purpose)! } : {}),
+    ...(str(row.feel) ? { feel: str(row.feel)! } : {}),
   };
 }
 
@@ -193,6 +196,15 @@ export async function applyZones(token: string, ownerId: string, thresholdSec: n
     await request('POST', entityUrl('PaceZone', '/bulk'), { token, body: spec });
   }
   return listZones(token, ownerId);
+}
+
+/** Changes one zone's name and pace range, as the website's zone editor does. Nothing else
+ * about the zone is sent, so its number, heart-rate band and text stay as they are. */
+export async function updateZone(token: string, zoneId: string, values: ZoneEdit): Promise<Zone> {
+  const body = { name: values.name, fast_sec: values.fast_sec, slow_sec: values.slow_sec };
+  const zone = toZone(record(await request('PUT', entityUrl('PaceZone', `/${encodeURIComponent(zoneId)}`), { token, body })));
+  if (!zone) throw new ApiError('The server did not confirm the change. Check your zones before saving it again.', 0);
+  return zone;
 }
 
 // ---- routes and directions -----------------------------------------------
@@ -266,7 +278,8 @@ function toServerRun(row: Record<string, unknown>): ServerRun | null {
   const distanceMi = num(row.distance_mi);
   const durationSec = num(row.duration_sec);
   if (!id || distanceMi == null || durationSec == null || distanceMi <= 0 || durationSec <= 0) return null;
-  const started = str(row.started_at);
+  // A run saved without a start time is dated by when it was created, as the website does.
+  const when = [str(row.started_at), str(row.created_date)].find((value) => value && Number.isFinite(Date.parse(value))) ?? null;
   return {
     id,
     routeId: str(row.route_id),
@@ -274,7 +287,7 @@ function toServerRun(row: Record<string, unknown>): ServerRun | null {
     distanceMi,
     durationSec,
     avgPaceSec: num(row.avg_pace_sec) ?? durationSec / distanceMi,
-    startedAt: started && Number.isFinite(Date.parse(started)) ? started : null,
+    startedAt: when,
     targetZoneName: str(row.target_zone_name),
     inZonePct: num(row.in_zone_pct),
     avgHr: num(row.avg_hr),

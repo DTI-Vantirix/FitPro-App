@@ -198,6 +198,7 @@ function RunStart() {
         ]} />
         {!bounds && <Text style={shared.body}>Heart-rate range unknown: no max heart rate on your profile.</Text>}
       </Panel>}
+      <Action label="Edit zones" icon="sliders" variant="ghost" compact onPress={() => router.push('/zones')} />
     </View>
 
     <View style={shared.section}>

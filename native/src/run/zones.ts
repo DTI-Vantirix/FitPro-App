@@ -11,6 +11,10 @@ export type Zone = {
   hr_min_pct: number | null;
   hr_max_pct: number | null;
   color?: string;
+  /** Shown on the Pace zones screen only; coaching never reads them. */
+  intensity?: string;
+  purpose?: string;
+  feel?: string;
 };
 export type ZoneRecord = Zone & { intensity: string; purpose: string; feel: string; sort_order: number; color: string };
 export type PaceStatus = 'in' | 'faster' | 'slower' | 'unknown';
@@ -37,6 +41,28 @@ const SPECS = [
     purpose: 'Developing peak power and anaerobic capacity',
     feel: 'All-out. Speaking is impossible. Short sprints and intervals.' },
 ];
+
+export const ZONE_COLORS = SPECS.map((s) => s.color);
+
+/** The colour to draw a zone in, by the website's rule (web/src/lib/zones.js): the five standard
+ * zones by number, whatever colour was stored before the rebrand; any other zone its own colour
+ * when that is on the ramp, else Volt. */
+export function zoneColor(zone: { zone_number?: number | null; color?: string | null }): string {
+  const n = Number(zone.zone_number);
+  if (n >= 1 && n <= 5) return ZONE_COLORS[Math.floor(n) - 1];
+  const stored = String(zone.color ?? '').toUpperCase();
+  return ZONE_COLORS.includes(stored) ? stored : ZONE_COLORS[4];
+}
+
+/** Intensity, purpose and talk test of a zone: what is stored, else the standard text for its number. */
+export function zoneDetails(zone: Zone): { intensity: string; purpose: string; feel: string } {
+  const spec = SPECS.find((s) => s.n === Number(zone.zone_number));
+  return {
+    intensity: zone.intensity ?? spec?.intensity ?? '',
+    purpose: zone.purpose ?? spec?.purpose ?? '',
+    feel: zone.feel ?? spec?.feel ?? '',
+  };
+}
 
 /** Five zone records for a threshold pace in seconds per mile. */
 export function zoneTemplate(thresholdSec: number): ZoneRecord[] {
@@ -78,6 +104,13 @@ export function hrBounds(zone: Zone, hrMax: number | null | undefined): HrBounds
   return { min: Math.round((hrMax * lo) / 100), max: Math.round((hrMax * hi) / 100) };
 }
 
+/** "60–70% max HR · 114–133 bpm"; the beats only when max heart rate is known. Empty when the zone has no band. */
+export function hrBandLabel(zone: Zone, hrMax: number | null | undefined): string {
+  if (zone.hr_min_pct == null || zone.hr_max_pct == null) return '';
+  const bounds = hrBounds(zone, hrMax);
+  return `${zone.hr_min_pct}–${zone.hr_max_pct}% max HR${bounds ? ` · ${bounds.min}–${bounds.max} bpm` : ''}`;
+}
+
 export function paceStatus(zone: Zone, paceSec: number | null): PaceStatus {
   if (paceSec == null || !Number.isFinite(paceSec) || paceSec <= 0) return 'unknown';
   if (paceSec < zone.fast_sec) return 'faster';
@@ -100,6 +133,20 @@ export function parsePace(text: string): number | null {
   return sec >= 180 && sec <= 1200 ? sec : null;
 }
 
+export type ZoneEdit = { name: string; fast_sec: number; slow_sec: number };
+
+/** What the runner typed when editing a zone, checked as the website's editor checks it. */
+export function parseZoneEdit(name: string, fastText: string, slowText: string): { ok: true; values: ZoneEdit } | { ok: false; error: string } {
+  const label = name.trim();
+  if (!label) return { ok: false, error: 'Give the zone a name.' };
+  if (label.length > 40) return { ok: false, error: 'Keep the name to 40 characters.' };
+  const fast = parsePace(fastText);
+  const slow = parsePace(slowText);
+  if (fast == null || slow == null) return { ok: false, error: 'Enter each pace as minutes:seconds, between 3:00 and 20:00.' };
+  if (slow <= fast) return { ok: false, error: 'The slowest pace must be slower than the fastest.' };
+  return { ok: true, values: { name: label, fast_sec: fast, slow_sec: slow } };
+}
+
 export function formatPace(sec: number | null | undefined): string {
   if (sec == null || !Number.isFinite(sec) || sec <= 0) return '--:--';
   const whole = Math.round(sec);
@@ -119,4 +166,18 @@ export function estimateHrMax(age: number): number | null {
 /** A runner cannot be coached without zones and a max heart rate. */
 export function needsSetup(profile: Profile | null, zones: Zone[]): boolean {
   return !profile || !profile.hr_max || !validHrMax(Math.round(profile.hr_max)) || zones.length === 0;
+}
+
+/** What saving the setup form does. The five zones are (re)built from the threshold pace only
+ * when there are none yet or the runner changed that pace; otherwise just the profile is saved
+ * and zones the runner edited are left alone. Null when the form cannot be saved. */
+export function profileChange(input: { hrMax: number; thresholdSec: number | null; known: Profile | null; hasZones: boolean }):
+  { values: { hr_max: number; threshold_sec?: number }; rebuildZones: boolean } | null {
+  const { hrMax, thresholdSec, known, hasZones } = input;
+  if (!validHrMax(hrMax)) return null;
+  if (thresholdSec == null) return hasZones ? { values: { hr_max: hrMax }, rebuildZones: false } : null;
+  const changed = known?.threshold_sec == null || Math.round(known.threshold_sec) !== thresholdSec;
+  return !hasZones || changed
+    ? { values: { hr_max: hrMax, threshold_sec: thresholdSec }, rebuildZones: true }
+    : { values: { hr_max: hrMax }, rebuildZones: false };
 }
