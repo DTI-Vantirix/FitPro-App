@@ -7,13 +7,21 @@ import { boundsOf, toLatLngs } from '@/lib/geo';
 const pinIcon = (label, tone) =>
   divIcon({
     className: 'map-pin-icon',
-    html: `<div class="map-pin ${tone}">${label}</div>`,
-    iconSize: [62, 22],
-    iconAnchor: [31, 11],
+    // The pill sits inside a taller grip so a finger can pick it up.
+    html: `<div class="map-pin-grip"><div class="map-pin ${tone}">${label}</div></div>`,
+    iconSize: [62, 40],
+    iconAnchor: [31, 20],
   });
 
 const START_ICON = pinIcon('START', 'start');
 const FINISH_ICON = pinIcon('FINISH', 'finish');
+// A waypoint you can drag: a small dot inside a finger-sized grip.
+const HANDLE_ICON = divIcon({
+  className: 'map-pin-icon',
+  html: '<div class="map-handle"><span></span></div>',
+  iconSize: [40, 40],
+  iconAnchor: [20, 20],
+});
 
 function Fit({ points, fitKey }) {
   const map = useMap();
@@ -57,6 +65,7 @@ export default function MapView({
   position = null,
   editable = false,
   onAddPoint,
+  onMovePoint,
   className = 'h-64 w-full',
   initialCenter,
   initialZoom = 14,
@@ -111,7 +120,26 @@ export default function MapView({
           <Polyline positions={trailLine} pathOptions={{ color: '#C6FF00', weight: 5, lineCap: 'round', lineJoin: 'round' }} />
         )}
 
-        {showWaypoints &&
+        {/* While drawing, every waypoint is a grip that can be dragged to a new spot. */}
+        {editable &&
+          points.map((p, i) => (
+            <Marker
+              key={`grip-${i}`}
+              position={[p.lat, p.lng]}
+              icon={i === 0 ? START_ICON : i === points.length - 1 ? FINISH_ICON : HANDLE_ICON}
+              draggable
+              autoPan
+              eventHandlers={{
+                dragend: (e) => {
+                  const at = e.target.getLatLng();
+                  onMovePoint?.(i, { lat: at.lat, lng: at.lng });
+                },
+              }}
+            />
+          ))}
+
+        {!editable &&
+          showWaypoints &&
           points.map((p, i) => {
             if (startPin && i === 0) return null;
             if (finishPin && i === points.length - 1) return null;
@@ -125,8 +153,12 @@ export default function MapView({
             );
           })}
 
-        {startPin && <Marker position={[startPin.lat, startPin.lng]} icon={START_ICON} interactive={false} />}
-        {finishPin && <Marker position={[finishPin.lat, finishPin.lng]} icon={FINISH_ICON} interactive={false} />}
+        {!editable && startPin && (
+          <Marker position={[startPin.lat, startPin.lng]} icon={START_ICON} interactive={false} />
+        )}
+        {!editable && finishPin && (
+          <Marker position={[finishPin.lat, finishPin.lng]} icon={FINISH_ICON} interactive={false} />
+        )}
 
         {position && (
           <CircleMarker

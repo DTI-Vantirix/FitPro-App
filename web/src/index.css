@@ -182,6 +182,12 @@
   background: none;
   border: none;
 }
+.map-pin-grip {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
 .map-pin {
   display: flex;
   align-items: center;
@@ -194,6 +200,25 @@
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.14em;
+}
+/* A draggable waypoint: Chalk dot, Ink outline, inside a larger grip. */
+.map-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+.map-handle span {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--vr-chalk);
+  border: 3px solid var(--vr-ink);
+}
+.leaflet-marker-draggable {
+  cursor: grab;
+  touch-action: none;
 }
 /* Start: Ink with a Volt outline. Finish: solid Volt. */
 .map-pin.start {
