@@ -17,6 +17,7 @@ import { deleteAccount } from '../src/billing/account.js';
 import { serialised } from '../src/billing/queue.js';
 import { syncOverdue } from '../src/billing/sync.js';
 import { loadRegistry } from '../src/entities/registry.js';
+import { priceCheck } from '../src/functions/subscription.js';
 import { migrate } from '../src/migrate.js';
 import { chooseDb } from './open-db.js';
 import { TEST_PRICES, TEST_STRIPE, createFakeStripe, daysFromNowUnix, signBody, signedEvent } from './stripe-fake.js';
@@ -3665,5 +3666,40 @@ describe('the trial reminder asks Stripe before it writes to anyone', () => {
     }
     await pending;
     assert.equal(box.to(who).length, 1);
+  });
+});
+
+describe('the prices at Stripe are checked again every ten minutes', () => {
+  test('a price changed at Stripe after the first sale stops checkout within ten minutes, and a fix is seen at once', async () => {
+    const prices = JSON.parse(JSON.stringify(TEST_PRICES));
+    const store = await shop({}, { prices });
+    const realNow = priceCheck.now;
+    try {
+      const checkout = async (email) => store.subscription(await legacyUser(email), { action: 'checkout', plan: 'monthly' });
+      assert.equal((await checkout('pri.one@example.com')).status, 200);
+      assert.equal(store.fake.callsTo('retrievePrice').length, 2, 'both prices were read before the first sale');
+
+      // someone edits the monthly price in the Stripe dashboard
+      prices[TEST_STRIPE.prices.monthly].unit_amount = 999;
+      assert.equal((await checkout('pri.two@example.com')).status, 200, 'inside ten minutes the earlier check still stands');
+      assert.equal(store.fake.callsTo('retrievePrice').length, 2);
+
+      priceCheck.now = () => realNow() + 11 * 60 * 1000;
+      assert.deepEqual(await checkout('pri.three@example.com'), UNAVAILABLE);
+      assert.ok(store.fake.callsTo('retrievePrice').length > 2, 'the prices were read again');
+      assert.deepEqual(await checkout('pri.four@example.com'), UNAVAILABLE, 'a mismatch is checked every time, not remembered');
+
+      // put right at Stripe: selling again straight away, and then quiet for another ten minutes
+      prices[TEST_STRIPE.prices.monthly].unit_amount = 499;
+      assert.equal((await checkout('pri.five@example.com')).status, 200);
+      const calls = store.fake.callsTo('retrievePrice').length;
+      assert.equal((await checkout('pri.six@example.com')).status, 200);
+      assert.equal(store.fake.callsTo('retrievePrice').length, calls);
+    } finally {
+      priceCheck.now = realNow;
+      await store.close();
+      await new Promise((r) => setTimeout(r, 100));
+      await db.query(`delete from client_errors where platform = 'server' returning id`, []);
+    }
   });
 });

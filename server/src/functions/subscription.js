@@ -45,10 +45,13 @@ export async function subscriptionStatus(db, config, user) {
   };
 }
 
-// The prices configured at Stripe must be the ones people are shown. Checked before the
-// first checkout and remembered for the life of the process, per Stripe client. A mismatch
-// is not remembered, so putting the price right at Stripe is enough to start selling.
-const pricesChecked = new WeakSet();
+// The prices configured at Stripe must be the ones people are shown. Checked before a
+// checkout and then trusted for ten minutes, per Stripe client: a price edited in Stripe's
+// dashboard while the server is running stops checkout within that time, not at the next
+// restart. A mismatch is not remembered at all, so putting the price right at Stripe is
+// enough to start selling again. (`now` is here so a test can move the clock.)
+export const priceCheck = { everyMs: 10 * 60 * 1000, now: Date.now };
+const pricesCheckedAt = new WeakMap();
 
 function priceProblem(plan, price) {
   const expected = PLANS[plan];
@@ -62,7 +65,9 @@ function priceProblem(plan, price) {
 }
 
 async function pricesMatch(db, stripe, config) {
-  if (pricesChecked.has(stripe)) return true;
+  const checkedAt = pricesCheckedAt.get(stripe);
+  if (checkedAt !== undefined && priceCheck.now() - checkedAt < priceCheck.everyMs) return true;
+  pricesCheckedAt.delete(stripe);
   for (const plan of Object.keys(PLANS)) {
     const priceId = config.stripe.prices[plan];
     const problem = priceProblem(plan, await stripe.retrievePrice(priceId));
@@ -73,7 +78,7 @@ async function pricesMatch(db, stripe, config) {
       return false;
     }
   }
-  pricesChecked.add(stripe);
+  pricesCheckedAt.set(stripe, priceCheck.now());
   return true;
 }
 
