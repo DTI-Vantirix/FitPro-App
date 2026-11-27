@@ -35,8 +35,21 @@ POST {API_URL}/api/auth/login
 ```
 
 Sign-up is `POST /api/auth/register` with `{ email, password, full_name?, invite_code }`,
-then `POST /api/auth/verify-otp` with the emailed 6-digit code, which also returns
-`{ access_token, user }`. `invite_code` is required: FitPro is invite-only and the server
+then `POST /api/auth/verify-otp` with `{ email, otp_code, password }` (the emailed 6-digit
+code and the password just chosen), which also returns `{ access_token, user }`.
+
+`password` at `verify-otp` was added on 2026-11-27. Anyone can register again with an
+address that is not verified yet, which replaces the password and mails that address a
+new code; sending the password back with the code stops the owner of the address from
+confirming an account that holds somebody else's password. When it is sent it must match
+the account's password, or the answer is `400 "That code is wrong or has expired."`
+(the same as a wrong code, and the code is not used up: registering again and retrying
+works). While `SUBSCRIPTIONS` is off it may be left out, so builds from before this
+date keep working; when it is on it is required. Always send it. The screen reached
+from sign-in for an unverified account has no password to send yet: see
+`docs/decisions.md`, "Known gaps before the switch is turned on".
+
+`invite_code` is required: FitPro is invite-only and the server
 creates no account without a valid unused code (`400` with `"Enter your invite code."`,
 `"That code is not recognised."` or `"That code has already been used."`). The code is
 claimed when the email is verified, not at register; if someone else verified with the same

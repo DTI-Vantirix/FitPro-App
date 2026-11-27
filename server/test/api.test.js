@@ -865,7 +865,20 @@ describe('sign-up when subscriptions are on', () => {
   let open; // the API with SUBSCRIPTIONS=on
   const on = (method, url, options = {}) => call(method, url, { ...options, origin: open.origin });
   const register = (body) => on('POST', '/api/auth/register', { body });
-  const verify = (email, code) => on('POST', '/api/auth/verify-otp', { body: { email, otp_code: code } });
+  // These tests already send the password with the emailed code, as the website and the phone do.
+  const verify = (email, code, password = 'longenough1') =>
+    on('POST', '/api/auth/verify-otp', { body: { email, otp_code: code, ...(password === null ? {} : { password }) } });
+  const WRONG_CODE = { status: 400, data: { error: 'That code is wrong or has expired.' } };
+  // Sign-ups are limited per address; these tests come from their own (see TRUST_PROXY in src/lib/http.js).
+  const from = (address) => ({ 'X-Forwarded-For': address });
+  const withProxy = async (work) => {
+    process.env.TRUST_PROXY = 'true';
+    try {
+      await work();
+    } finally {
+      delete process.env.TRUST_PROXY;
+    }
+  };
 
   before(async () => {
     open = await startApp({ subscriptions: true });
@@ -952,6 +965,78 @@ describe('sign-up when subscriptions are on', () => {
     assert.equal((await db.query('select status from invite_codes where code = $1', [code]))[0].status, 'used');
     assert.equal((await on('POST', '/api/entities/Run/query', { token: ver.data.access_token, body: {} })).status, 200);
   });
+
+  test('someone who re-registers your email cannot get you verified on their password', () => withProxy(async () => {
+    const email = 'vic.tim@example.com';
+    const signUp = (password, address) => on('POST', '/api/auth/register', { body: { email, password }, headers: from(address) });
+    const login = (password) => on('POST', '/api/auth/login', { body: { email, password } });
+    const verified = async () => Boolean((await db.query('select email_verified_at from users where email = $1', [email]))[0].email_verified_at);
+
+    assert.equal((await signUp('victim-pass-V1', '198.51.100.1')).status, 200);
+    // Before the victim types their code, someone else signs up with the same address
+    // and their own password. The new code goes to the victim's inbox, not to them.
+    const hijack = await signUp('attacker-pass-A1', '198.51.100.2');
+    assert.equal(hijack.status, 200);
+
+    // The victim types the code that arrived, with the password they chose: refused,
+    // because the account now holds someone else's password.
+    assert.deepEqual(await verify(email, hijack.data.dev_code, 'victim-pass-V1'), WRONG_CODE);
+    assert.equal(await verified(), false);
+
+    // The other person never sees the code: they cannot guess it in, and signing in only
+    // sends the victim another code.
+    const guess = hijack.data.dev_code === '000000' ? '111111' : '000000';
+    assert.deepEqual(await verify(email, guess, 'attacker-pass-A1'), WRONG_CODE);
+    const theirLogin = await login('attacker-pass-A1');
+    assert.equal(theirLogin.status, 403);
+    assert.equal(theirLogin.data.access_token, undefined);
+    assert.equal(await verified(), false);
+
+    // The victim starts again with their own password and gets in.
+    const again = await signUp('victim-pass-V1', '198.51.100.1');
+    assert.equal(again.status, 200);
+    const code = again.data.dev_code;
+    assert.deepEqual(await verify(email, code, null), WRONG_CODE, 'with subscriptions on the password is required');
+    assert.deepEqual(await verify(email, code, ''), WRONG_CODE);
+    assert.deepEqual(await verify(email, code, 'attacker-pass-A1'), WRONG_CODE);
+    assert.equal(await verified(), false);
+    // none of those refusals used the code up
+    const ok = await verify(email, code, 'victim-pass-V1');
+    assert.equal(ok.status, 200, JSON.stringify(ok.data));
+    assert.ok(ok.data.access_token);
+
+    assert.equal((await login('attacker-pass-A1')).status, 401);
+    assert.equal((await login('victim-pass-V1')).status, 200);
+  }));
+
+  test('with the switch off the password is optional at verification, and a wrong one does not burn the code', () => withProxy(async () => {
+    const email = 'old.phone@example.com';
+    const verifyOff = (body) => call('POST', '/api/auth/verify-otp', { body: { email, ...body } });
+    const reg = await call('POST', '/api/auth/register', {
+      body: { email, password: 'longenough1', invite_code: await mintCode() },
+      headers: from('198.51.100.3'),
+    });
+    assert.equal(reg.status, 200, JSON.stringify(reg.data));
+    assert.deepEqual(await verifyOff({ otp_code: reg.data.dev_code, password: 'not-the-password' }), WRONG_CODE);
+    assert.deepEqual(await verifyOff({ otp_code: reg.data.dev_code, password: 'not-the-password' }), WRONG_CODE);
+    // an installed phone build sends no password: still accepted, with the same code
+    const ok = await verifyOff({ otp_code: reg.data.dev_code });
+    assert.equal(ok.status, 200, JSON.stringify(ok.data));
+    assert.ok(ok.data.access_token);
+  }));
+
+  test('with the switch off, the right password with the code is accepted too', () => withProxy(async () => {
+    const email = 'new.phone@example.com';
+    const reg = await call('POST', '/api/auth/register', {
+      body: { email, password: 'longenough1', invite_code: await mintCode() },
+      headers: from('198.51.100.3'),
+    });
+    const ok = await call('POST', '/api/auth/verify-otp', { body: { email, otp_code: reg.data.dev_code, password: 'longenough1' } });
+    assert.equal(ok.status, 200, JSON.stringify(ok.data));
+    // an address with no account gets the same answer as a wrong code
+    const nobody = await call('POST', '/api/auth/verify-otp', { body: { email: 'nobody.at.all@example.com', otp_code: '123456', password: 'longenough1' } });
+    assert.deepEqual(nobody, WRONG_CODE);
+  }));
 
   test('starting again without the code lets go of the code that was held', async () => {
     const email = 'changed.mind@example.com';

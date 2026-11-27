@@ -115,9 +115,12 @@ export async function register(input: { email: string; password: string; fullNam
   });
 }
 
-/** Confirms the emailed 6-digit code and returns the access token. */
-export async function verifyEmailCode(email: string, code: string): Promise<string> {
-  const data = record(await request('POST', `${APP_AUTH_URL}/verify-otp`, { body: { email: email.trim(), otp_code: code.trim() } }));
+/** Confirms the emailed 6-digit code and returns the access token. `password` is the one
+ * chosen at sign-up: the server confirms the account only if it still holds that password,
+ * so a code mailed for someone else's sign-up with this address cannot confirm theirs. */
+export async function verifyEmailCode(email: string, code: string, password = ''): Promise<string> {
+  const body = { email: email.trim(), otp_code: code.trim(), ...(password ? { password } : {}) };
+  const data = record(await request('POST', `${APP_AUTH_URL}/verify-otp`, { body }));
   if (typeof data.access_token !== 'string' || !data.access_token) throw new ApiError('The server did not sign you in. Try signing in.', 0);
   return data.access_token;
 }

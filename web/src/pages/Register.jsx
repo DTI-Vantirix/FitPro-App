@@ -63,7 +63,7 @@ export default function Register() {
     setError("");
     setLoading(true);
     try {
-      const result = await api.auth.verifyOtp({ email, otpCode });
+      const result = await api.auth.verifyOtp({ email, otpCode, password });
       if (result?.mfa_required) {
         setMfaChallenge(result);
         return;

@@ -120,7 +120,10 @@ const auth = {
   },
   register: ({ email, password, full_name, invite_code }) =>
     request('POST', '/api/auth/register', { email, password, full_name, invite_code }),
-  verifyOtp: ({ email, otpCode }) => request('POST', '/api/auth/verify-otp', { email, otp_code: otpCode }),
+  // The password chosen at sign-up goes back with the emailed code: the server confirms
+  // the account only if it is still the one this person set.
+  verifyOtp: ({ email, otpCode, password }) =>
+    request('POST', '/api/auth/verify-otp', { email, otp_code: otpCode, ...(password ? { password } : {}) }),
   resendOtp: (email) => request('POST', '/api/auth/resend-otp', { email }),
   async changePassword({ currentPassword, newPassword }) {
     const result = await request('POST', '/api/auth/change-password', { currentPassword, newPassword });
