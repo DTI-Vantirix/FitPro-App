@@ -670,7 +670,7 @@ describe('invite grants written by an older build are picked up at start-up', ()
 });
 
 describe('the server refuses product calls without access', () => {
-  const NO_ACCESS = { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } };
+  const NO_ACCESS = { status: 403, data: { error: 'Enter an invite code to use VantraRun.', code: 'no_access' } };
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 9, 9, 9]);
   const aRun = { distance_mi: 2, duration_sec: 1200, route_name: 'Before the lapse', started_at: '2026-11-21T12:00:00Z' };
   const upload = {
@@ -955,8 +955,8 @@ describe('sign-up needs a code', () => {
 
 describe('sign-up when subscriptions are on', () => {
   // The refusal names what is on offer: a subscription only where one can be bought.
-  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
-  const NO_ACCESS_OFF = { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } };
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.', code: 'no_access' } };
+  const NO_ACCESS_OFF = { status: 403, data: { error: 'Enter an invite code to use VantraRun.', code: 'no_access' } };
   let open; // the API with SUBSCRIPTIONS=on
   const on = (method, url, options = {}) => call(method, url, { ...options, origin: open.origin });
   const register = (body) => on('POST', '/api/auth/register', { body });
@@ -1163,7 +1163,7 @@ describe('sign-up when subscriptions are on', () => {
 });
 
 describe('the owner sees and controls access', () => {
-  const NO_ACCESS = { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } };
+  const NO_ACCESS = { status: 403, data: { error: 'Enter an invite code to use VantraRun.', code: 'no_access' } };
   const access = (who, body) => call('POST', '/api/functions/adminAccess', { token: who.token, body });
   const runs = (who) => call('POST', '/api/entities/Run/query', { token: who.token, body: {} });
   const find = async (email) => (await access(admin, { action: 'list', search: email })).data.people.find((p) => p.email === email);
@@ -1391,11 +1391,11 @@ describe('ingestActivity (native contract)', () => {
   test('no accepted invite code -> 403, nothing stored', async () => {
     const lee = await legacyUser('lee@example.com');
     const res = await call('POST', '/api/functions/ingestActivity', { token: lee.token, body: run });
-    assert.deepEqual(res, { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } });
+    assert.deepEqual(res, { status: 403, data: { error: 'Enter an invite code to use VantraRun.', code: 'no_access' } });
     assert.equal((await db.query('select id from runs where created_by_id = $1', [lee.user.id])).length, 0);
     // and they cannot read runs either: the whole product is closed, not only the upload
     const mine = await call('POST', '/api/entities/Run/query', { token: lee.token, body: {} });
-    assert.deepEqual(mine, { status: 403, data: { error: 'Enter an invite code to use VantraRun.' } });
+    assert.deepEqual(mine, { status: 403, data: { error: 'Enter an invite code to use VantraRun.', code: 'no_access' } });
   });
 
   test('admins upload without a code', async () => {
@@ -1885,7 +1885,7 @@ async function shop(overrides = {}, fakeOptions = {}) {
 
 describe('subscribing on the website', () => {
   let store;
-  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.', code: 'no_access' } };
 
   before(async () => {
     store = await shop();
@@ -2082,7 +2082,7 @@ describe('subscribing on the website', () => {
 
 describe('Stripe webhook', () => {
   let store;
-  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.', code: 'no_access' } };
   const RECEIVED = { status: 200, data: { received: true } };
   const DAY_MS = 24 * 60 * 60 * 1000;
   const near = (actual, expectedMs, message) =>
@@ -2407,7 +2407,7 @@ describe('Stripe webhook', () => {
 
 describe('when the webhook is late', () => {
   let store;
-  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.', code: 'no_access' } };
   const customerOf = async (who) => (await userRow(who.user.id)).stripe_customer_id;
   const stripeRows = async (who) => (await entitlementsOf(who.user.id)).filter((r) => r.source === 'stripe');
   const listCalls = (fake, customer) => fake.callsTo('listSubscriptions').filter((c) => c.args.customerId === customer).length;
@@ -3076,5 +3076,42 @@ describe('open sign-up cannot be used to send mail', () => {
     assert.deepEqual(await off('/api/auth/register', { email: 'switch.off.nocode@example.com', password: 'longenough1' }, '203.0.113.90'), {
       status: 400, data: { error: 'Enter your invite code.' },
     });
+  });
+});
+
+describe('a refusal for lack of access says so in a way a screen can act on', () => {
+  test("the body is { error, code: 'no_access' } on an entity call, an upload and a function", async () => {
+    const nia = await legacyUser('nia.noaccess@example.com');
+    const REFUSED = { status: 403, data: { error: 'Enter an invite code to use VantraRun.', code: 'no_access' } };
+    assert.deepEqual(await call('POST', '/api/entities/Run/query', { token: nia.token, body: {} }), REFUSED);
+    assert.deepEqual(await call('POST', '/api/uploads', { token: nia.token, raw: 'x', headers: { 'Content-Type': 'image/png' } }), REFUSED);
+    assert.deepEqual(await call('POST', '/api/functions/socialFeed', { token: nia.token, body: {} }), REFUSED);
+
+    const open = await startApp({ subscriptions: true });
+    try {
+      assert.deepEqual(await call('POST', '/api/entities/Run/query', { token: nia.token, body: {}, origin: open.origin }), {
+        status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.', code: 'no_access' },
+      });
+    } finally {
+      await open.close();
+    }
+  });
+
+  test('no other 403 carries the code', async () => {
+    const member = await invitedUser('mel.member@example.com');
+    assert.deepEqual(await call('POST', '/api/functions/adminAccess', { token: member.token, body: { action: 'list' } }), {
+      status: 403, data: { error: 'Admins only' },
+    });
+    const [run] = (await call('POST', '/api/entities/Run/query', { token: admin.token, body: { limit: 1 } })).data.items;
+    const foreign = await call('DELETE', `/api/entities/InviteCode/${run?.id || '00000000-0000-4000-8000-000000000000'}`, { token: member.token });
+    assert.equal(foreign.data?.code, undefined);
+    const reg = await call('POST', '/api/auth/register', {
+      body: { email: 'una.unverified@example.com', password: 'longenough1', invite_code: await mintCode() },
+      headers: { 'X-Forwarded-For': '203.0.113.200' },
+    });
+    assert.equal(reg.status, 200, JSON.stringify(reg.data));
+    const unverified = await call('POST', '/api/auth/login', { body: { email: 'una.unverified@example.com', password: 'longenough1' } });
+    assert.equal(unverified.status, 403);
+    assert.equal(unverified.data.code, undefined);
   });
 });

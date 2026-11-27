@@ -10,6 +10,12 @@ const TOKEN_KEY = 'fitpro_access_token';
 
 export const apiUrl = (path) => API_URL + path;
 
+// Fired on `window` when the server refuses a call because the account has no access
+// (a 403 whose body says code: 'no_access'). The access gate listens for it, so a person
+// whose access ended in the middle of a session is shown the way back in. No other 403
+// (admins only, an unverified email) fires it.
+export const NO_ACCESS_EVENT = 'vantrarun:no-access';
+
 export class ApiError extends Error {
   constructor(message, status, data) {
     super(message);
@@ -60,7 +66,10 @@ export async function request(method, path, body, { raw = false, headers = {} } 
   } catch {
     data = { error: text };
   }
-  if (!res.ok) throw new ApiError(data?.error || `Request failed (${res.status})`, res.status, data);
+  if (!res.ok) {
+    if (res.status === 403 && data?.code === 'no_access') window.dispatchEvent(new Event(NO_ACCESS_EVENT));
+    throw new ApiError(data?.error || `Request failed (${res.status})`, res.status, data);
+  }
   return data;
 }
 

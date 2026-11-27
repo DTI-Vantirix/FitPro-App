@@ -71,6 +71,8 @@ export const hasAccess = async (db, user) => (await accessOf(db, user)).allowed;
 
 // What an account without access is told. It names only what is on offer: while
 // SUBSCRIPTIONS is off nothing is for sale, so the way in is an invite code.
+export const NO_ACCESS_CODE = 'no_access';
+
 export const noAccessMessage = (config) =>
   config?.subscriptions
     ? 'Subscribe or enter an invite code to use VantraRun.'
@@ -84,7 +86,9 @@ export const noAccessMessage = (config) =>
  */
 export async function requireAccess(ctx) {
   const user = requireUser(ctx);
-  if (!(await hasAccess(ctx.db, user))) throw new HttpError(403, noAccessMessage(ctx.config));
+  // `code` lets a screen tell this refusal from any other 403 (admins only, an unverified
+  // email) and show the way in. The phone sorts by status alone and is not affected.
+  if (!(await hasAccess(ctx.db, user))) throw new HttpError(403, noAccessMessage(ctx.config), { code: NO_ACCESS_CODE });
   return user;
 }
 
