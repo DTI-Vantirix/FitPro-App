@@ -24,7 +24,7 @@ Chosen for Expo SDK 58 / React Native 0.88.1:
 - `react-native-nitro-modules@0.37.2` — native dependency required by HealthKit.
 - `expo-dev-client@~58.0.18` — development build runtime; Expo Go cannot load HealthKit.
 
-The HealthKit Expo plugin sets `NSHealthShareUsageDescription`; `NSHealthUpdateUsageDescription` is disabled, and `background` is `false`. This milestone is strictly read-only foreground access.
+The HealthKit Expo plugin sets `NSHealthShareUsageDescription`; `NSHealthUpdateUsageDescription` is present only because App Store Connect rejects a HealthKit build without it (ITMS-90683), and it says that nothing is written, and `background` is `false`. This milestone is strictly read-only foreground access.
 
 ## Install over the already migrated personal-backend Step 3 working copy
 
