@@ -5,7 +5,7 @@
 // This file also starts billing's other background job, the daily check (at the end).
 import { sendMail } from '../lib/mail.js';
 import { PLANS } from './plans.js';
-import { syncOverdue } from './sync.js';
+import { syncCustomer, syncOverdue } from './sync.js';
 
 const WINDOW_HOURS = 48;
 const SUPPORT_EMAIL = 'info@dtisys.com';
@@ -32,44 +32,78 @@ function reminderMail(config, row) {
   };
 }
 
+const CLAIM_MINUTES = 60;
+
 /**
  * Sends the reminder to every trial that ends within the next 48 hours and has not had
- * one. A row is claimed in the same statement that picks it, so two sweeps (or two
- * servers) never mail the same person twice. If the mail provider refuses the message,
- * or cannot be reached, the claim is cleared and the next sweep tries again.
- * Returns how many were sent.
+ * one. Returns how many were sent. For each such row:
+ *
+ *  1. it is claimed (`trial_reminder_claimed_at`), in the statement that picks it, so two
+ *     sweeps or two servers do not work on the same person. A claim older than an hour is
+ *     taken to be left by a sweep that died, and the row is picked up again;
+ *  2. Stripe is asked about the customer, with nothing held in the database, and our
+ *     copy is brought up to date. Someone who cancelled a minute ago, whose notice has not
+ *     arrived, must not be told they are about to be charged;
+ *  3. if the trial is still running, still due to be charged and still ends within the two
+ *     days, the email is sent, with the date Stripe has now;
+ *  4. only then is it marked as sent (`trial_reminder_sent_at`).
+ *
+ * If Stripe cannot be asked, or the mail provider refuses or cannot be reached, the claim
+ * is given back and the next sweep tries again. (A process that dies between 3 and 4
+ * leads to a second email an hour later: rare, and better than a missed reminder.)
  */
-export async function sendTrialReminders({ db, config, now = new Date(), send = sendMail }) {
-  const due = await db.query(
+export async function sendTrialReminders({ db, config, stripe = null, now = new Date(), send = sendMail }) {
+  const at = now.toISOString();
+  const claimed = await db.query(
     `update entitlements e
-        set trial_reminder_sent_at = $1
+        set trial_reminder_claimed_at = $1
        from users u
       where u.id = e.user_id
         and e.id in (
           select id from entitlements
            where source = 'stripe' and status = 'trial' and not cancel_at_period_end
              and trial_reminder_sent_at is null
+             and (trial_reminder_claimed_at is null
+                  or trial_reminder_claimed_at < $1::timestamptz - make_interval(mins => $3::int))
              and plan in ('monthly', 'annual')
              and expires_at > $1 and expires_at <= $1::timestamptz + make_interval(hours => $2::int)
            for update skip locked)
-      returning e.id, e.plan, e.expires_at, u.email`,
-    [now.toISOString(), WINDOW_HOURS]
+      returning e.id, u.stripe_customer_id as customer`,
+    [at, WINDOW_HOURS, CLAIM_MINUTES]
   );
+  const giveBack = (id) =>
+    db.query('update entitlements set trial_reminder_claimed_at = null where id = $1 and trial_reminder_sent_at is null returning id', [id]);
+
   let sent = 0;
-  for (const row of due) {
-    let refused = false;
+  for (const { id, customer } of claimed) {
     try {
+      // Outside any transaction. Without Stripe set up (or in a test that passes none) the
+      // row is taken as it stands.
+      if (stripe && config.stripe?.ready && customer) await syncCustomer(db, stripe, config, customer);
+      const [row] = await db.query(
+        `select e.id, e.plan, e.expires_at, u.email
+           from entitlements e join users u on u.id = e.user_id
+          where e.id = $1 and e.status = 'trial' and not e.cancel_at_period_end
+            and e.trial_reminder_sent_at is null and e.plan in ('monthly', 'annual')
+            and e.expires_at > $2 and e.expires_at <= $2::timestamptz + make_interval(hours => $3::int)`,
+        [id, at, WINDOW_HOURS]
+      );
+      if (!row) {
+        // No longer due: cancelled, ended, or moved out of the two days.
+        await giveBack(id);
+        continue;
+      }
       const result = await send(config, reminderMail(config, row));
       // With no mail key the message is printed, as every email is locally; that is not a refusal.
-      refused = Boolean(config.mail?.resendApiKey) && !result?.delivered;
+      if (config.mail?.resendApiKey && !result?.delivered) {
+        await giveBack(id);
+        continue;
+      }
+      await db.query('update entitlements set trial_reminder_sent_at = $2 where id = $1 returning id', [id, at]);
+      sent += 1;
     } catch (error) {
       console.error(`[billing] trial reminder could not be sent: ${error?.message || error}`);
-      refused = true;
-    }
-    if (refused) {
-      await db.query('update entitlements set trial_reminder_sent_at = null where id = $1 returning id', [row.id]);
-    } else {
-      sent += 1;
+      await giveBack(id).catch(() => {});
     }
   }
   return sent;

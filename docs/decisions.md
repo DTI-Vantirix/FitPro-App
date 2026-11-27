@@ -170,7 +170,10 @@ nothing a tester sees changes. The decisions:
   days before a trial ends, which for a 7-day trial is the moment it starts. Ours goes
   two days before, through the existing mail path, with the date, the amount and how to
   cancel, from an hourly sweep that does not depend on a webhook. Stripe's own trial
-  email stays off so nobody gets two. The date in the email is the day on a US Pacific
+  email stays off so nobody gets two. Before each one is sent Stripe is asked about that
+  customer, so someone who cancelled a minute ago is not told they are about to be
+  charged; a row is marked as sent only once the email has gone (a claim, retried after
+  an hour, keeps two sweeps apart). The date in the email is the day on a US Pacific
   calendar, so nobody in the contiguous states is charged before the day named.
 - **A failed payment keeps access for the 3-day allowance only.** The row becomes
   `grace` with `expires_at` at the end of the period that was paid for (the start of the

@@ -3545,3 +3545,121 @@ describe('a failed payment never extends access by being looked at again', () =>
     assert.equal((await entitlementsOf(neo.user.id)).length, 0);
   });
 });
+
+describe('the trial reminder asks Stripe before it writes to anyone', () => {
+  let store;
+  const HOUR_MS = 60 * 60 * 1000;
+  const selling = () => ({ ...testConfig, ...SELLING });
+  function outbox(answer = { delivered: true }) {
+    const sent = [];
+    return { sent, send: async (_config, message) => (sent.push(message), answer), to: (who) => sent.filter((m) => m.to === who.user.email) };
+  }
+  const sweep = (box, now = new Date()) => sendTrialReminders({ db, config: selling(), stripe: store.fake, now, send: box.send });
+  const rowOf = async (who) => (await entitlementsOf(who.user.id)).find((r) => r.source === 'stripe');
+  // Someone 36 hours from the end of their trial, here and at Stripe.
+  async function trialist(email) {
+    const who = await legacyUser(email);
+    const sub = await store.subscribe(who);
+    store.fake.setSubscription(sub.id, { trial_end: daysFromNowUnix(1.5), current_period_end: daysFromNowUnix(1.5) });
+    await store.subscription(who, { action: 'refresh' });
+    return { who, sub };
+  }
+
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('a trial cancelled at Stripe a moment ago, with the notice still on its way, gets no reminder', async () => {
+    const { who, sub } = await trialist('cass.cancelled@example.com');
+    store.fake.setSubscription(sub.id, { cancel_at_period_end: true });
+    assert.equal((await rowOf(who)).cancel_at_period_end, false, 'our copy has not heard yet');
+
+    const box = outbox();
+    await sweep(box);
+    assert.equal(box.to(who).length, 0);
+    const row = await rowOf(who);
+    assert.equal(row.cancel_at_period_end, true, 'and the sweep brought our copy up to date');
+    assert.equal(row.trial_reminder_sent_at, null);
+
+    // they change their mind: the reminder is due after all, and goes out once
+    store.fake.setSubscription(sub.id, { cancel_at_period_end: false });
+    await store.subscription(who, { action: 'refresh' });
+    await sweep(box);
+    await sweep(box);
+    assert.equal(box.to(who).length, 1);
+    assert.ok((await rowOf(who)).trial_reminder_sent_at);
+  });
+
+  test('a trial that Stripe has ended gets none either', async () => {
+    const { who, sub } = await trialist('enid.ended@example.com');
+    store.fake.setSubscription(sub.id, { status: 'canceled', canceled_at: daysFromNowUnix(0), ended_at: daysFromNowUnix(0) });
+    const box = outbox();
+    await sweep(box);
+    assert.equal(box.to(who).length, 0);
+    assert.equal((await rowOf(who)).status, 'expired');
+  });
+
+  test('the date in the email is the one Stripe has now', async () => {
+    const { who, sub } = await trialist('dana.date@example.com');
+    // the trial was extended at Stripe by a few hours; still inside the two days
+    store.fake.setSubscription(sub.id, { trial_end: daysFromNowUnix(1.9), current_period_end: daysFromNowUnix(1.9) });
+    const box = outbox();
+    await sweep(box);
+    const [mail] = box.to(who);
+    assert.ok(mail);
+    assert.ok(mail.subject.endsWith(formatDay(new Date(Date.now() + 1.9 * 24 * HOUR_MS))));
+  });
+
+  test('when Stripe cannot be asked nothing is sent, and the next sweep tries again', async () => {
+    const { who } = await trialist('una.unreachable@example.com');
+    const box = outbox();
+    store.fake.failNext('listSubscriptions', 100);
+    assert.equal(await sweep(box), 0);
+    assert.equal(box.to(who).length, 0);
+    const held = await rowOf(who);
+    assert.deepEqual([held.trial_reminder_sent_at, held.trial_reminder_claimed_at], [null, null]);
+    store.fake.failNext('listSubscriptions', 0);
+    await sweep(box);
+    assert.equal(box.to(who).length, 1);
+  });
+
+  test('a reminder is marked as sent only once it has been; a claim left by a sweep that died is retried after an hour', async () => {
+    const { who } = await trialist('cleo.claimed@example.com');
+    // a sweep claimed this row half an hour ago and never finished
+    await db.query(`update entitlements set trial_reminder_claimed_at = now() - interval '30 minutes' where id = $1 returning id`, [(await rowOf(who)).id]);
+    const box = outbox();
+    await sweep(box);
+    assert.equal(box.to(who).length, 0, 'another sweep may still be working on it');
+    await sweep(box, new Date(Date.now() + 35 * 60 * 1000));
+    assert.equal(box.to(who).length, 1, 'an hour after the claim it is taken up again');
+    const row = await rowOf(who);
+    assert.ok(row.trial_reminder_sent_at);
+    await sweep(box, new Date(Date.now() + 3 * HOUR_MS));
+    assert.equal(box.to(who).length, 1);
+  });
+
+  test('nothing in the database is held while Stripe is asked', async (t) => {
+    if (db.transactional === false) return t.skip('the psql test driver has no row locks');
+    const { who } = await trialist('hope.held@example.com');
+    const row = await rowOf(who);
+    const release = store.fake.hold('listSubscriptions');
+    const box = outbox();
+    let pending;
+    try {
+      pending = sweep(box);
+      await new Promise((r) => setTimeout(r, 250));
+      const free = await Promise.race([
+        db.tx((tx) => tx.query('select id from entitlements where id = $1 for update nowait', [row.id])).then(() => 'free'),
+        new Promise((r) => setTimeout(() => r('held'), 1500)),
+      ]);
+      assert.equal(free, 'free');
+    } finally {
+      release();
+    }
+    await pending;
+    assert.equal(box.to(who).length, 1);
+  });
+});
