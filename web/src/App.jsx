@@ -15,6 +15,7 @@ import ForgotPassword from '@/pages/ForgotPassword';
 import ResetPassword from '@/pages/ResetPassword';
 import Mfa from '@/pages/Mfa';
 import Privacy from '@/pages/Privacy';
+import Terms from '@/pages/Terms';
 import ConsentGate from '@/components/ConsentGate';
 import AccessGate from '@/components/access/AccessGate';
 import Home from '@/pages/Home';
@@ -63,6 +64,7 @@ const AuthenticatedApp = () => {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/mfa" element={<Mfa />} />
       <Route path="/privacy" element={<Privacy />} />
+      <Route path="/terms" element={<Terms />} />
       <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
         <Route element={<AccessGate />}>
         <Route element={<ConsentGate />}>

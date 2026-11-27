@@ -7,13 +7,14 @@ const SECTIONS = [
     title: 'Who this covers',
     body: [
       'This policy covers the VantraRun phone app and the VantraRun website. They are the same service: one account, one set of data.',
-      'VantraRun is run by Dynamic Technology Integration, and is in invite-only testing. To ask a question or make a request about your data, email info@dtisys.com.',
+      'VantraRun is run by Dynamic Technology Integration. To ask a question or make a request about your data, email info@dtisys.com.',
     ],
   },
   {
     title: 'What we collect',
     body: [
-      'Account: your email address, a password (stored only as a one-way hash, never as text), your name if you give one, and the invite code you signed up with.',
+      'Account: your email address, a password (stored only as a one-way hash, never as text), your name if you give one, and the invite code you signed up with, if you used one.',
+      'Subscription: whether you have one, the plan, when it renews or ends, and the reference numbers the payment provider gives us for you and your subscription. We never receive or store your card number.',
       'Training profile: max heart rate and threshold pace, and on the website optionally age, sex, height and weight. These produce your five training zones.',
       'Runs you record: start time, distance, duration, pace, mile splits, the GPS track of the route, the zone you aimed for and how much of the run you spent in it, and heart rate (highest, lowest, average) if you paired a sensor.',
       'Routes: the routes you build on the website, including their turn-by-turn directions when you open one to run.',
@@ -34,7 +35,7 @@ const SECTIONS = [
     title: 'How we use it',
     body: [
       'To do what the app is for: record and show your runs, coach you against your zones, give directions on your routes, show your history and statistics, and run the social features you choose to use.',
-      'To keep the service working and secure: sending sign-up code password-reset emails, fixing crashes, blocking abuse.',
+      'To keep the service working and secure: sending sign-up codes, password-reset emails and a reminder before a free trial ends, fixing crashes, blocking abuse.',
       'We do not sell your data, use it for advertising, build a profile of you for anyone else, or share it with data brokers or insurers.',
     ],
   },
@@ -61,7 +62,8 @@ const SECTIONS = [
     title: 'Companies that help run the service',
     body: [
       'Hosting: the server and database run on Render, in the United States. Everything listed above is stored there.',
-      'Email: sign-up codes and password-reset links are delivered by Resend, which receives your email address and the message.',
+      'Email: sign-up codes, password-reset links and the reminder before a free trial ends are delivered by Resend, which receives your email address and the message.',
+      'Payments: subscriptions bought on the website are paid through Stripe, which receives your email address and the payment details you enter on its checkout page. Subscriptions bought in the iPhone app are paid through Apple with your Apple account. Each tells us only whether your subscription is active.',
       'Maps and directions: when you build a route or open one to run, its waypoints (coordinates, without your name or account) are sent to a routing service to work out the path and the turns. The map you see is drawn by Apple Maps or Google Maps in the phone app and by OpenStreetMap on the website; like any map, those providers see which area is being displayed.',
       'These companies handle data only to provide their part of the service. None of them is given your data to use for their own advertising.',
     ],
@@ -71,6 +73,7 @@ const SECTIONS = [
     body: [
       'There is no fixed period. Your data kept until you delete it or your account.',
       'Deleting your account removes your account and every record tied to it from the live database straight away, including error reports. Copies may remain in the hosting provider’s routine database backups for a short time until those backups expire.',
+      'Deleting your account also deletes your customer record at Stripe and cancels a website subscription. Stripe and Apple keep their own records of past payments as the law requires of them.',
       'Error reports are also trimmed automatically: only the most recent 2,000 across everyone are kept.',
       'Runs waiting to upload are stored on your phone until the server has them. Deleting your account from the app removes them from the phone as well.',
     ],
@@ -81,7 +84,7 @@ const SECTIONS = [
       'See your data: your runs, routes, zones and posts are all visible in the app and on the website. To ask for a copy, email info@dtisys.com.',
       'Correct it: edit your profile and zones on the website; delete and re-record or re-import anything that is wrong.',
       'Delete training data: on the website, Settings → Your data wipes your runs, routes, profile and zones immediately. It cannot be undone.',
-      'Delete your whole account: in the phone app, Settings → Delete account; on the website, Settings → Your data → Delete account. Both ask for your password, then remove your account and every record tied to it. It cannot be undone.',
+      'Delete your whole account: in the phone app, Settings → Delete account; on the website, Settings → Your data → Delete account, or on the subscription screen if you have not subscribed. Each asks for your password, then removes your account and every record tied to it. It cannot be undone.',
       'Withdraw consent: stop using the app and delete your account. Turning off a permission in your phone’s settings stops that kind of data being collected from then on.',
     ],
   },
