@@ -24,6 +24,35 @@ test('the app is closed to people who are not signed in', async () => {
   await expect(page).toHaveURL(/\/login/);
 });
 
+test('the sign-up form is the invite-only one while subscriptions are off', async ({ request }) => {
+  const options = await (await request.get('/api/auth/options')).json();
+  expect(options.subscriptions).toBe(false);
+
+  await page.goto('/register');
+  await expect(page.getByText('VantraRun is invite-only. Use the code you were sent.')).toBeVisible();
+  await expect(page.getByLabel('Invite code')).toHaveAttribute('required', '');
+  await expect(page.getByText(/Have an invite code\?/)).toHaveCount(0);
+
+  // and the server refuses a sign-up with no code, whatever the form allows
+  const res = await request.post('/api/auth/register', { data: { email: 'nocode@e2e.test', password: 'e2e-nocode-pass-1' } });
+  expect(res.status()).toBe(400);
+  expect((await res.json()).error).toBe('Enter your invite code.');
+});
+
+test('the form makes the code optional once the server reports subscriptions on', async ({ browser }) => {
+  // The test server runs with the switch off, so only the form is checked here: its
+  // answer from /api/auth/options is replaced. The server side is covered in server/test.
+  const visitor = await browser.newPage();
+  await visitor.route('**/api/auth/options', (route) =>
+    route.fulfill({ json: { name: 'VantraRun', auth_config: { mfa_policy: 'off', providers: [] }, subscriptions: true } })
+  );
+  await visitor.goto('/register');
+  await expect(visitor.getByText('Have an invite code? Enter it here. Otherwise leave this empty.')).toBeVisible();
+  await expect(visitor.getByText('VantraRun is invite-only. Use the code you were sent.')).toHaveCount(0);
+  await expect(visitor.getByLabel('Invite code')).not.toHaveAttribute('required', '');
+  await visitor.close();
+});
+
 test('sign-up without a real code is refused', async () => {
   const answer = await submitSignUp(page, { ...RUNNER, inviteCode: 'FP-NOPE-NOPE' });
   expect(answer.status).toBe(400);

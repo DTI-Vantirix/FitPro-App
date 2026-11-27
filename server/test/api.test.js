@@ -30,10 +30,13 @@ async function openDb() {
 let db;
 let server;
 let base;
+let testConfig;
+let registry;
 const uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fitpro-uploads-'));
 
-async function call(method, url, { body, token, headers = {}, raw } = {}) {
-  const res = await fetch(base + url, {
+// `origin` sends the request to another instance of the API (see startApp).
+async function call(method, url, { body, token, headers = {}, raw, origin = base } = {}) {
+  const res = await fetch(origin + url, {
     method,
     headers: {
       ...(body !== undefined && !raw ? { 'Content-Type': 'application/json' } : {}),
@@ -108,13 +111,24 @@ before(async () => {
   db = await openDb();
   await db.exec('drop schema if exists public cascade; create schema public;');
   await migrate(db, { log: () => {} });
-  const config = { ...loadConfig({ NODE_ENV: 'test' }), uploadDir, routerUrl: 'off' };
-  const registry = await loadRegistry(db);
-  server = http.createServer(createApp({ db, config, registry }));
+  testConfig = { ...loadConfig({ NODE_ENV: 'test' }), uploadDir, routerUrl: 'off' };
+  registry = await loadRegistry(db);
+  server = http.createServer(createApp({ db, config: testConfig, registry }));
   await new Promise((r) => server.listen(0, r));
   base = `http://127.0.0.1:${server.address().port}`;
   console.log = () => {}; // silence request logs
 });
+
+// A second instance of the API on the same database with some settings changed,
+// for behaviour that sits behind a setting. Returns its address and a way to stop it.
+async function startApp(overrides) {
+  const other = http.createServer(createApp({ db, config: { ...testConfig, ...overrides }, registry }));
+  await new Promise((r) => other.listen(0, r));
+  return {
+    origin: `http://127.0.0.1:${other.address().port}`,
+    close: () => new Promise((r) => other.close(r)),
+  };
+}
 
 after(async () => {
   if (server) await new Promise((r) => server.close(r));
@@ -842,6 +856,112 @@ describe('sign-up needs a code', () => {
     assert.equal((await call('POST', '/api/auth/login', { body: { email: 'kim@example.com', password: 'correct-horse-1' } })).status, 200);
     const res = await call('POST', '/api/functions/inviteAccess', { token: kim.token, body: { action: 'redeem', code: await mintCode() } });
     assert.deepEqual(res.data, { allowed: true });
+  });
+});
+
+describe('sign-up when subscriptions are on', () => {
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
+  let open; // the API with SUBSCRIPTIONS=on
+  const on = (method, url, options = {}) => call(method, url, { ...options, origin: open.origin });
+  const register = (body) => on('POST', '/api/auth/register', { body });
+  const verify = (email, code) => on('POST', '/api/auth/verify-otp', { body: { email, otp_code: code } });
+
+  before(async () => {
+    open = await startApp({ subscriptions: true });
+  });
+  after(async () => {
+    await open?.close();
+  });
+
+  test('the switch is off unless SUBSCRIPTIONS is exactly "on"', () => {
+    assert.equal(loadConfig({ NODE_ENV: 'test' }).subscriptions, false);
+    assert.equal(loadConfig({ NODE_ENV: 'test', SUBSCRIPTIONS: 'off' }).subscriptions, false);
+    assert.equal(loadConfig({ NODE_ENV: 'test', SUBSCRIPTIONS: '' }).subscriptions, false);
+    assert.equal(loadConfig({ NODE_ENV: 'test', SUBSCRIPTIONS: 'true' }).subscriptions, false);
+    assert.equal(loadConfig({ NODE_ENV: 'test', SUBSCRIPTIONS: 'on' }).subscriptions, true);
+    assert.equal(testConfig.subscriptions, false, 'the suite itself runs with it off');
+  });
+
+  test('the sign-in options say whether subscriptions are on', async () => {
+    const off = await call('GET', '/api/auth/options');
+    assert.deepEqual(off, { status: 200, data: { name: 'VantraRun', auth_config: { mfa_policy: 'off', providers: [] }, subscriptions: false } });
+    const yes = await on('GET', '/api/auth/options');
+    assert.deepEqual(yes, { status: 200, data: { name: 'VantraRun', auth_config: { mfa_policy: 'off', providers: [] }, subscriptions: true } });
+  });
+
+  test('with the switch off, sign-up without a code is refused exactly as before', async () => {
+    const body = { email: 'nocode.off@example.com', password: 'longenough1' };
+    assert.deepEqual(await call('POST', '/api/auth/register', { body }), { status: 400, data: { error: 'Enter your invite code.' } });
+    assert.deepEqual(await call('POST', '/api/auth/register', { body: { ...body, invite_code: '   ' } }), { status: 400, data: { error: 'Enter your invite code.' } });
+    assert.equal((await db.query(`select id from users where email = 'nocode.off@example.com'`, [])).length, 0);
+  });
+
+  test('sign-up with no code makes an account that signs in and has no access', async () => {
+    const email = 'nocode.on@example.com';
+    const reg = await register({ email, password: 'longenough1', full_name: 'No Code' });
+    assert.equal(reg.status, 200, JSON.stringify(reg.data));
+    assert.equal(reg.data.ok, true);
+    const [held] = await db.query('select pending_invite_code, email_verified_at from users where email = $1', [email]);
+    assert.equal(held.pending_invite_code ?? null, null);
+    assert.equal(held.email_verified_at ?? null, null);
+
+    const ver = await verify(email, reg.data.dev_code);
+    assert.equal(ver.status, 200, JSON.stringify(ver.data));
+    assert.ok(ver.data.access_token);
+    assert.equal(ver.data.user.email, email);
+    const token = ver.data.access_token;
+    assert.equal((await on('GET', '/api/auth/me', { token })).status, 200);
+    assert.equal((await entitlementsOf(ver.data.user.id)).length, 0);
+    assert.equal((await db.query('select id from access_grants where user_id = $1', [ver.data.user.id])).length, 0);
+
+    const status = await on('POST', '/api/functions/inviteAccess', { token, body: { action: 'status' } });
+    assert.deepEqual(status.data, {
+      allowed: false, reason: null, source: null, plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: true,
+    });
+    assert.deepEqual(await on('POST', '/api/entities/Run/query', { token, body: {} }), NO_ACCESS);
+    assert.deepEqual(await on('POST', '/api/entities/Run', { token, body: { distance_mi: 1, duration_sec: 600 } }), NO_ACCESS);
+    assert.deepEqual(await on('POST', '/api/functions/socialFeed', { token, body: {} }), NO_ACCESS);
+    // the same account is just as closed on an instance with the switch off
+    assert.deepEqual(await call('POST', '/api/entities/Run/query', { token, body: {} }), NO_ACCESS);
+
+    const redeem = await on('POST', '/api/functions/inviteAccess', { token, body: { action: 'redeem', code: await mintCode() } });
+    assert.deepEqual(redeem.data, { allowed: true });
+    assert.equal((await on('POST', '/api/entities/Run/query', { token, body: {} })).status, 200);
+    assert.equal((await on('POST', '/api/entities/Run', { token, body: { distance_mi: 1, duration_sec: 600 } })).status, 201);
+    const after = await on('POST', '/api/functions/inviteAccess', { token, body: { action: 'status' } });
+    assert.deepEqual([after.data.allowed, after.data.reason, after.data.subscriptions], [true, 'invite', true]);
+  });
+
+  test('a code given at sign-up is still checked, held and claimed as today', async () => {
+    const body = { email: 'withcode.on@example.com', password: 'longenough1' };
+    assert.deepEqual(await register({ ...body, invite_code: 'FP-NOPE-NOPE' }), { status: 400, data: { error: 'That code is not recognised.' } });
+    const used = await mintCode();
+    await signUpWith('first.on@example.com', used);
+    assert.deepEqual(await register({ ...body, invite_code: used }), { status: 400, data: { error: 'That code has already been used.' } });
+    assert.equal((await db.query('select id from users where email = $1', [body.email])).length, 0, 'a refused code makes no account');
+
+    const code = await mintCode();
+    const reg = await register({ ...body, invite_code: ` ${code.toLowerCase()} ` });
+    assert.equal(reg.status, 200);
+    const [held] = await db.query('select pending_invite_code from users where email = $1', [body.email]);
+    assert.equal(held.pending_invite_code, code);
+    assert.equal((await db.query('select status from invite_codes where code = $1', [code]))[0].status, 'available', 'not claimed before verifying');
+    const ver = await verify(body.email, reg.data.dev_code);
+    assert.equal(ver.status, 200);
+    assert.equal((await db.query('select status from invite_codes where code = $1', [code]))[0].status, 'used');
+    assert.equal((await on('POST', '/api/entities/Run/query', { token: ver.data.access_token, body: {} })).status, 200);
+  });
+
+  test('starting again without the code lets go of the code that was held', async () => {
+    const email = 'changed.mind@example.com';
+    const code = await mintCode();
+    await register({ email, password: 'longenough1', invite_code: code });
+    const again = await register({ email, password: 'longenough1', invite_code: '  ' });
+    assert.equal(again.status, 200, JSON.stringify(again.data));
+    const ver = await verify(email, again.data.dev_code);
+    assert.equal(ver.status, 200);
+    assert.equal((await db.query('select status from invite_codes where code = $1', [code]))[0].status, 'available');
+    assert.deepEqual(await on('POST', '/api/entities/Run/query', { token: ver.data.access_token, body: {} }), NO_ACCESS);
   });
 });
 

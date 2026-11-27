@@ -42,6 +42,12 @@ creates no account without a valid unused code (`400` with `"Enter your invite c
 claimed when the email is verified, not at register; if someone else verified with the same
 code first, `verify-otp` answers `409` and the person registers again with a new code.
 
+That is the behaviour while the server's `SUBSCRIPTIONS` setting is off, which it is
+today. `GET /api/auth/options` reports the setting as `"subscriptions": true|false`. When
+it is on, `invite_code` is optional: left out (or empty), the account is created and
+verified as usual but has no access until it subscribes or redeems a code. A code that
+is given is checked and claimed exactly as above.
+
 Store the token in `expo-secure-store` and send it on every request. Tokens last 30 days
 by default. Any `401` means the token is no longer valid (expired, password changed,
 account deleted): clear it and send the user to sign-in. `GET /api/auth/me` checks a

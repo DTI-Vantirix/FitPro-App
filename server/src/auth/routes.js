@@ -63,13 +63,18 @@ export function registerAuthRoutes(router) {
     const fullName = ctx.body.full_name ? String(ctx.body.full_name).trim().slice(0, 120) : null;
     signupLimit(`signup:${clientIp(ctx.req)}`);
 
-    // VantraRun is invite-only: no account without a code from the owner. The code
-    // is only held here; it is claimed when the email is verified.
-    const inviteCode = normalizeCode(ctx.body.invite_code);
-    if (!inviteCode) throw new HttpError(400, 'Enter your invite code.');
-    const [invite] = await ctx.db.query('select status from invite_codes where code = $1', [inviteCode]);
-    if (!invite) throw new HttpError(400, 'That code is not recognised.');
-    if (invite.status !== 'available') throw new HttpError(400, 'That code has already been used.');
+    // Invite-only (SUBSCRIPTIONS off): no account without a code from the owner.
+    // With subscriptions on the code is optional: an account made without one is
+    // verified with no access and meets the paywall. A code that is given is
+    // checked the same way either way, and only held here; it is claimed when the
+    // email is verified.
+    const inviteCode = normalizeCode(ctx.body.invite_code) || null;
+    if (!inviteCode && !ctx.config.subscriptions) throw new HttpError(400, 'Enter your invite code.');
+    if (inviteCode) {
+      const [invite] = await ctx.db.query('select status from invite_codes where code = $1', [inviteCode]);
+      if (!invite) throw new HttpError(400, 'That code is not recognised.');
+      if (invite.status !== 'available') throw new HttpError(400, 'That code has already been used.');
+    }
     mailLimit(`mail:${email}`);
 
     const existing = await findByEmail(ctx.db, email);
@@ -242,8 +247,10 @@ export function registerAuthRoutes(router) {
   });
 
   // What the sign-in screens can offer. Social sign-in and MFA come later.
-  router.add('GET', '/api/auth/options', async () => ({
+  // `subscriptions` tells the sign-up form whether an invite code is still required.
+  router.add('GET', '/api/auth/options', async (ctx) => ({
     name: 'VantraRun',
     auth_config: { mfa_policy: 'off', providers: [] },
+    subscriptions: Boolean(ctx.config.subscriptions),
   }));
 }
