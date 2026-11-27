@@ -150,7 +150,7 @@ function Home() {
       </Pressable>)}
     </Card>
 
-    <Note>Routes are created on the website and appear here when you choose a pre-mapped run.</Note>
+    <Note>Routes you draw in the Routes tab or on the website appear when you choose a pre-mapped run.</Note>
   </Screen>;
 }
 

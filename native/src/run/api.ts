@@ -1,11 +1,13 @@
 /** Everything the run experience asks of the VantraRun API, over HTTP only.
  * Runs are written through ingestActivity and nowhere else (docs/native-contract.md).
- * Profile, zones and routes use the same entity routes the website uses.
+ * Profile, zones and routes use the same entity routes the website uses. Runs are read
+ * (never written) with one entity query, listServerRuns.
  */
 import { API_URL, APP_AUTH_URL, ENTITIES_URL, FUNCTIONS_URL, INGEST_URL } from '../config';
 import type { Maneuver } from './directions';
 import { validLatLng, type LatLng } from './geo';
 import { classifyResponse, type SendResult } from './queue';
+import type { RouteRecord, SnapResult, Waypoint } from './route-draft';
 import { sortZones, zoneTemplate, type Profile, type Zone } from './zones';
 
 export class ApiError extends Error {
@@ -25,6 +27,21 @@ export type SavedRoute = {
   targetZoneName: string | null;
 };
 export type Directions = { available: boolean; maneuvers: Maneuver[] };
+/** A run as the server holds it, whichever device or import it came from. */
+export type ServerRun = {
+  id: string;
+  routeId: string | null;
+  routeName: string;
+  distanceMi: number;
+  durationSec: number;
+  avgPaceSec: number;
+  startedAt: string | null;
+  targetZoneName: string | null;
+  inZonePct: number | null;
+  avgHr: number | null;
+  source: string | null;
+  externalId: string | null;
+};
 
 const OFFLINE = "Can't reach VantraRun. Check your connection and try again.";
 
@@ -196,6 +213,27 @@ export async function listRoutes(token: string, ownerId: string): Promise<SavedR
   });
 }
 
+/** Road-following line for the waypoints of a route being drawn. A waypoint with
+ * `offroad: true` is joined to the one before by a straight line. `snapped: false` means
+ * a road section could not be routed and straight lines were used. Throws when the
+ * server cannot be reached or refuses. */
+export async function snapRoute(token: string, points: Waypoint[]): Promise<SnapResult> {
+  const body = { points: points.map((p) => ({ lat: p.lat, lng: p.lng, ...(p.offroad === true ? { offroad: true } : {}) })) };
+  const data = record(await request('POST', `${FUNCTIONS_URL}/snapRoute`, { token, body, timeoutMs: 15000 }));
+  return { snapped: data.snapped === true, path: toPath(data.path), distanceMi: num(data.distance_mi) };
+}
+
+/** Saves a drawn route and returns its id. */
+export async function createRoute(token: string, route: RouteRecord): Promise<string> {
+  const id = str(record(await request('POST', entityUrl('Route'), { token, body: route })).id);
+  if (!id) throw new ApiError('The server did not confirm the route was saved. Check your routes before saving it again.', 0);
+  return id;
+}
+
+export async function deleteRoute(token: string, routeId: string): Promise<void> {
+  await request('DELETE', entityUrl('Route', `/${encodeURIComponent(routeId)}`), { token });
+}
+
 function toManeuver(value: unknown, index: number): Maneuver | null {
   const m = record(value);
   const lat = num(m.lat);
@@ -219,6 +257,39 @@ export async function fetchDirections(token: string, routeId: string): Promise<D
   } catch {
     return { available: false, maneuvers: [] };
   }
+}
+
+// ---- reading runs --------------------------------------------------------
+
+function toServerRun(row: Record<string, unknown>): ServerRun | null {
+  const id = str(row.id);
+  const distanceMi = num(row.distance_mi);
+  const durationSec = num(row.duration_sec);
+  if (!id || distanceMi == null || durationSec == null || distanceMi <= 0 || durationSec <= 0) return null;
+  const started = str(row.started_at);
+  return {
+    id,
+    routeId: str(row.route_id),
+    routeName: str(row.route_name) ?? 'Free run',
+    distanceMi,
+    durationSec,
+    avgPaceSec: num(row.avg_pace_sec) ?? durationSec / distanceMi,
+    startedAt: started && Number.isFinite(Date.parse(started)) ? started : null,
+    targetZoneName: str(row.target_zone_name),
+    inZonePct: num(row.in_zone_pct),
+    avgHr: num(row.avg_hr),
+    source: str(row.source),
+    externalId: str(row.external_id),
+  };
+}
+
+/** The runner's runs as the server holds them, newest first: recorded here, on the website
+ * or imported. Read only. Runs are still written through ingestActivity and nowhere else. */
+export async function listServerRuns(token: string, ownerId: string, options: { limit?: number } = {}): Promise<ServerRun[]> {
+  const asked = options.limit;
+  const limit = typeof asked === 'number' && Number.isInteger(asked) && asked > 0 ? Math.min(asked, 200) : 40;
+  const rows = items(await request('POST', entityUrl('Run', '/query'), { token, body: { q: mine(ownerId), sort: '-started_at', limit } }));
+  return rows.map(toServerRun).filter((run): run is ServerRun => run !== null);
 }
 
 // ---- saving a run --------------------------------------------------------

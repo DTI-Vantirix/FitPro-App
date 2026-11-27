@@ -100,7 +100,7 @@ function Settings() {
       <Heading>For developers</Heading>
       <Action label="Connection test" onPress={() => router.push('/spike')} variant="ghost" />
     </Panel>
-    <Note>VantraRun uses no advertising or analytics software. Zones and routes are edited on the website for now.</Note>
+    <Note>VantraRun uses no advertising or analytics software. Zones are edited on the website for now.</Note>
   </Screen>;
 }
 
