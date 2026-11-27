@@ -6,6 +6,7 @@
 //
 // This file and stripe.js are the only two that read fields of a Stripe object.
 import { planForPrice } from './plans.js';
+import { customerKey, serialised } from './queue.js';
 
 const iso = (unixSeconds) => new Date(unixSeconds * 1000).toISOString();
 const isTime = (value) => typeof value === 'number' && Number.isFinite(value) && value > 0;
@@ -88,43 +89,36 @@ export async function stripeRowOf(db, userId) {
 }
 
 /**
- * The account's Stripe customer id, made on first use. Call inside a transaction that
- * holds the user's row (see lockUser), so two tabs cannot make two customers.
+ * The account's Stripe customer id, made on first use. Stripe is called with no
+ * transaction open; the id is then claimed in a short one that holds the user's row, so
+ * if two requests got here together the first id written is the one both use. Callers
+ * also queue per account (queue.js), which is what stops two tabs making two customers.
  */
-export async function ensureCustomer(tx, stripe, user) {
-  const [row] = await tx.query('select stripe_customer_id from users where id = $1', [user.id]);
+export async function ensureCustomer(db, stripe, user) {
+  const [row] = await db.query('select stripe_customer_id from users where id = $1', [user.id]);
   if (row?.stripe_customer_id) return row.stripe_customer_id;
   const customer = await stripe.createCustomer({ userId: user.id, email: user.email });
-  await tx.query('update users set stripe_customer_id = $2, updated_date = now() where id = $1 returning id', [user.id, customer.id]);
-  return customer.id;
+  return db.tx(async (tx) => {
+    const [held] = await tx.query('select stripe_customer_id from users where id = $1 for no key update', [user.id]);
+    if (held?.stripe_customer_id) return held.stripe_customer_id;
+    await tx.query('update users set stripe_customer_id = $2, updated_date = now() where id = $1 returning id', [user.id, customer.id]);
+    return customer.id;
+  });
 }
 
 /**
- * Everything that changes an account's billing state goes one at a time, by holding the
- * user's row. NO KEY UPDATE: the person's other requests (which only reference the row)
- * are not held up while Stripe answers.
- */
-export async function lockUser(tx, userId) {
-  const [row] = await tx.query('select id from users where id = $1 for no key update', [userId]);
-  return row || null;
-}
-
-/**
- * Asks Stripe for the customer's subscriptions and writes what it says. Returns null when
- * no account has that customer id (a deleted account, or someone else's customer).
+ * Writes what Stripe said about a customer's subscriptions, in one short transaction
+ * that holds the user's row. Nothing here calls Stripe.
  *  - one row per subscription, found by (source, external_id); `user_id` never changes;
  *  - a row that is `revoked` (refunded) is never changed, whatever Stripe says later;
  *  - a row that already says the same is left alone, `updated_date` included;
  *  - the account's one free trial is marked used when a subscription has had one.
- * Throws StripeError when Stripe cannot be reached; nothing is written then.
+ * Returns null when no account has that customer any more (deleted in the meantime).
  */
-export async function syncCustomer(db, stripe, config, customerId) {
-  if (!customerId) return null;
-  const [owner] = await db.query('select id from users where stripe_customer_id = $1', [customerId]);
-  if (!owner) return null;
+async function writeSubscriptions(db, config, customerId, subscriptions) {
   return db.tx(async (tx) => {
-    if (!(await lockUser(tx, owner.id))) return null;
-    const subscriptions = await stripe.listSubscriptions(customerId);
+    const [owner] = await tx.query('select id from users where stripe_customer_id = $1 for no key update', [customerId]);
+    if (!owner) return null;
     let trialStartedAt = null;
     for (const subscription of subscriptions) {
       const next = entitlementFromSubscription(config, subscription);
@@ -156,5 +150,25 @@ export async function syncCustomer(db, stripe, config, customerId) {
       [owner.id]
     );
     return { userId: owner.id, rows };
+  });
+}
+
+/**
+ * Asks Stripe for the customer's subscriptions and writes what it says. Returns null when
+ * no account has that customer id (a deleted account, or a customer that is not ours).
+ *
+ * Stripe is asked with no transaction open and no row held, so a slow Stripe ties up
+ * nothing in the database. Work for one customer goes one at a time through the queue,
+ * so the answer read last is the one written last. Never call this from inside a
+ * transaction, or from inside other work queued under the same customer.
+ * Throws StripeError when Stripe cannot be reached; nothing is written then.
+ */
+export async function syncCustomer(db, stripe, config, customerId) {
+  if (!customerId) return null;
+  const [owner] = await db.query('select id from users where stripe_customer_id = $1', [customerId]);
+  if (!owner) return null;
+  return serialised(customerKey(customerId), async () => {
+    const subscriptions = await stripe.listSubscriptions(customerId);
+    return writeSubscriptions(db, config, customerId, subscriptions);
   });
 }

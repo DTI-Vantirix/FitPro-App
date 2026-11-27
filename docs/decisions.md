@@ -164,10 +164,17 @@ nothing a tester sees changes. The decisions:
   have been removed, the account is not deleted and the person is told to try again.
 - **One Stripe customer per account**, id in `users.stripe_customer_id`. Nothing else
   from Stripe is stored except subscription ids and webhook event ids. No card data.
-- **Billing changes for one account go one at a time** by holding that user's row
-  (`FOR NO KEY UPDATE`), in checkout, in the sync and in the webhook. The plan named an
-  advisory lock on the customer id for the sync; with checkout already holding the user
-  row, two different locks taken in two orders could deadlock, so one lock is used.
+- **Nothing in the database is held while Stripe is asked.** Stripe is called first,
+  with no transaction open; what it said is then written in a short transaction that
+  holds the user's row (`FOR NO KEY UPDATE`). Order is kept by a queue inside the
+  process (`src/billing/queue.js`): work for one customer, and checkout for one account,
+  goes one at a time, so the answer read last is the one written last and two tabs
+  share one customer. A slow Stripe therefore cannot use up database connections or
+  block a person's other requests. (The first version held the row across the Stripe
+  calls; a review on 2026-11-27 had that changed. The plan's advisory lock was never
+  used.) The queue is per process: with more than one API instance, order across
+  instances is not guaranteed, though each write is still a whole copy of what Stripe
+  said and the next sync corrects a stale one.
 - **The price at Stripe is checked before anyone is sent to checkout.** Both configured
   prices must be USD, 499 a month and 4999 a year. A mismatch stops checkout
   ("Subscriptions are not available right now.") and is written to the error reports.

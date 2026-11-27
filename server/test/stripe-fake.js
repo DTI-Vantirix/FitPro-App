@@ -40,9 +40,11 @@ export function createFakeStripe({
   let seq = 0;
   const nextId = (prefix) => `${prefix}_fake${String((seq += 1)).padStart(4, '0')}${crypto.randomBytes(3).toString('hex')}`;
 
-  // Records the call, then fails it if a test asked for that.
-  function enter(method, args) {
+  // Records the call, waits if a test is holding the method, then fails it if a test asked for that.
+  const holds = new Map();
+  async function enter(method, args) {
     calls.push({ method, args });
+    if (holds.has(method)) await holds.get(method).promise;
     const left = failing.get(method) || 0;
     if (left > 0) {
       failing.set(method, left - 1);
@@ -54,7 +56,7 @@ export function createFakeStripe({
 
   const api = {
     async createCustomer({ userId, email }) {
-      enter('createCustomer', { userId, email });
+      await enter('createCustomer', { userId, email });
       // Same idempotency key, same customer.
       const existing = [...state.customers.values()].find((c) => c.metadata.user_id === userId && !c.deleted);
       if (existing) return copy(existing);
@@ -64,7 +66,7 @@ export function createFakeStripe({
     },
 
     async deleteCustomer(customerId) {
-      enter('deleteCustomer', { customerId });
+      await enter('deleteCustomer', { customerId });
       const customer = state.customers.get(customerId);
       if (!customer) return;
       customer.deleted = true;
@@ -76,19 +78,19 @@ export function createFakeStripe({
     },
 
     async retrievePrice(priceId) {
-      enter('retrievePrice', { priceId });
+      await enter('retrievePrice', { priceId });
       const found = prices[priceId];
       if (!found) throw new StripeError(404, `No such price: '${priceId}'`, 'resource_missing');
       return copy(found);
     },
 
     async listOpenCheckoutSessions(customerId) {
-      enter('listOpenCheckoutSessions', { customerId });
+      await enter('listOpenCheckoutSessions', { customerId });
       return [...state.sessions.values()].filter((s) => s.customer === customerId && s.status === 'open').map(copy);
     },
 
     async expireCheckoutSession(sessionId) {
-      enter('expireCheckoutSession', { sessionId });
+      await enter('expireCheckoutSession', { sessionId });
       const session = state.sessions.get(sessionId);
       if (!session) throw new StripeError(404, 'No such checkout session', 'resource_missing');
       if (session.status === 'open') session.status = 'expired';
@@ -96,7 +98,7 @@ export function createFakeStripe({
     },
 
     async createCheckoutSession({ customerId, userId, priceId, trialDays, successUrl, cancelUrl }) {
-      enter('createCheckoutSession', { customerId, userId, priceId, trialDays, successUrl, cancelUrl });
+      await enter('createCheckoutSession', { customerId, userId, priceId, trialDays, successUrl, cancelUrl });
       const session = {
         id: nextId('cs_test'),
         object: 'checkout.session',
@@ -116,12 +118,12 @@ export function createFakeStripe({
     },
 
     async listSubscriptions(customerId) {
-      enter('listSubscriptions', { customerId });
+      await enter('listSubscriptions', { customerId });
       return [...state.subscriptions.values()].filter((s) => s.customer === customerId).map(copy);
     },
 
     async setCancelAtPeriodEnd(subscriptionId, value) {
-      enter('setCancelAtPeriodEnd', { subscriptionId, value });
+      await enter('setCancelAtPeriodEnd', { subscriptionId, value });
       const sub = state.subscriptions.get(subscriptionId);
       if (!sub) throw new StripeError(404, 'No such subscription', 'resource_missing');
       sub.cancel_at_period_end = Boolean(value);
@@ -129,19 +131,19 @@ export function createFakeStripe({
     },
 
     async cancelSubscription(subscriptionId) {
-      enter('cancelSubscription', { subscriptionId });
+      await enter('cancelSubscription', { subscriptionId });
       const sub = state.subscriptions.get(subscriptionId);
       if (!sub || sub.status === 'canceled') return;
       Object.assign(sub, { status: 'canceled', canceled_at: unix(), ended_at: unix(), cancel_at_period_end: false });
     },
 
     async subscriptionIdForCharge(chargeId) {
-      enter('subscriptionIdForCharge', { chargeId });
+      await enter('subscriptionIdForCharge', { chargeId });
       return state.charges.get(chargeId) ?? null;
     },
 
     async createPortalSession({ customerId, returnUrl, cancelSubscriptionId }) {
-      enter('createPortalSession', { customerId, returnUrl, cancelSubscriptionId });
+      await enter('createPortalSession', { customerId, returnUrl, cancelSubscriptionId });
       const portal = { id: nextId('bps'), customer: customerId, return_url: returnUrl, cancel: cancelSubscriptionId || null };
       portal.url = portalUrl(portal);
       state.portals.push(portal);
@@ -227,6 +229,22 @@ export function createFakeStripe({
       failing.set(methodName, times);
     },
 
+    /**
+     * Makes every call to a method wait, as when Stripe is slow, until the returned function
+     * is called. The call is recorded when it arrives, so a test can see it is waiting.
+     */
+    hold(methodName) {
+      let release;
+      const promise = new Promise((resolve) => {
+        release = resolve;
+      });
+      holds.set(methodName, { promise });
+      return () => {
+        holds.delete(methodName);
+        release();
+      };
+    },
+
     callsTo: (methodName) => calls.filter((c) => c.method === methodName),
   };
 }
@@ -244,6 +262,12 @@ export function signedEvent(secret, { id, type, object }, { at = Date.now() } = 
   const t = unix(at);
   const v1 = crypto.createHmac('sha256', secret).update(`${t}.${body}`).digest('hex');
   return { body, header: `t=${t},v1=${v1}` };
+}
+
+/** The Stripe-Signature header for any body, signed as Stripe would (for a body that is not an event). */
+export function signBody(secret, body, { at = Date.now() } = {}) {
+  const t = unix(at);
+  return `t=${t},v1=${crypto.createHmac('sha256', secret).update(`${t}.${body}`).digest('hex')}`;
 }
 
 export const daysFromNowUnix = (days) => unix() + Math.round(days * DAY);

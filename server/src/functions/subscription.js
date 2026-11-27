@@ -1,7 +1,8 @@
 import { accessOf, isLive } from '../access.js';
 import { PLANS, TRIAL_DAYS } from '../billing/plans.js';
 import { StripeError } from '../billing/stripe.js';
-import { ensureCustomer, lockUser, stripeRowOf, syncCustomer } from '../billing/sync.js';
+import { accountKey, serialised } from '../billing/queue.js';
+import { ensureCustomer, stripeRowOf, syncCustomer } from '../billing/sync.js';
 import { recordServerError } from '../errors.js';
 import { HttpError, rateLimiter } from '../lib/http.js';
 
@@ -105,33 +106,27 @@ async function checkout({ db, user, body, config, stripe }) {
   const subscribed = () => new HttpError(409, 'You already have a subscription. Manage it in Settings.');
   if (await stripeRowOf(db, user.id)) throw subscribed();
 
-  // One at a time per account, so two tabs share one customer and leave one open session.
-  // A Stripe failure after the customer was made keeps the customer id (the transaction
-  // still commits) and is reported once the lock is released.
-  const result = await db.tx(async (tx) => {
-    await lockUser(tx, user.id);
-    let customerId;
-    let known;
-    try {
-      [{ stripe_customer_id: known }] = await tx.query('select stripe_customer_id from users where id = $1', [user.id]);
-      customerId = await ensureCustomer(tx, stripe, user);
-    } catch (error) {
-      if (error instanceof StripeError) return { error };
-      throw error;
-    }
-    try {
+  // One at a time per account (in this process), so two tabs share one customer and leave
+  // one open session. No transaction is open and no row is held while Stripe is called:
+  // each read and write below is its own short statement. A Stripe failure after the
+  // customer was made keeps the customer id, so the next try uses the same customer.
+  return serialised(accountKey(user.id), () =>
+    withStripe(async () => {
+      const known = await ownCustomer(db, user);
+      const customerId = known || (await ensureCustomer(db, stripe, user));
+
       // The person may have paid a moment ago in another tab, with the webhook still on its
       // way: ask Stripe before selling a second subscription. This also lets them in.
       // (A customer made a moment ago has nothing to ask about.)
       if (known) {
-        await syncCustomer(tx, stripe, config, customerId);
-        if (await stripeRowOf(tx, user.id)) return { subscribed: true };
+        await syncCustomer(db, stripe, config, customerId);
+        if (await stripeRowOf(db, user.id)) throw subscribed();
       }
 
       for (const open of await stripe.listOpenCheckoutSessions(customerId)) {
         await stripe.expireCheckoutSession(open.id);
       }
-      const [account] = await tx.query('select trial_used_at from users where id = $1', [user.id]);
+      const [account] = await db.query('select trial_used_at from users where id = $1', [user.id]);
       const session = await stripe.createCheckoutSession({
         customerId,
         userId: user.id,
@@ -141,24 +136,18 @@ async function checkout({ db, user, body, config, stripe }) {
         cancelUrl: `${config.appUrl}/?checkout=cancelled`,
       });
       return { url: session.url };
-    } catch (error) {
-      if (error instanceof StripeError) return { error };
-      throw error;
-    }
-  });
-  if (result.subscribed) throw subscribed();
-  if (result.error) await withStripe(() => Promise.reject(result.error));
-  return { url: result.url };
+    })
+  );
 }
+
+const ownCustomer = async (db, user) =>
+  (await db.query('select stripe_customer_id from users where id = $1', [user.id]))[0]?.stripe_customer_id || null;
 
 const refreshLimit = rateLimiter({
   windowMs: 15 * 60 * 1000,
   max: 30,
   message: 'Too many checks. Wait a few minutes and try again.',
 });
-
-const ownCustomer = async (db, user) =>
-  (await db.query('select stripe_customer_id from users where id = $1', [user.id]))[0]?.stripe_customer_id || null;
 
 /**
  * Asks Stripe about the account's own customer and answers with what it said. Nothing

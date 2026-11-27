@@ -13,6 +13,7 @@ import { SERVER_ROOT, loadConfig } from '../src/config.js';
 import { bootstrapAdmin } from '../src/auth/bootstrap.js';
 import { hashPassword } from '../src/auth/crypto.js';
 import { formatDay, sendTrialReminders } from '../src/billing/reminders.js';
+import { serialised } from '../src/billing/queue.js';
 import { loadRegistry } from '../src/entities/registry.js';
 import { migrate } from '../src/migrate.js';
 import { createPsqlDb } from './psql-db.js';
@@ -2012,8 +2013,7 @@ describe('subscribing on the website', () => {
     assert.equal(store.fake.callsTo('createCustomer').filter((c) => [ivy, gus, admin].some((w) => w.user.id === c.args.userId)).length, 0);
   });
 
-  test('two checkouts at once share one Stripe customer and leave one open session', async (t) => {
-    if (db.transactional === false) return t.skip('needs real row locks; the psql test driver does not hold transactions');
+  test('two checkouts at once share one Stripe customer and leave one open session', async () => {
     const twin = await shop();
     try {
       const tab = await legacyUser('tab.twice@example.com');
@@ -3113,5 +3113,130 @@ describe('a refusal for lack of access says so in a way a screen can act on', ()
     const unverified = await call('POST', '/api/auth/login', { body: { email: 'una.unverified@example.com', password: 'longenough1' } });
     assert.equal(unverified.status, 403);
     assert.equal(unverified.data.code, undefined);
+  });
+});
+
+describe('nothing waits on Stripe with a database connection in hand', () => {
+  let store;
+  const soon = (promise, ms = 1500) =>
+    Promise.race([promise.then(() => 'done'), new Promise((r) => setTimeout(() => r('still waiting'), ms))]);
+  const settle = (ms = 150) => new Promise((r) => setTimeout(r, ms));
+  // Would fail at once if any transaction were holding this user's row.
+  const rowIsFree = (userId) =>
+    db.tx((tx) => tx.query('select id from users where id = $1 for update nowait', [userId])).then((rows) => rows.length === 1);
+  const post = (event) => {
+    const { body, header } = signedEvent(TEST_STRIPE.webhookSecret, event);
+    return store.on('POST', '/api/stripe/webhook', { raw: body, headers: { 'Content-Type': 'application/json', 'Stripe-Signature': header } });
+  };
+
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('a queue of work for one key runs one at a time, in order, and a failure does not stop the next', async () => {
+    const order = [];
+    const step = (name, ms, fail = false) =>
+      serialised('test:queue', async () => {
+        order.push(`${name} starts`);
+        await new Promise((r) => setTimeout(r, ms));
+        order.push(`${name} ends`);
+        if (fail) throw new Error(`${name} failed`);
+        return name;
+      });
+    const results = await Promise.allSettled([step('a', 30), step('b', 1, true), step('c', 1), serialised('test:other', async () => 'other')]);
+    assert.deepEqual(order, ['a starts', 'a ends', 'b starts', 'b ends', 'c starts', 'c ends']);
+    assert.deepEqual(results.map((r) => r.status), ['fulfilled', 'rejected', 'fulfilled', 'fulfilled']);
+    assert.equal(results[2].value, 'c');
+  });
+
+  test('many notices for two customers while Stripe is slow leave the database free', async (t) => {
+    if (db.transactional === false) return t.skip('the psql test driver has no pool to exhaust');
+    const ann = await legacyUser('ann.slow@example.com');
+    const ben = await legacyUser('ben.slow@example.com');
+    const subs = { ann: await store.subscribe(ann), ben: await store.subscribe(ben) };
+    const customers = { ann: (await userRow(ann.user.id)).stripe_customer_id, ben: (await userRow(ben.user.id)).stripe_customer_id };
+
+    const release = store.fake.hold('listSubscriptions');
+    let deliveries;
+    try {
+      // more notices than the pool has connections, all stuck on Stripe
+      deliveries = [];
+      for (let i = 0; i < 8; i++) {
+        deliveries.push(post({ type: 'customer.subscription.updated', object: { customer: customers.ann } }));
+        deliveries.push(post({ type: 'invoice.paid', object: { customer: customers.ben } }));
+      }
+      await settle(300);
+      assert.ok(store.fake.callsTo('listSubscriptions').length >= 2, 'Stripe is being asked');
+      assert.equal(await soon(db.query('select 1 as ok', [])), 'done', 'an unrelated query is answered while they wait');
+      assert.equal(await soon(call('GET', '/api/health')), 'done');
+      assert.equal(await soon(rowIsFree(ann.user.id)), 'done', "nobody holds the customer's account row");
+      assert.equal(await soon(call('GET', '/api/auth/me', { token: ben.token })), 'done');
+    } finally {
+      release();
+    }
+    const answers = await Promise.all(deliveries);
+    assert.deepEqual([...new Set(answers.map((a) => a.status))], [200]);
+    // one customer's notices were handled one after another: Stripe was asked once per notice
+    assert.equal(store.fake.callsTo('listSubscriptions').filter((c) => c.args.customerId === customers.ann).length, 8);
+    assert.deepEqual((await entitlementsOf(ann.user.id)).map((r) => [r.external_id, r.status]), [[subs.ann.id, 'trial']]);
+    assert.deepEqual((await entitlementsOf(ben.user.id)).map((r) => [r.external_id, r.status]), [[subs.ben.id, 'trial']]);
+  });
+
+  test('the later answer from Stripe is the one that is kept', async () => {
+    const lia = await legacyUser('lia.later@example.com');
+    const sub = await store.subscribe(lia);
+    const customer = (await userRow(lia.user.id)).stripe_customer_id;
+    const release = store.fake.hold('listSubscriptions');
+    const first = post({ type: 'customer.subscription.created', object: { customer } });
+    await settle();
+    const second = post({ type: 'customer.subscription.deleted', object: { customer } });
+    await settle();
+    // Stripe ends the subscription while both notices are waiting; the first read is released first
+    store.fake.setSubscription(sub.id, { status: 'canceled', canceled_at: daysFromNowUnix(0), ended_at: daysFromNowUnix(0) });
+    release();
+    assert.deepEqual((await Promise.all([first, second])).map((a) => a.status), [200, 200]);
+    assert.deepEqual((await entitlementsOf(lia.user.id)).map((r) => r.status), ['expired']);
+  });
+
+  test('checkout holds nothing while Stripe makes the session', async (t) => {
+    if (db.transactional === false) return t.skip('the psql test driver has no row locks');
+    const cho = await legacyUser('cho.checkout@example.com');
+    for (const method of ['createCustomer', 'createCheckoutSession']) {
+      const release = store.fake.hold(method);
+      let pending;
+      try {
+        pending = store.subscription(cho, { action: 'checkout', plan: 'monthly' });
+        await settle(250);
+        assert.ok(store.fake.callsTo(method).some((c) => c.args.userId === cho.user.id), `${method} is waiting`);
+        assert.equal(await soon(rowIsFree(cho.user.id)), 'done', `row free during ${method}`);
+        assert.equal(await soon(call('PUT', '/api/auth/me', { token: cho.token, body: { full_name: 'Cho' } })), 'done');
+      } finally {
+        release();
+      }
+      assert.equal((await pending).status, 200);
+    }
+    assert.equal([...store.fake.state.customers.values()].filter((c) => c.metadata.user_id === cho.user.id).length, 1);
+  });
+
+  test('a refund holds nothing while Stripe cancels the subscription', async (t) => {
+    if (db.transactional === false) return t.skip('the psql test driver has no row locks');
+    const rob = await legacyUser('rob.refunded@example.com');
+    const sub = await store.subscribe(rob);
+    const customer = (await userRow(rob.user.id)).stripe_customer_id;
+    const release = store.fake.hold('cancelSubscription');
+    let pending;
+    try {
+      pending = post({ type: 'charge.refunded', object: { id: store.fake.chargeFor(sub.id), customer, refunded: true } });
+      await settle(300);
+      assert.equal(store.fake.callsTo('cancelSubscription').filter((c) => c.args.subscriptionId === sub.id).length, 1);
+      assert.equal(await soon(rowIsFree(rob.user.id)), 'done');
+    } finally {
+      release();
+    }
+    assert.equal((await pending).status, 200);
+    assert.deepEqual((await entitlementsOf(rob.user.id)).map((r) => [r.status, r.note]), [['revoked', 'Refunded']]);
   });
 });
