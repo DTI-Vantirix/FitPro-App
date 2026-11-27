@@ -70,11 +70,22 @@ little to learn or upgrade.
   - `sync.js`: turns a Stripe subscription into our `entitlements` row, and
     `syncCustomer`, which asks Stripe for a customer's subscriptions and writes what it says.
   - `webhook.js`: `POST /api/stripe/webhook`.
-  - `reminders.js`: the email two days before a free trial ends, from an hourly sweep.
+  - `queue.js`: one thing at a time per customer (and per account), inside the process.
+    This, not a database lock, is what keeps billing work in order: nothing in the
+    database is held while Stripe is being asked.
+  - `account.js`: deleting an account that may have a Stripe customer (open checkouts
+    expired, the customer deleted, then the account).
+  - `reminders.js`: the email two days before a free trial ends, from an hourly sweep,
+    and the start of billing's other background job, the daily check of subscriptions
+    whose period has passed without word from Stripe (`syncOverdue` in `sync.js`).
 - `src/functions/subscription.js`: what the screens call: `status`, `checkout`,
   `refresh`, `portal`, `resume`.
 - `src/storage.js`: where uploads live. Local disk, or an S3-compatible bucket when the
   `S3_*` settings are present (requests signed here, no SDK).
+- `src/lib/http.js`: the router, JSON helpers, the in-memory rate limiter and `clientIp`,
+  the address a request is counted against. Behind a proxy that address comes from
+  `X-Forwarded-For`; `TRUSTED_PROXY_HOPS` says which entry to believe, and the admin-only
+  `requestInfo` function shows what arrives so the right value can be found on a host.
 - `src/errors.js`: error reports kept in our own table (`client_errors`): crashes the
   phone app posts to `POST /api/client-errors`, and the API's own unexpected errors.
 - `src/well-known.js`: the two public files that let a friend invite link
@@ -154,7 +165,14 @@ it finds. It runs:
 - before a second checkout is sold, so someone who paid in another tab is let in instead;
 - when an account that has a Stripe customer asks for its access status and is about
   to be told "no" (at most once in five minutes per account). The phone only ever
-  calls `inviteAccess`, so this is what repairs a lost renewal notice for it.
+  calls `inviteAccess`, so this is what repairs a lost renewal notice for it;
+- once a day, for subscriptions our table says are running but whose period has passed
+  (at most 50 a run), which also catches an ending we never heard about;
+- before a trial reminder is sent, so nobody who has just cancelled is told they are
+  about to be charged.
+
+Stripe is always asked first, with no transaction open, and the answer is then written
+in a short transaction. Work for one customer is kept in order by `queue.js`.
 
 So a repeated notice changes nothing, an old one arriving late cannot reopen access,
 and a missing one is repaired the next time the person turns up. Event ids are kept
@@ -165,7 +183,7 @@ A failure while handling answers 500 and records nothing, so Stripe sends it aga
 | --- | --- | --- |
 | `trialing` | `trial` | when the trial ends |
 | `active` | `active` | end of the period paid for (read from the subscription's item) |
-| `past_due` | `grace` | start of the unpaid period, so access lasts `GRACE_DAYS` (3) more and no longer |
+| `past_due` | `grace` | start of the unpaid period, so access lasts `GRACE_DAYS` (3) more and no longer; if Stripe gives no period start, the date the row already has is kept |
 | `canceled`, `unpaid`, `incomplete_expired`, `paused` | `expired` | when Stripe ended it |
 | `incomplete` | nothing is written | |
 
@@ -208,7 +226,7 @@ records, e.g. "the owner or an admin" for runs, "anyone signed in" for challenge
   the server and ignored if a client sends them.
 
 Backend functions run with full access, like Base44's service role, and do their
-own checks (`adminInviteCodes` and `adminAccess` are admin-only, `subscription` only ever
+own checks (`adminInviteCodes`, `adminAccess` and `requestInfo` are admin-only, `subscription` only ever
 acts on the caller's own Stripe customer, `challengeBoard` only returns the
 one metric, `socialFeed` only friends' non-private posts).
 
