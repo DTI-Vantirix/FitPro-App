@@ -17,6 +17,10 @@ if (config.production && !config.mail.resendApiKey) {
   console.warn('[mail] RESEND_API_KEY is not set: sign-up codes and password-reset links cannot be emailed, so nobody new can sign up.');
 }
 
+if ((process.env.ANDROID_CERT_SHA256 || '').trim() && !config.appLinks.androidCertSha256.length) {
+  console.warn('[links] ANDROID_CERT_SHA256 is set but holds no SHA-256 fingerprint (64 hex digits, colons optional): invite links will not open the Android app.');
+}
+
 // Nothing a single request does may stop the process: a failure that escapes the
 // request handler is logged and answered, and a stray rejection is only logged.
 const handle = createApp({ db, config, registry });

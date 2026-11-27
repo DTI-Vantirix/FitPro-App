@@ -1,10 +1,11 @@
 /** Layout and access gate shared by the run screens. */
 import React from 'react';
-import { Redirect, usePathname, useRouter } from 'expo-router';
+import { Redirect, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { StyleSheet, Text } from 'react-native';
 import { useSession } from '../../auth/session';
 import { useAccessGate } from '../../access/access-gate';
 import { Action, Card, ErrorNotice, IconButton, Loading, Screen, ScreenHeader } from '../../components/Ui';
+import { inviteRedirect, rememberInvite } from '../../social/invite-link';
 import { colors } from '../../theme';
 import { heading, type } from '../../typography';
 import { useRunAccount } from '../use-run';
@@ -46,8 +47,14 @@ export function Gated({ children, setup = true }: { children: React.ReactNode; s
   const { accessToken, loadingSession, consentAccepted } = useSession();
   const { status, error, refresh } = useAccessGate();
   const account = useRunAccount();
+  const path = usePathname();
+  const { add } = useLocalSearchParams<{ add?: string | string[] }>();
 
   if (loadingSession) return <Loading />;
+  // A friend invite link (/friends?add=<handle>) opened by someone who is about to be turned
+  // away is kept, cleaned, while they sign in, agree and set up: see the end of this function.
+  const turnedAway = !accessToken || !consentAccepted || status === 'needs_invite' || status === 'blocked' || (setup && account.setupNeeded === true);
+  if (turnedAway && path === '/friends') rememberInvite(add, Date.now());
   if (!accessToken) return <Redirect href="/" />;
   if (!consentAccepted) return <Redirect href="/consent" />;
   if (status === 'needs_invite' || status === 'blocked') return <Redirect href="/invite" />;
@@ -79,6 +86,11 @@ export function Gated({ children, setup = true }: { children: React.ReactNode; s
       <Action label="Try again" onPress={() => { void account.reload(); }} />
     </Screen>;
   }
+  // A friend invite link opened before this person could use the app (signed out, or zones not
+  // set yet) brings them to Friends now that they can. Only a screen that needs the full
+  // account does this, so first-time setup is finished first. See src/social/invite-link.ts.
+  const invited = setup ? inviteRedirect(path, Date.now()) : null;
+  if (invited) return <Redirect href={invited} />;
   return <>{children}</>;
 }
 

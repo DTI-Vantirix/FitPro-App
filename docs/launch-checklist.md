@@ -108,6 +108,35 @@ npx eas-cli build --platform android --profile preview
 This produces an install link for an APK. Open it on an Android phone to install
 directly, no store needed. That is enough for the phone test list on the build board.
 
+**Invite links that open the app (`ANDROID_CERT_SHA256`).** A friend invite link
+(`https://<site>/friends?add=<handle>`) opens the Android app only after the site vouches
+for the app's signing certificate. Until then the link opens the website, as before.
+
+1. After the first Android build, run `npx eas-cli credentials` → Android → the keystore,
+   and copy its **SHA-256 fingerprint** (`AA:BB:…`, 32 pairs).
+2. In Render → the service → Environment, add `ANDROID_CERT_SHA256` with that value and
+   save. For several certificates, separate them with commas: once the app is on Google
+   Play, add the **Play app signing** fingerprint too (Play Console → Setup → App signing),
+   because Play re-signs the store build with its own key.
+3. Check: `https://<site>/.well-known/assetlinks.json` shows the package
+   `com.vantrarun.app` and the fingerprint(s). With the variable unset it shows `[]`.
+4. Android verifies the link when the app is installed, so reinstall the app after step 2.
+   Not verified from here: this needs a real build and the deployed site.
+
+iPhone needs no setting: `https://<site>/.well-known/apple-app-site-association` already
+names the app `LA4YX3HF32.com.vantrarun.app` (Apple team id + bundle id). Only if the app
+ever moves to another Apple team, set `IOS_APP_ID` in Render → Environment. Apple fetches
+that file through its own servers when the app is installed and may take a while to notice
+a change, so test with a fresh install from TestFlight after the site is deployed.
+
+**The site's address is written into the app.** `native/app.json` names
+`vantrarun.onrender.com` twice (`ios.associatedDomains` and the Android `intentFilters`
+entry). If the site later moves to a custom domain, both the `app.json` entries and the
+links must change: update the two entries (and `EXPO_PUBLIC_API_URL` in `native/eas.json`,
+which is where invite links get their address), build and release the app again, and keep
+serving the two `/.well-known` files on the new domain. Links already shared on the old
+address keep opening the app only while the old address still serves them.
+
 For Play internal testing (later, when you want testers to install from the store):
 
 1. In [Play Console](https://play.google.com/console), create an app named VantraRun.
@@ -202,3 +231,4 @@ build carries a Google Maps key.
 | 4 | a test sign-up receives its 6-digit email |
 | 5 / 6 | the app opens, signs in, and "Start a run" appears; then the phone test list on the build board |
 | 7 | the map appears in "Free run with map" on Android |
+| 5 / 6, with the site deployed | a friend's invite link tapped in Messages or Notes opens the app on the Friends screen and says whose request was sent (Android: only after `ANDROID_CERT_SHA256` is set and the app reinstalled) |

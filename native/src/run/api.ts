@@ -8,7 +8,7 @@ import type { Maneuver } from './directions';
 import { validLatLng, type LatLng } from './geo';
 import { classifyResponse, type SendResult } from './queue';
 import type { RouteRecord, SnapResult, Waypoint } from './route-draft';
-import { sortZones, zoneTemplate, type Profile, type Zone, type ZoneEdit } from './zones';
+import { sortZones, zoneTemplate, type NewZone, type Profile, type ProfileValues, type Zone, type ZoneEdit } from './zones';
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number, readonly data: unknown = null) {
@@ -146,10 +146,24 @@ const mine = (ownerId: string) => ({ created_by_id: ownerId });
 export async function loadProfile(token: string, ownerId: string): Promise<Profile | null> {
   const [row] = items(await request('POST', entityUrl('Profile', '/query'), { token, body: { q: mine(ownerId), sort: '-created_date', limit: 1 } }));
   const id = str(row?.id);
-  return id ? { id, hr_max: num(row.hr_max), threshold_sec: num(row.threshold_sec) } : null;
+  if (!id) return null;
+  return {
+    id,
+    hr_max: num(row.hr_max),
+    threshold_sec: num(row.threshold_sec),
+    // What the website's profile form stores beside them (server/entities/Profile.json).
+    age: num(row.age),
+    sex: row.sex === 'male' || row.sex === 'female' ? row.sex : null,
+    height_in: num(row.height_in),
+    weight_lb: num(row.weight_lb),
+    vo2max: num(row.vo2max),
+    auto_threshold_sec: num(row.auto_threshold_sec),
+  };
 }
 
-export async function saveProfile(token: string, ownerId: string, values: { hr_max: number; threshold_sec?: number }): Promise<void> {
+/** Creates the profile or changes the one there is, as the website's saveProfile does. Only
+ * the fields given are written, so a save of max heart rate alone keeps the body numbers. */
+export async function saveProfile(token: string, ownerId: string, values: ProfileValues): Promise<void> {
   const existing = await loadProfile(token, ownerId);
   if (existing) await request('PUT', entityUrl('Profile', `/${encodeURIComponent(existing.id)}`), { token, body: values });
   else await request('POST', entityUrl('Profile'), { token, body: values });
@@ -205,6 +219,20 @@ export async function updateZone(token: string, zoneId: string, values: ZoneEdit
   const zone = toZone(record(await request('PUT', entityUrl('PaceZone', `/${encodeURIComponent(zoneId)}`), { token, body })));
   if (!zone) throw new ApiError('The server did not confirm the change. Check your zones before saving it again.', 0);
   return zone;
+}
+
+/** Adds a zone of the runner's own, with the record the website's zone editor creates: name,
+ * pace range, colour and place in the order. It has no number and no heart-rate band, so it
+ * coaches by pace only. */
+export async function createZone(token: string, values: NewZone): Promise<Zone> {
+  const body = { name: values.name, fast_sec: values.fast_sec, slow_sec: values.slow_sec, color: values.color, sort_order: values.sort_order };
+  const zone = toZone(record(await request('POST', entityUrl('PaceZone'), { token, body })));
+  if (!zone) throw new ApiError('The server did not confirm the new zone. Check your zones before adding it again.', 0);
+  return zone;
+}
+
+export async function deleteZone(token: string, zoneId: string): Promise<void> {
+  await request('DELETE', entityUrl('PaceZone', `/${encodeURIComponent(zoneId)}`), { token });
 }
 
 // ---- routes and directions -----------------------------------------------
