@@ -1,5 +1,6 @@
 import { StripeError } from '../billing/stripe.js';
 import { claimInvite, normalizeCode } from '../functions/inviteAccess.js';
+import { recordServerError } from '../errors.js';
 import { HttpError, clientIp, rateLimiter } from '../lib/http.js';
 import { sendMail } from '../lib/mail.js';
 import { burnPasswordCheck, hashPassword, longToken, sixDigitCode, verifyPassword } from './crypto.js';
@@ -42,6 +43,9 @@ function readNewPassword(value) {
 const findByEmail = async (db, email) =>
   (await db.query('select * from users where lower(email) = lower($1)', [email]))[0] || null;
 
+const HOUR_MS = 60 * 60 * 1000;
+const TOO_MANY_EMAILS = 'Too many emails requested. Try again later.';
+
 async function sendVerifyCode(ctx, user) {
   const code = sixDigitCode();
   await storeCode(ctx.db, user.id, 'verify_email', code, VERIFY_TTL_MIN);
@@ -57,7 +61,62 @@ function signedIn(ctx, user) {
   return { access_token: issueAccessToken(ctx.config, user), user: publicUser(user) };
 }
 
-export function registerAuthRoutes(router) {
+export function registerAuthRoutes(router, config) {
+  // ---- Sign-up with no invite code (possible only with SUBSCRIPTIONS on).
+  // Anyone can type any address, so the verification email is rationed more tightly
+  // than for a sign-up that holds a code from the owner. Counted per app, so the limits
+  // follow this server's settings; the per-address counts are read from the codes
+  // already stored, so they survive a restart.
+  const openSignupLimit = rateLimiter({
+    windowMs: HOUR_MS,
+    max: config?.signup?.openPerNetworkPerHour || 10,
+    message: 'Too many sign-ups from this network. Try again later.',
+  });
+  const openMailCeiling = config?.signup?.openMailsPerHour || 300;
+  const openMails = { since: 0, count: 0 };
+
+  // Is this account an open sign-up that has not been confirmed yet?
+  const isOpen = (ctx, user) => Boolean(ctx.config.subscriptions) && !user.pending_invite_code;
+
+  /**
+   * May one more verification email go to this open sign-up? True: send it. False: one
+   * went out in the last minute, so say nothing and send nothing. Throws 429 when the
+   * address has had 3 in the hour or 8 in the day, or when everyone together has reached
+   * the hourly ceiling. `userId` is empty for an address with no account yet.
+   */
+  async function mayMailOpenSignup(ctx, userId) {
+    if (userId) {
+      const [sent] = await ctx.db.query(
+        `select count(*) filter (where created_date > now() - interval '1 hour')::int as hour,
+                count(*)::int as day,
+                coalesce(max(created_date) > now() - interval '60 seconds', false) as just_now
+           from auth_codes
+          where user_id = $1 and purpose = 'verify_email' and created_date > now() - interval '1 day'`,
+        [userId]
+      );
+      if (sent.just_now) return false;
+      if (sent.hour >= 3 || sent.day >= 8) throw new HttpError(429, TOO_MANY_EMAILS, { retryAfter: 3600 });
+    }
+    const now = Date.now();
+    if (now - openMails.since >= HOUR_MS) {
+      openMails.since = now;
+      openMails.count = 0;
+    }
+    if (openMails.count >= openMailCeiling) {
+      // The owner should know: either the product is suddenly popular or someone is abusing sign-up.
+      recordServerError(
+        ctx.db,
+        new Error(`Open sign-up reached its ceiling of ${openMailCeiling} verification emails in an hour. New sign-ups without an invite code are refused until the hour is up.`),
+        { method: 'POST', pathname: '/api/auth/register' }
+      );
+      throw new HttpError(429, 'Sign-up is busy right now. Try again in an hour.', {
+        retryAfter: Math.max(1, Math.ceil((openMails.since + HOUR_MS - now) / 1000)),
+      });
+    }
+    openMails.count += 1;
+    return true;
+  }
+
   router.add('POST', '/api/auth/register', async (ctx) => {
     const email = readEmail(ctx.body.email);
     const password = readNewPassword(ctx.body.password);
@@ -71,6 +130,7 @@ export function registerAuthRoutes(router) {
     // email is verified.
     const inviteCode = normalizeCode(ctx.body.invite_code) || null;
     if (!inviteCode && !ctx.config.subscriptions) throw new HttpError(400, 'Enter your invite code.');
+    if (!inviteCode) openSignupLimit(`open-signup:${clientIp(ctx.req)}`);
     if (inviteCode) {
       const [invite] = await ctx.db.query('select status from invite_codes where code = $1', [inviteCode]);
       if (!invite) throw new HttpError(400, 'That code is not recognised.');
@@ -82,6 +142,8 @@ export function registerAuthRoutes(router) {
     if (existing?.email_verified_at) {
       throw new HttpError(409, 'An account with that email already exists. Log in instead.');
     }
+    // Checked before anything is written, so a refused sign-up changes nothing.
+    const mail = inviteCode ? true : await mayMailOpenSignup(ctx, existing?.id);
     const hash = await hashPassword(password);
     let user;
     if (existing) {
@@ -99,7 +161,7 @@ export function registerAuthRoutes(router) {
         [email, hash, fullName, inviteCode]
       );
     }
-    return { ok: true, ...(await sendVerifyCode(ctx, user)) };
+    return { ok: true, ...(mail ? await sendVerifyCode(ctx, user) : {}) };
   });
 
   router.add('POST', '/api/auth/verify-otp', async (ctx) => {
@@ -144,6 +206,7 @@ export function registerAuthRoutes(router) {
     mailLimit(`mail:${email}`);
     const user = await findByEmail(ctx.db, email);
     if (!user || user.email_verified_at) return { ok: true };
+    if (isOpen(ctx, user) && !(await mayMailOpenSignup(ctx, user.id))) return { ok: true };
     return { ok: true, ...(await sendVerifyCode(ctx, user)) };
   });
 
@@ -157,7 +220,8 @@ export function registerAuthRoutes(router) {
       : await burnPasswordCheck(ctx.body.password);
     if (!ok) throw new HttpError(401, 'Invalid email or password.');
     if (!user.email_verified_at) {
-      const dev = await sendVerifyCode(ctx, user);
+      const mail = isOpen(ctx, user) ? await mayMailOpenSignup(ctx, user.id) : true;
+      const dev = mail ? await sendVerifyCode(ctx, user) : {};
       throw new HttpError(403, 'Verify your email first. We just sent you a new code.', {
         needs_verification: true,
         ...dev,

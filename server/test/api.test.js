@@ -964,6 +964,15 @@ describe('sign-up when subscriptions are on', () => {
   const verify = (email, code, password = 'longenough1') =>
     on('POST', '/api/auth/verify-otp', { body: { email, otp_code: code, ...(password === null ? {} : { password }) } });
   const WRONG_CODE = { status: 400, data: { error: 'That code is wrong or has expired.' } };
+  // A sign-up with no invite code is not mailed a second code within a minute of the first
+  // (see 'open sign-up cannot be used to send mail'). Where a test needs the next email, a
+  // few minutes pass first: the codes this address was sent so far become that much older.
+  const aFewMinutesLater = (email) =>
+    db.query(
+      `update auth_codes set created_date = created_date - interval '5 minutes'
+        where user_id = (select id from users where email = $1) returning id`,
+      [email]
+    );
   // Sign-ups are limited per address; these tests come from their own (see TRUST_PROXY in src/lib/http.js).
   const from = (address) => ({ 'X-Forwarded-For': address });
   const withProxy = async (work) => {
@@ -1074,6 +1083,7 @@ describe('sign-up when subscriptions are on', () => {
     assert.equal((await signUp('victim-pass-V1', '198.51.100.1')).status, 200);
     // Before the victim types their code, someone else signs up with the same address
     // and their own password. The new code goes to the victim's inbox, not to them.
+    await aFewMinutesLater(email);
     const hijack = await signUp('attacker-pass-A1', '198.51.100.2');
     assert.equal(hijack.status, 200);
 
@@ -1092,6 +1102,7 @@ describe('sign-up when subscriptions are on', () => {
     assert.equal(await verified(), false);
 
     // The victim starts again with their own password and gets in.
+    await aFewMinutesLater(email);
     const again = await signUp('victim-pass-V1', '198.51.100.1');
     assert.equal(again.status, 200);
     const code = again.data.dev_code;
@@ -1141,6 +1152,7 @@ describe('sign-up when subscriptions are on', () => {
     const email = 'changed.mind@example.com';
     const code = await mintCode();
     await register({ email, password: 'longenough1', invite_code: code });
+    await aFewMinutesLater(email);
     const again = await register({ email, password: 'longenough1', invite_code: '  ' });
     assert.equal(again.status, 200, JSON.stringify(again.data));
     const ver = await verify(email, again.data.dev_code);
@@ -1190,7 +1202,10 @@ describe('the owner sees and controls access', () => {
       {
         user_id: invited.user.id, email: 'ines.invited@example.com', full_name: 'ines.invited', role: 'user',
         allowed: true, reason: 'invite', source: 'invite', plan: null, expires_at: null, cancel_at_period_end: false,
-        entitlements: [{ source: 'invite', status: 'active', plan: null, expires_at: null, granted_by: inviteCode, note: null }],
+        entitlements: [{
+          source: 'invite', status: 'active', plan: null, expires_at: null, granted_by: inviteCode, note: null,
+          cancel_at_period_end: false, revoked_by: null, revoked_at: null,
+        }],
       }
     );
     assert.match(ines.entitlements[0].id, /^[0-9a-f-]{36}$/);
@@ -2818,5 +2833,248 @@ describe('trial reminder', () => {
     assert.equal(await sweep(box), 1);
     assert.ok(await claimed(dev));
     assert.equal(await sweep(box), 0);
+  });
+});
+
+describe('who removed a free pass', () => {
+  const access = (body) => call('POST', '/api/functions/adminAccess', { token: admin.token, body });
+  const find = async (email) => (await access({ action: 'list', search: email })).data.people.find((p) => p.email === email);
+
+  test('a removed pass records who removed it and when', async () => {
+    const pam = await legacyUser('pam.pass@example.com');
+    await access({ action: 'grant', email: 'pam.pass@example.com' });
+    let listed = (await find('pam.pass@example.com')).entitlements[0];
+    assert.deepEqual([listed.revoked_by, listed.revoked_at, listed.cancel_at_period_end], [null, null, false]);
+    assert.equal('external_id' in listed, false, 'a free pass has no subscription id');
+
+    assert.equal((await access({ action: 'revoke', entitlement_id: listed.id })).status, 200);
+    const [row] = await entitlementsOf(pam.user.id);
+    assert.deepEqual([row.status, row.revoked_by], ['revoked', 'admin@example.com']);
+    assert.ok(Math.abs(new Date(row.revoked_at).getTime() - Date.now()) < 60 * 1000);
+    listed = (await find('pam.pass@example.com')).entitlements[0];
+    assert.equal(listed.revoked_by, 'admin@example.com');
+    assert.equal(new Date(listed.revoked_at).getTime(), new Date(row.revoked_at).getTime());
+
+    // removing it a second time keeps the first record
+    await db.query(`update entitlements set revoked_by = 'first.admin@example.com' where id = $1 returning id`, [row.id]);
+    assert.equal((await access({ action: 'revoke', entitlement_id: row.id })).status, 200);
+    assert.equal((await entitlementsOf(pam.user.id))[0].revoked_by, 'first.admin@example.com');
+  });
+
+  test('granting again clears that record', async () => {
+    const [before] = await db.query(`select e.* from entitlements e join users u on u.id = e.user_id where u.email = 'pam.pass@example.com'`, []);
+    assert.equal(before.status, 'revoked');
+    assert.equal((await access({ action: 'grant', email: 'pam.pass@example.com' })).status, 200);
+    const [row] = await db.query('select * from entitlements where id = $1', [before.id]);
+    assert.deepEqual([row.status, row.revoked_by, row.revoked_at], ['active', null, null]);
+    // and so does a new invite code after an invite pass was removed
+    const ian = await invitedUser('ian.invite@example.com');
+    const [pass] = await entitlementsOf(ian.user.id);
+    await access({ action: 'revoke', entitlement_id: pass.id });
+    assert.equal((await entitlementsOf(ian.user.id))[0].revoked_by, 'admin@example.com');
+    await call('POST', '/api/functions/inviteAccess', { token: ian.token, body: { action: 'redeem', code: await mintCode() } });
+    const [again] = await entitlementsOf(ian.user.id);
+    assert.deepEqual([again.status, again.revoked_by, again.revoked_at], ['active', null, null]);
+  });
+
+  test('a paid row is listed with its subscription id and whether it is ending', async () => {
+    const sue = await legacyUser('sue.subscribed@example.com');
+    await db.query(
+      `insert into entitlements (user_id, source, status, plan, expires_at, cancel_at_period_end, external_id)
+       values ($1, 'stripe', 'active', 'monthly', $2, true, 'sub_listed_0001') returning id`,
+      [sue.user.id, daysFromNow(20)]
+    );
+    const [listed] = (await find('sue.subscribed@example.com')).entitlements;
+    assert.deepEqual([listed.source, listed.external_id, listed.cancel_at_period_end, listed.revoked_by], ['stripe', 'sub_listed_0001', true, null]);
+    // only the owner sees it
+    assert.equal((await call('POST', '/api/functions/adminAccess', { token: sue.token, body: { action: 'list' } })).status, 403);
+  });
+});
+
+describe('AccessGrant is history only', () => {
+  test('nobody can write AccessGrant through the entity API', async () => {
+    const holder = await invitedUser('hal.holder@example.com');
+    const other = await legacyUser('olive.other@example.com');
+    const [grant] = await db.query('select * from access_grants where user_id = $1', [holder.user.id]);
+    const as = (who, method, url, body) => call(method, url, { token: who.token, body });
+    const fresh = { user_id: other.user.id, email: 'olive.other@example.com', code: 'FP-FAKE-0001' };
+
+    for (const who of [admin, holder]) {
+      assert.equal((await as(who, 'POST', '/api/entities/AccessGrant', fresh)).status, 403, 'create');
+      assert.equal((await as(who, 'POST', '/api/entities/AccessGrant/bulk', [fresh])).status, 403, 'bulk create');
+      assert.equal((await as(who, 'PUT', `/api/entities/AccessGrant/${grant.id}`, { code: 'FP-EDIT-0001' })).status, 403, 'update');
+      assert.equal((await as(who, 'PUT', '/api/entities/AccessGrant/bulk', [{ id: grant.id, code: 'FP-EDIT-0001' }])).status, 403, 'bulk update');
+      assert.equal((await as(who, 'DELETE', `/api/entities/AccessGrant/${grant.id}`)).status, 403, 'delete');
+      assert.deepEqual((await as(who, 'POST', '/api/entities/AccessGrant/delete-many', { q: { user_id: holder.user.id } })).data, { deleted: 0 }, 'deleteMany');
+      assert.deepEqual((await as(who, 'POST', '/api/entities/AccessGrant/update-many', { q: { user_id: holder.user.id }, data: { code: 'FP-EDIT-0001' } })).data, { updated: 0 }, 'updateMany');
+    }
+    const [after] = await db.query('select * from access_grants where user_id = $1', [holder.user.id]);
+    assert.deepEqual([after.id, after.code], [grant.id, grant.code], 'the row is as it was');
+    assert.equal((await db.query('select id from access_grants where user_id = $1', [other.user.id])).length, 0);
+    assert.equal(await hasAccess(db, other.user), false, 'and no access came of it');
+
+    // reading is unchanged: the owner sees every row, a runner only their own
+    const all = await as(admin, 'POST', '/api/entities/AccessGrant/query', {});
+    assert.ok(all.data.items.length > 1);
+    const own = await as(holder, 'POST', '/api/entities/AccessGrant/query', {});
+    assert.deepEqual(own.data.items.map((g) => g.user_id), [holder.user.id]);
+
+    // and redeeming a code still writes the row, because the server does that itself
+    const code = await mintCode();
+    assert.deepEqual((await as(other, 'POST', '/api/functions/inviteAccess', { action: 'redeem', code })).data, { allowed: true });
+    assert.deepEqual((await db.query('select code from access_grants where user_id = $1', [other.user.id])).map((g) => g.code), [code]);
+  });
+});
+
+describe('open sign-up cannot be used to send mail', () => {
+  let open; // SUBSCRIPTIONS=on
+  const BUSY_INBOX = { status: 429, data: { error: 'Too many emails requested. Try again later.' } };
+  const from = (address) => ({ 'X-Forwarded-For': address });
+  const post = (app, path, body, address) => call('POST', path, { body, headers: address ? from(address) : {}, origin: app.origin });
+  const register = (app, email, address, extra = {}) => post(app, '/api/auth/register', { email, password: 'longenough1', ...extra }, address);
+  const resend = (app, email) => post(app, '/api/auth/resend-otp', { email });
+  const login = (app, email) => post(app, '/api/auth/login', { email, password: 'longenough1' });
+  // Time passes for one address: its codes so far were sent this long ago.
+  const later = (email, interval) =>
+    db.query(
+      `update auth_codes set created_date = created_date - $2::interval
+        where user_id = (select id from users where email = $1) returning id`,
+      [email, interval]
+    );
+  const codesSent = async (email) =>
+    (await db.query(`select count(*)::int as n from auth_codes c join users u on u.id = c.user_id where u.email = $1 and c.purpose = 'verify_email'`, [email]))[0].n;
+
+  before(async () => {
+    process.env.TRUST_PROXY = 'true'; // every sign-up here comes from its own address
+    open = await startApp({ subscriptions: true });
+  });
+  after(async () => {
+    delete process.env.TRUST_PROXY;
+    await open?.close();
+    await new Promise((r) => setTimeout(r, 100));
+    await db.query(`delete from client_errors where platform = 'server' returning id`, []);
+  });
+
+  test('a second code within a minute is not mailed', async () => {
+    const email = 'quick.again@example.com';
+    const first = await register(open, email, '203.0.113.1');
+    assert.equal(first.status, 200, JSON.stringify(first.data));
+    assert.ok(first.data.dev_code);
+    assert.deepEqual(await resend(open, email), { status: 200, data: { ok: true } }, 'the same answer, and no new code');
+    assert.deepEqual(await register(open, email, '203.0.113.1'), { status: 200, data: { ok: true } });
+    const unverified = await login(open, email);
+    assert.equal(unverified.status, 403);
+    assert.equal(unverified.data.needs_verification, true);
+    assert.equal(unverified.data.dev_code, undefined);
+    assert.equal(await codesSent(email), 1);
+    // the one code that was mailed still works
+    const ok = await post(open, '/api/auth/verify-otp', { email, otp_code: first.data.dev_code, password: 'longenough1' });
+    assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  });
+
+  test('open sign-up mails one address at most three times an hour', async () => {
+    const email = 'three.an.hour@example.com';
+    const first = await register(open, email, '203.0.113.2');
+    assert.ok(first.data.dev_code);
+    await later(email, '2 minutes');
+    const second = await resend(open, email);
+    assert.ok(second.data.dev_code, 'a resend counts as the second');
+    await later(email, '2 minutes');
+    const third = await login(open, email);
+    assert.equal(third.status, 403);
+    assert.ok(third.data.dev_code, 'the sign-in that re-sends a code is the third');
+    await later(email, '2 minutes');
+
+    assert.deepEqual(await resend(open, email), BUSY_INBOX);
+    assert.deepEqual(await register(open, email, '203.0.113.2'), BUSY_INBOX);
+    assert.deepEqual(await login(open, email), BUSY_INBOX);
+    assert.equal(await codesSent(email), 3);
+    // an hour on, there is room again
+    await later(email, '1 hour');
+    assert.ok((await resend(open, email)).data.dev_code);
+  });
+
+  test('and at most eight times a day', async () => {
+    const email = 'eight.a.day@example.com';
+    await register(open, email, '203.0.113.3');
+    // six more went out earlier in the day
+    await db.query(
+      `insert into auth_codes (user_id, purpose, code_hash, expires_at, used_at, created_date)
+       select u.id, 'verify_email', 'x', now(), now(), now() - make_interval(hours => h)
+         from users u, generate_series(2, 7) as h where u.email = $1 returning id`,
+      [email]
+    );
+    await later(email, '2 minutes');
+    assert.ok((await resend(open, email)).data.dev_code, 'the eighth');
+    await later(email, '2 minutes');
+    assert.equal(await codesSent(email), 8);
+    assert.deepEqual(await resend(open, email), BUSY_INBOX, 'the ninth in a day');
+  });
+
+  test('at most ten code-less sign-ups an hour from one network', async () => {
+    const cafe = '203.0.113.50';
+    for (let i = 0; i < 10; i++) {
+      const res = await register(open, `cafe.${i}@example.com`, cafe);
+      assert.equal(res.status, 200, `sign-up ${i + 1}: ${JSON.stringify(res.data)}`);
+    }
+    assert.deepEqual(await register(open, 'cafe.11@example.com', cafe), {
+      status: 429, data: { error: 'Too many sign-ups from this network. Try again later.' },
+    });
+    assert.equal((await db.query(`select id from users where email = 'cafe.11@example.com'`, [])).length, 0);
+    // another network is not affected, and neither is someone on this one who has an invite code
+    assert.equal((await register(open, 'elsewhere.1@example.com', '203.0.113.51')).status, 200);
+    assert.equal((await register(open, 'cafe.invited@example.com', cafe, { invite_code: await mintCode() })).status, 200);
+  });
+
+  test('the hourly ceiling for everyone holds', async () => {
+    const small = await startApp({ subscriptions: true, signup: { ...testConfig.signup, openMailsPerHour: 3 } });
+    try {
+      for (let i = 0; i < 3; i++) {
+        assert.equal((await register(small, `crowd.${i}@example.com`, `203.0.113.${60 + i}`)).status, 200);
+      }
+      const BUSY = { status: 429, data: { error: 'Sign-up is busy right now. Try again in an hour.' } };
+      assert.deepEqual(await register(small, 'crowd.3@example.com', '203.0.113.70'), BUSY);
+      assert.equal((await db.query(`select id from users where email = 'crowd.3@example.com'`, [])).length, 0, 'no account is made');
+      await later('crowd.0@example.com', '2 minutes');
+      assert.deepEqual(await resend(small, 'crowd.0@example.com'), BUSY, 'a resend is one of those emails too');
+      // a sign-up with an invite code is not part of the ceiling
+      assert.equal((await register(small, 'crowd.invited@example.com', '203.0.113.71', { invite_code: await mintCode() })).status, 200);
+      // the owner is told, once
+      let reports = [];
+      for (let i = 0; i < 40 && !reports.length; i++) {
+        await new Promise((r) => setTimeout(r, 25));
+        reports = await db.query(`select message from client_errors where platform = 'server' and message like 'Open sign-up reached%'`, []);
+      }
+      assert.equal(reports.length, 1);
+      assert.match(reports[0].message, /3 verification emails/);
+    } finally {
+      await small.close();
+    }
+  });
+
+  test('sign-up with an invite code keeps the old limits', async () => {
+    const email = 'coded.signup@example.com';
+    const first = await register(open, email, '203.0.113.80', { invite_code: await mintCode() });
+    assert.ok(first.data.dev_code);
+    // six emails an hour, with no wait between them, exactly as before
+    for (let i = 0; i < 5; i++) assert.ok((await resend(open, email)).data.dev_code, `resend ${i + 1}`);
+    assert.deepEqual(await resend(open, email), BUSY_INBOX);
+    assert.equal(await codesSent(email), 6);
+  });
+
+  test('with the switch off nothing changed', async () => {
+    const email = 'switch.off@example.com';
+    const off = (path, body, address) => call('POST', path, { body, headers: address ? from(address) : {} });
+    const first = await off('/api/auth/register', { email, password: 'longenough1', invite_code: await mintCode() }, '203.0.113.90');
+    assert.ok(first.data.dev_code);
+    for (let i = 0; i < 5; i++) assert.ok((await off('/api/auth/resend-otp', { email })).data.dev_code, `resend ${i + 1}`);
+    assert.deepEqual(await off('/api/auth/resend-otp', { email }), BUSY_INBOX);
+    // signing in before confirming still sends a code every time
+    const unverified = await off('/api/auth/login', { email, password: 'longenough1' });
+    assert.equal(unverified.status, 403);
+    assert.ok(unverified.data.dev_code);
+    assert.deepEqual(await off('/api/auth/register', { email: 'switch.off.nocode@example.com', password: 'longenough1' }, '203.0.113.90'), {
+      status: 400, data: { error: 'Enter your invite code.' },
+    });
   });
 });

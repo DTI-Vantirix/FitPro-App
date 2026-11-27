@@ -113,7 +113,8 @@ export async function syncInviteEntitlements(db) {
 /**
  * Gives an account a free pass: `invite` (a redeemed code) or `admin` (granted by
  * hand). One row per account and source. Granting again leaves a pass that is
- * still good as it is, and brings back one that was revoked. Call inside a transaction.
+ * still good as it is, and brings back one that was revoked (forgetting who revoked it).
+ * Call inside a transaction.
  */
 export async function grantFree(tx, { userId, source, grantedBy = null, note = null }) {
   if (!FREE_SOURCES.has(source)) throw new Error(`grantFree is for free passes only, not "${source}"`);
@@ -125,6 +126,8 @@ export async function grantFree(tx, { userId, source, grantedBy = null, note = n
        granted_by = case when entitlements.status = 'active' then entitlements.granted_by else excluded.granted_by end,
        note = case when entitlements.status = 'active' then entitlements.note else excluded.note end,
        status = 'active',
+       revoked_by = null,
+       revoked_at = null,
        expires_at = null,
        updated_date = now()
      returning *`,

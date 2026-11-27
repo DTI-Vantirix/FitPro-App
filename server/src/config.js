@@ -88,6 +88,13 @@ export function loadConfig(env = process.env) {
     // Selling needs the switch and the keys. Looking after people who already pay
     // (the webhook, the portal, cancel on delete) needs only the keys.
     selling: subscriptions && stripe.ready,
+    // Sign-up with no invite code (only possible with SUBSCRIPTIONS on) sends a
+    // verification email to whatever address is typed, so it is capped: this many such
+    // emails an hour across everyone, and this many such sign-ups an hour from one network.
+    signup: {
+      openMailsPerHour: Number(env.OPEN_SIGNUP_MAILS_PER_HOUR) > 0 ? Number(env.OPEN_SIGNUP_MAILS_PER_HOUR) : 300,
+      openPerNetworkPerHour: 10,
+    },
     // Outside production, auth responses include the emailed code so you can
     // test sign-up without a mail provider. Never on in production.
     exposeDevCodes: !production && env.EXPOSE_DEV_CODES !== 'false',

@@ -48,7 +48,7 @@ export function createApp({ db, config, registry, stripe = createStripe(config) 
   // The old app asked Base44 for public app settings before anything else.
   router.add('GET', '/api/app/public-settings', async () => ({ id: 'fitpro', public_settings: {} }));
 
-  registerAuthRoutes(router);
+  registerAuthRoutes(router, config);
   registerEntityRoutes(router, entities);
   registerFunctionRoutes(router);
   registerBillingRoutes(router);
