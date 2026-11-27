@@ -151,9 +151,63 @@ async function checkout({ db, user, body, config, stripe }) {
   return { url: result.url };
 }
 
+const refreshLimit = rateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: 'Too many checks. Wait a few minutes and try again.',
+});
+
+const ownCustomer = async (db, user) =>
+  (await db.query('select stripe_customer_id from users where id = $1', [user.id]))[0]?.stripe_customer_id || null;
+
+/**
+ * Asks Stripe about the account's own customer and answers with what it said. Nothing
+ * in the request names a customer, a session or a subscription: an account can only
+ * ever refresh itself. This is what lets a payer in when the webhook is late or lost.
+ */
+async function refresh({ db, user, config, stripe }) {
+  refreshLimit(`refresh:${user.id}`);
+  const customerId = await ownCustomer(db, user);
+  if (customerId) await withStripe(() => syncCustomer(db, stripe, config, customerId));
+  return { ...(await subscriptionStatus(db, config, user)), allowed: (await accessOf(db, user)).allowed };
+}
+
+/** A link to Stripe's own pages for the card, invoices and cancelling. */
+async function portal({ db, user, body, config, stripe }) {
+  const customerId = await ownCustomer(db, user);
+  if (!customerId) throw new HttpError(404, 'You do not have a subscription to manage.');
+  const row = body.flow === 'cancel' ? await stripeRowOf(db, user.id) : null;
+  const session = await withStripe(() =>
+    stripe.createPortalSession({
+      customerId,
+      returnUrl: `${config.appUrl}/settings?billing=updated`,
+      ...(row?.external_id ? { cancelSubscriptionId: row.external_id } : {}),
+    })
+  );
+  return { url: session.url };
+}
+
+/** Undoes "cancel at the end of the period" while that period is still running. */
+async function resume({ db, user, config, stripe }) {
+  const row = await stripeRowOf(db, user.id);
+  if (!row || !row.cancel_at_period_end) {
+    throw new HttpError(400, 'Your subscription is not set to end, so there is nothing to resume.');
+  }
+  await withStripe(async () => {
+    await stripe.setCancelAtPeriodEnd(row.external_id, false);
+    await syncCustomer(db, stripe, config, await ownCustomer(db, user));
+  });
+  return subscriptionStatus(db, config, user);
+}
+
 export default async function subscription({ db, user, body, config, stripe }) {
   const action = body?.action || 'status';
   if (action === 'status') return subscriptionStatus(db, config, user);
   if (action === 'checkout') return checkout({ db, user, body, config, stripe });
-  throw new HttpError(400, 'Unknown action');
+  // The rest look after a subscription that already exists. They need the keys but not
+  // the switch: turning SUBSCRIPTIONS off stops new sales, never the care of a payer.
+  const upkeep = { refresh, portal, resume }[action];
+  if (!upkeep) throw new HttpError(400, 'Unknown action');
+  if (!config.stripe?.ready) throw new HttpError(503, UNAVAILABLE);
+  return upkeep({ db, user, body, config, stripe });
 }

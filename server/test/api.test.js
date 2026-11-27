@@ -2388,3 +2388,219 @@ describe('Stripe webhook', () => {
     assert.equal(JSON.stringify([user, await entitlementsOf(who.user.id), events]).includes('4242'), false);
   });
 });
+
+describe('when the webhook is late', () => {
+  let store;
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
+  const customerOf = async (who) => (await userRow(who.user.id)).stripe_customer_id;
+  const stripeRows = async (who) => (await entitlementsOf(who.user.id)).filter((r) => r.source === 'stripe');
+  const listCalls = (fake, customer) => fake.callsTo('listSubscriptions').filter((c) => c.args.customerId === customer).length;
+
+  before(async () => {
+    store = await shop();
+  });
+  after(async () => {
+    await store?.close();
+  });
+
+  test('a payer whose webhook never arrives is let in on return from checkout', async () => {
+    const wes = await legacyUser('wes.waiting@example.com');
+    await store.subscribe(wes, 'annual');
+    assert.deepEqual(await store.runs(wes), NO_ACCESS);
+
+    const res = await store.subscription(wes, { action: 'refresh' });
+    assert.equal(res.status, 200, JSON.stringify(res.data));
+    assert.equal(res.data.allowed, true);
+    assert.deepEqual(
+      [res.data.selling, res.data.trial_available, res.data.customer, res.data.duplicate, res.data.subscription.status, res.data.subscription.plan],
+      [true, false, true, false, 'trial', 'annual']
+    );
+    assert.equal((await store.runs(wes)).status, 200);
+    assert.ok((await userRow(wes.user.id)).trial_used_at);
+  });
+
+  test('refresh for someone who abandoned checkout stays closed', async () => {
+    const abe = await legacyUser('abe.abandoned@example.com');
+    assert.equal((await store.subscription(abe, { action: 'checkout', plan: 'monthly' })).status, 200);
+    const res = await store.subscription(abe, { action: 'refresh' });
+    assert.deepEqual(res, {
+      status: 200,
+      data: { selling: true, trial_available: true, customer: true, subscription: null, duplicate: false, allowed: false },
+    });
+    assert.equal((await stripeRows(abe)).length, 0);
+    assert.deepEqual(await store.runs(abe), NO_ACCESS);
+    // someone who never started checkout: nothing to ask Stripe about
+    const nell = await legacyUser('nell.never@example.com');
+    const calls = store.fake.calls.length;
+    assert.equal((await store.subscription(nell, { action: 'refresh' })).data.allowed, false);
+    assert.equal(store.fake.calls.length, calls);
+  });
+
+  test("refresh cannot be pointed at someone else's subscription", async () => {
+    const payer = await legacyUser('vera.victim@example.com');
+    const paid = await store.subscribe(payer);
+    const session = store.sessionOf(payer);
+    const thief = await legacyUser('theo.thief@example.com');
+    await store.subscription(thief, { action: 'checkout', plan: 'monthly' });
+
+    const res = await store.subscription(thief, {
+      action: 'refresh',
+      subscription_id: paid.id, subscription: paid.id, customer: session.customer, customer_id: session.customer,
+      session_id: session.id, user_id: payer.user.id,
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.data.allowed, false);
+    assert.equal((await stripeRows(thief)).length, 0);
+    assert.deepEqual(await store.runs(thief), NO_ACCESS);
+    assert.equal(listCalls(store.fake, session.customer), 0, "the payer's customer was never asked about");
+    // and the payer still gets what they paid for
+    assert.equal((await store.subscription(payer, { action: 'refresh' })).data.allowed, true);
+    assert.deepEqual((await stripeRows(payer)).map((r) => r.external_id), [paid.id]);
+  });
+
+  test('a lost renewal is repaired when the phone asks for its status', async () => {
+    const lola = await legacyUser('lola.lost@example.com');
+    const sub = await store.subscribe(lola);
+    await store.subscription(lola, { action: 'refresh' });
+    // the period ended five days ago as far as we know; the renewal notice never came
+    await db.query(`update entitlements set status = 'active', expires_at = $2 where user_id = $1 and source = 'stripe' returning id`, [lola.user.id, daysFromNow(-5)]);
+    assert.deepEqual(await store.runs(lola), NO_ACCESS);
+    store.fake.setSubscription(sub.id, { status: 'active', current_period_start: daysFromNowUnix(-5), current_period_end: daysFromNowUnix(25) });
+
+    const customer = await customerOf(lola);
+    const before = listCalls(store.fake, customer);
+    const status = await store.access(lola);
+    assert.equal(status.status, 200);
+    assert.deepEqual(Object.keys(status.data).sort(), ['allowed', 'cancel_at_period_end', 'expires_at', 'plan', 'reason', 'source', 'subscriptions'], 'the shape the phone knows');
+    assert.deepEqual([status.data.allowed, status.data.reason, status.data.source], [true, 'subscription', 'stripe']);
+    const [row] = await stripeRows(lola);
+    assert.ok(new Date(row.expires_at).getTime() > Date.now() + 24 * 24 * 60 * 60 * 1000, 'the row has the new end date');
+    assert.equal(listCalls(store.fake, customer), before + 1);
+    // someone who has access is never a reason to call Stripe
+    await store.access(lola);
+    assert.equal(listCalls(store.fake, customer), before + 1);
+  });
+
+  test('a status check asks Stripe at most once in five minutes, and only for an account that has a customer', async () => {
+    const gone = await legacyUser('gil.gone@example.com');
+    const sub = await store.subscribe(gone);
+    store.fake.setSubscription(sub.id, { status: 'canceled', canceled_at: daysFromNowUnix(0), ended_at: daysFromNowUnix(0) });
+    const customer = await customerOf(gone);
+    assert.equal((await store.access(gone)).data.allowed, false);
+    assert.equal(listCalls(store.fake, customer), 1);
+    assert.equal((await store.access(gone)).data.allowed, false);
+    assert.equal((await store.access(gone)).data.allowed, false);
+    assert.equal(listCalls(store.fake, customer), 1, 'the second and third checks made no call');
+
+    const never = await legacyUser('nora.nocustomer@example.com');
+    const calls = store.fake.calls.length;
+    assert.equal((await store.access(never)).data.allowed, false);
+    assert.equal(store.fake.calls.length, calls);
+  });
+
+  test('the status check still answers when Stripe is down', async () => {
+    const dot = await legacyUser('dot.down@example.com');
+    await store.subscribe(dot);
+    store.fake.failNext('listSubscriptions');
+    const res = await store.access(dot);
+    assert.equal(res.status, 200);
+    assert.equal(res.data.allowed, false);
+    assert.equal(res.data.subscriptions, true);
+  });
+
+  test('looking after a subscription needs the keys, not the switch', async () => {
+    const kit = await legacyUser('kit.keys@example.com');
+    const sub = await store.subscribe(kit);
+    // the owner has switched SUBSCRIPTIONS off again; the keys are still there
+    const keysOnly = await startApp({ stripe: TEST_STRIPE }, { stripe: store.fake });
+    // and here the keys are gone altogether
+    const noKeys = await startApp({ subscriptions: true }, { stripe: store.fake });
+    const ask = (app, body) => call('POST', '/api/functions/subscription', { token: kit.token, body, origin: app.origin });
+    try {
+      const refreshed = await ask(keysOnly, { action: 'refresh' });
+      assert.deepEqual([refreshed.status, refreshed.data.allowed, refreshed.data.selling], [200, true, false]);
+      assert.equal((await ask(keysOnly, { action: 'portal' })).status, 200);
+      assert.deepEqual((await stripeRows(kit)).map((r) => r.external_id), [sub.id]);
+
+      for (const action of ['refresh', 'portal', 'resume']) {
+        assert.deepEqual(await ask(noKeys, { action }), UNAVAILABLE, action);
+      }
+    } finally {
+      await keysOnly.close();
+      await noKeys.close();
+    }
+  });
+
+  test("the portal link is made for the account's own customer", async () => {
+    const mo = await legacyUser('mo.manages@example.com');
+    await store.subscribe(mo);
+    await store.subscription(mo, { action: 'refresh' });
+    const res = await store.subscription(mo, { action: 'portal', customer: 'cus_someone_else', return_url: 'https://evil.example/' });
+    assert.equal(res.status, 200, JSON.stringify(res.data));
+    const made = store.fake.callsTo('createPortalSession').at(-1).args;
+    assert.equal(made.customerId, await customerOf(mo));
+    assert.equal(made.returnUrl, `${testConfig.appUrl}/settings?billing=updated`);
+    assert.equal(made.cancelSubscriptionId ?? null, null);
+    assert.deepEqual(res.data, { url: store.fake.state.portals.at(-1).url });
+  });
+
+  test("the cancel link names the account's subscription", async () => {
+    const cy = await legacyUser('cy.cancel@example.com');
+    const sub = await store.subscribe(cy);
+    await store.subscription(cy, { action: 'refresh' });
+    const res = await store.subscription(cy, { action: 'portal', flow: 'cancel', subscription: 'sub_someone_else' });
+    assert.equal(res.status, 200, JSON.stringify(res.data));
+    const made = store.fake.callsTo('createPortalSession').at(-1).args;
+    assert.deepEqual([made.customerId, made.cancelSubscriptionId], [await customerOf(cy), sub.id]);
+  });
+
+  test('no customer, no portal', async () => {
+    const ann = await legacyUser('ann.nothing@example.com');
+    const calls = store.fake.calls.length;
+    for (const body of [{ action: 'portal' }, { action: 'portal', flow: 'cancel' }]) {
+      assert.deepEqual(await store.subscription(ann, body), { status: 404, data: { error: 'You do not have a subscription to manage.' } });
+    }
+    assert.equal(store.fake.calls.length, calls);
+  });
+
+  test('resume clears the end date at Stripe and here', async () => {
+    const ray = await legacyUser('ray.resumes@example.com');
+    const sub = await store.subscribe(ray);
+    store.fake.setSubscription(sub.id, { cancel_at_period_end: true });
+    assert.equal((await store.subscription(ray, { action: 'refresh' })).data.subscription.cancel_at_period_end, true);
+
+    const res = await store.subscription(ray, { action: 'resume' });
+    assert.equal(res.status, 200, JSON.stringify(res.data));
+    assert.deepEqual([res.data.subscription.status, res.data.subscription.cancel_at_period_end], ['trial', false]);
+    assert.deepEqual(store.fake.callsTo('setCancelAtPeriodEnd').at(-1).args, { subscriptionId: sub.id, value: false });
+    assert.equal(store.fake.state.subscriptions.get(sub.id).cancel_at_period_end, false);
+    assert.equal((await stripeRows(ray))[0].cancel_at_period_end, false);
+  });
+
+  test('resume with nothing to resume', async () => {
+    const NOTHING = { status: 400, data: { error: 'Your subscription is not set to end, so there is nothing to resume.' } };
+    const sam = await legacyUser('sam.steady@example.com');
+    assert.deepEqual(await store.subscription(sam, { action: 'resume' }), NOTHING, 'no subscription at all');
+    await store.subscribe(sam);
+    await store.subscription(sam, { action: 'refresh' });
+    const calls = store.fake.callsTo('setCancelAtPeriodEnd').length;
+    assert.deepEqual(await store.subscription(sam, { action: 'resume' }), NOTHING, 'one that is not ending');
+    assert.equal(store.fake.callsTo('setCancelAtPeriodEnd').length, calls);
+  });
+
+  test('a Stripe failure in any of them is the same clear 502', async () => {
+    const zed = await legacyUser('zed.zapped@example.com');
+    const sub = await store.subscribe(zed);
+    await store.subscription(zed, { action: 'refresh' });
+    store.fake.setSubscription(sub.id, { cancel_at_period_end: true });
+    await store.subscription(zed, { action: 'refresh' });
+
+    store.fake.failNext('listSubscriptions');
+    assert.deepEqual(await store.subscription(zed, { action: 'refresh' }), PROVIDER_DOWN);
+    store.fake.failNext('createPortalSession');
+    assert.deepEqual(await store.subscription(zed, { action: 'portal' }), PROVIDER_DOWN);
+    store.fake.failNext('setCancelAtPeriodEnd');
+    assert.deepEqual(await store.subscription(zed, { action: 'resume' }), PROVIDER_DOWN);
+    assert.equal((await stripeRows(zed))[0].cancel_at_period_end, true, 'nothing changed here');
+  });
+});
