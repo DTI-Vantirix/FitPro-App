@@ -151,7 +151,10 @@ test('the owner sees the runner listed with an invite code, and a runner cannot 
   const card = owner.locator('section', { has: owner.getByRole('heading', { name: 'Who has access' }) });
   await expect(card).toBeVisible();
   await expect(card.getByRole('row').filter({ hasText: RUNNER.email })).toContainText('Invite code');
-  await expect(card.getByRole('row').filter({ hasText: ADMIN.email })).toContainText('Admin');
+  // The row of the admin's own account: found by its Person cell, because another row can
+  // now name the admin too ("Free access removed by admin@... on ...").
+  const adminRow = card.getByRole('row').filter({ has: owner.locator('td:first-child', { hasText: ADMIN.email }) });
+  await expect(adminRow).toContainText('Admin');
 
   await card.getByLabel('Search by email').fill('runner@');
   await expect(card.getByRole('row').filter({ hasText: ADMIN.email })).toHaveCount(0);
