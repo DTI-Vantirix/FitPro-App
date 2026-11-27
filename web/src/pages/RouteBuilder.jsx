@@ -25,8 +25,7 @@ export default function RouteBuilder() {
   // across ground the map has no path for.
   const [offroad, setOffroad] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-  const [fitSeed] = useState(0);
+  const [error, setError] = useState(null);
   const requestId = useRef(0);
 
   const distance = useMemo(() => (path.length > 1 ? pathMiles(path) : pathMiles(points)), [path, points]);
@@ -154,7 +153,8 @@ export default function RouteBuilder() {
           onAddPoint={addPoint}
           initialCenter={center}
           initialZoom={15}
-          fitKey={`${points.length}-${fitSeed}`}
+          // Never refit while drawing: the map stays at the zoom and place you chose.
+          fitKey="builder"
           className="h-[44vh] min-h-[260px] w-full"
         />
         <div className="absolute bottom-3 left-3 z-[500] flex rounded-full border border-border bg-background p-1">

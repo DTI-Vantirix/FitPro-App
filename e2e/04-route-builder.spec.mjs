@@ -67,3 +67,33 @@ test('an off-road leg can be planned and is saved on the route', async ({ browse
   await expect(page).toHaveURL(/\/routes$/);
   await context.close();
 });
+
+// The zoom levels of the map tiles on screen, read from their addresses (/z/x/y.png).
+const tileZooms = (page) =>
+  page.evaluate(() => [
+    ...new Set([...document.querySelectorAll('.leaflet-tile-pane img')].map((img) => Number(new URL(img.src).pathname.split('/')[1]))),
+  ]);
+
+test('adding points leaves the map at the zoom you chose', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  await signIn(page, RUNNER);
+  await expectSignedIn(page);
+  await page.goto('/routes/new');
+
+  const map = page.locator('.leaflet-container');
+  await expect(map).toBeVisible();
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  await expect.poll(() => tileZooms(page)).toEqual([16]);
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  await expect.poll(() => tileZooms(page)).toEqual([17]);
+
+  const box = await map.boundingBox();
+  await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.4);
+  await page.mouse.click(box.x + box.width * 0.6, box.y + box.height * 0.6);
+  await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.7);
+  await expect(page.getByText('3 points', { exact: true })).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(await tileZooms(page)).toEqual([17]);
+  await context.close();
+});
