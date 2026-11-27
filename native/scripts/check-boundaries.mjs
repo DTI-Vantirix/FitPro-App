@@ -90,10 +90,11 @@ assert(buildProp?.[1]?.android?.minSdkVersion === 26 && buildProp?.[1]?.android?
   'Android Health Connect requires min API 26 and compatible target SDK.');
 assert(!activities.includes('sendSyntheticWorkout') && !activities.includes('ingestActivity'), 'Real activities screen cannot upload data in Step 5.');
 // ---- Stage 1B: the run experience ----
-for (const f of ['app/signup.tsx', 'app/setup.tsx', 'app/(tabs)/home.tsx', 'app/(tabs)/settings.tsx', 'app/run-start.tsx', 'app/run-live.tsx', 'app/run-summary.tsx'])
+for (const f of ['app/signup.tsx', 'app/setup.tsx', 'app/(tabs)/home.tsx', 'app/(tabs)/settings.tsx', 'app/run-start.tsx', 'app/run-live.tsx', 'app/run-summary.tsx',
+  'app/(tabs)/routes.tsx', 'app/route-new.tsx'])
   assert(existsSync(join(native, f)), `Missing ${f}`);
 // Every screen past sign-up sits behind the same three checks: sign-in, consent, invite.
-for (const f of ['setup', '(tabs)/home', '(tabs)/settings', 'run-start', 'run-live', 'run-summary']) {
+for (const f of ['setup', '(tabs)/home', '(tabs)/settings', 'run-start', 'run-live', 'run-summary', '(tabs)/routes', 'route-new']) {
   const screen = readFileSync(join(native, `app/${f}.tsx`), 'utf8');
   assert(/export default function \w+\(\) \{\s*return <Gated/.test(screen), `app/${f}.tsx must render inside <Gated>.`);
 }
@@ -105,13 +106,20 @@ const signup = readFileSync(join(native, 'app/signup.tsx'), 'utf8');
 assert(!/expo-location|react-native-ble-plx|expo-notifications|health/i.test(signup.replace(/\/\*\*[\s\S]*?\*\//, '')), 'Sign-up must not touch device permissions.');
 // Runs are written through ingestActivity only; never the generic entity routes.
 const runFiles = sourceFiles(join(native, 'src/run'));
+// One exception, and it is a read: listServerRuns in src/run/api.ts lists the runner's own
+// runs with a single POST .../Run/query. That exact call may appear once, in that file only;
+// any other mention of the Run or Workout entity routes still fails.
+const RUN_READ = "request('POST', entityUrl('Run', '/query'), { token, body: { q: mine(ownerId), sort: '-started_at', limit } })";
+const runApiFile = join(native, 'src/run/api.ts');
+assert(readFileSync(runApiFile, 'utf8').split(RUN_READ).length <= 2, 'Runs may be read by one query only.');
 for (const file of [...runFiles, ...sourceFiles(join(native, 'app'))]) {
-  const text = readFileSync(file, 'utf8');
+  const source = readFileSync(file, 'utf8');
+  const text = file === runApiFile ? source.replace(RUN_READ, '') : source;
   assert(!/entities\/(Run|Workout)\b|entityUrl\('(Run|Workout)'/.test(text), `${file} writes runs outside ingestActivity.`);
   assert(!/HealthKit|health-connect|react-native-healthkit/.test(text) || !file.includes(`${sep}run${sep}`), `${file}: the run code must not request health permissions.`);
 }
 // The run logic is plain TypeScript: no React, React Native or Expo, so it is unit-tested as is.
-const PURE = ['zones', 'geo', 'tracker', 'cues', 'directions', 'engine', 'payload', 'format', 'queue', 'hr-parse', 'controller'];
+const PURE = ['zones', 'geo', 'tracker', 'cues', 'directions', 'engine', 'payload', 'format', 'queue', 'hr-parse', 'controller', 'route-draft'];
 for (const name of PURE) {
   const text = readFileSync(join(native, `src/run/${name}.ts`), 'utf8');
   for (const [, spec] of text.matchAll(importPattern)) assert(spec.startsWith('./'), `src/run/${name}.ts must stay pure but imports ${spec}.`);

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Redirect, useRouter } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { useSession } from '../src/auth/session';
@@ -30,7 +30,10 @@ function RunStart() {
   const account = useRunAccount();
   const active = useRun();
   const sensor = useHeartRateSensor();
-  const [mode, setMode] = useState<RunMode>('free');
+  // The Routes tab opens this screen with one of the runner's routes already chosen.
+  const { route: wantedRouteId } = useLocalSearchParams<{ route?: string }>();
+  const wanted = useRef(typeof wantedRouteId === 'string' && wantedRouteId ? wantedRouteId : null);
+  const [mode, setMode] = useState<RunMode>(wanted.current ? 'route' : 'free');
   const [routes, setRoutes] = useState<SavedRoute[] | null>(null);
   const [routesNote, setRoutesNote] = useState<string | null>(null);
   const [route, setRoute] = useState<SavedRoute | null>(null);
@@ -74,6 +77,15 @@ function RunStart() {
       if (directionsFor.current === next.id) setDirections(result);
     });
   }
+
+  // Once the list is in, the route asked for is chosen exactly as a tap on it would. Only once:
+  // after that the runner's own choice stands.
+  useEffect(() => {
+    if (!wanted.current || routes === null) return;
+    const match = routes.find((item) => item.id === wanted.current);
+    wanted.current = null;
+    if (match) chooseRoute(match);
+  }, [routes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const chosenRoute = mode === 'route' ? route : null;
   const zone: Zone | null = useMemo(
@@ -156,7 +168,7 @@ function RunStart() {
       {routes === null && <ActivityIndicator color={colors.accent} />}
       {!!routesNote && <Text style={shared.body}>{routesNote}</Text>}
       {routes !== null && routes.length === 0 && !routesNote &&
-        <Text style={shared.body}>You have no saved routes yet. Create one on the website, or choose a free run.</Text>}
+        <Text style={shared.body}>You have no saved routes yet. Draw one in the Routes tab, or choose a free run.</Text>}
       {(routes ?? []).map((item) => <Pressable key={item.id} accessibilityRole="radio" accessibilityState={{ selected: route?.id === item.id }}
         onPress={() => chooseRoute(item)} style={[shared.panel, local.route, route?.id === item.id && shared.selected]}>
         <Text style={shared.title}>{item.name}</Text>

@@ -71,7 +71,9 @@ routes the website uses; nothing here is new on the server. All need the bearer 
 | Delete the account | `DELETE /api/auth/me { password }` -> `{ ok: true, deleted: true }`; `401` when the password is wrong. Removes the user and every record they own |
 | Profile (`hr_max`, `threshold_sec`) | `POST /api/entities/Profile/query`, then `POST /api/entities/Profile` or `PUT /api/entities/Profile/:id` |
 | Pace zones | `POST /api/entities/PaceZone/query`; first-time setup writes the five zones with `PUT` or `POST /api/entities/PaceZone/bulk` (and `DELETE /api/entities/PaceZone/:id` to clear a non-standard set), exactly as the website's onboarding does |
-| Saved routes (read only) | `POST /api/entities/Route/query` |
+| Saved routes | `POST /api/entities/Route/query` to list them. The route builder saves one with `POST /api/entities/Route { name, distance_mi, points: [{ lat, lng, offroad? }], path: [{ lat, lng }], target_zone_id, target_zone_name }` (`distance_mi` to 2 decimals; `path` is the snapped line, or the points when there is none; no zone is `""`), and the Routes tab removes one with `DELETE /api/entities/Route/:id`. Same records and fields as the website's builder |
+| Road-following line while drawing a route | `POST /api/functions/snapRoute { points: [{ lat, lng, offroad? }] }` -> `{ snapped, path: [{ lat, lng }], distance_mi }`. 2 to 40 waypoints (`400` otherwise). A waypoint with `offroad: true` is joined to the one before by a straight line; the rest follow roads. `snapped: false` means a road section could not be routed and straight lines were used: the route still saves. The app sends one request per change and uses only the answer to the latest |
+| The runner's runs (read only) | `POST /api/entities/Run/query { q, sort: "-started_at", limit }` (default 40, at most 200), the query the website's Home page makes. The app reads `id`, `route_id`, `route_name`, `distance_mi`, `duration_sec`, `avg_pace_sec`, `started_at`, `target_zone_name`, `in_zone_pct`, `avg_hr`, `source`, `external_id`. The helper exists (`listServerRuns`); no screen calls it yet |
 | Turn directions for a route | `POST /api/functions/routeDirections { route_id }` -> `{ available, maneuvers: [{ index, instruction, verbal, type, lat, lng, at_mi }] }`; `404` for a route the caller does not own. A waypoint saved with `offroad: true` is reached in a straight line: its leg is not sent to the router and comes back as one maneuver of `type: 0` ("Leave the road and head straight for the next marker."). `available: false` means the route is still drawn but turns are not spoken |
 | Report a crash | `POST /api/client-errors { message, stack?, context?, platform?, app_version? }` -> `201 { ok: true }`. Signed-in users only, 20 an hour each; long fields are cut. Never send a token, location or health data in it |
 
@@ -79,7 +81,10 @@ Every query the app sends carries `q: { "created_by_id": "<the user's id>" }`. A
 token can read other people's records, and the app must only ever show and change the
 signed-in person's own.
 
-Runs and workouts are **never** read or written through `/api/entities` by the app.
+Runs and workouts are **never written** through `/api/entities` by the app: `ingestActivity`
+is the only write path. The one read is the `Run/query` above; workouts are not read at all.
+`native/scripts/check-boundaries.mjs` allows that single call and fails on any other use of
+the `Run` or `Workout` entity routes.
 
 ---
 

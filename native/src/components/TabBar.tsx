@@ -17,6 +17,7 @@ import type { IconName } from './Ui';
 
 export const TABS: { name: string; label: string; icon: IconName }[] = [
   { name: 'home', label: 'Today', icon: 'home' },
+  { name: 'routes', label: 'Routes', icon: 'map' },
   { name: 'activities', label: 'Activities', icon: 'activity' },
   { name: 'settings', label: 'Settings', icon: 'settings' },
 ];
