@@ -84,6 +84,13 @@ export default function RouteBuilder() {
     snap(next);
   };
 
+  // A dragged point keeps how it joins the route (road or off-road).
+  const movePoint = (index, at) => {
+    const next = points.map((p, i) => (i === index ? { ...p, lat: at.lat, lng: at.lng } : p));
+    setPoints(next);
+    snap(next);
+  };
+
   const undo = () => {
     const next = points.slice(0, -1);
     setPoints(next);
@@ -132,6 +139,7 @@ export default function RouteBuilder() {
         <div>
           <p className="eyebrow">
             {offroad ? 'Off-road: points join in a straight line' : 'Tap the map — the line follows the roads'}
+            {points.length > 0 && ' · drag a point to move it'}
           </p>
           <h1 className="font-heading text-lg leading-tight">Draw a route</h1>
         </div>
@@ -151,6 +159,7 @@ export default function RouteBuilder() {
           path={path}
           editable
           onAddPoint={addPoint}
+          onMovePoint={movePoint}
           initialCenter={center}
           initialZoom={15}
           // Never refit while drawing: the map stays at the zoom and place you chose.
