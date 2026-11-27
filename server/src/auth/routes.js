@@ -216,11 +216,11 @@ export function registerAuthRoutes(router, config) {
     mailLimit(`mail:${email}`);
     const user = await findByEmail(ctx.db, email);
     if (!user || user.email_verified_at) return { ok: true };
-    if (isOpen(ctx, user)) {
-      const mail = await mayMailOpenSignup(ctx, user.id);
-      refuseMail(mail);
-      if (!mail.send) return { ok: true };
-    }
+    // Whatever the reason an open sign-up is not mailed (one went out a minute ago, the
+    // address has had its share, sign-up is at its ceiling), the answer is the one an
+    // address with no account gets. A refusal here would tell anyone who asks that the
+    // address has an unconfirmed account.
+    if (isOpen(ctx, user) && !(await mayMailOpenSignup(ctx, user.id)).send) return { ok: true };
     return { ok: true, ...(await sendVerifyCode(ctx, user)) };
   });
 

@@ -2931,6 +2931,8 @@ describe('AccessGrant is history only', () => {
 describe('open sign-up cannot be used to send mail', () => {
   let open; // SUBSCRIPTIONS=on
   const BUSY_INBOX = { status: 429, data: { error: 'Too many emails requested. Try again later.' } };
+  // "Resend" for an open sign-up that will not be mailed: the answer an unknown address gets.
+  const QUIET = { status: 200, data: { ok: true } };
   // Signing in before confirming: what is said when a code went out, and when none did.
   const CODE_SENT = { status: 403, error: 'Verify your email first. We just sent you a new code.' };
   const NO_CODE_SENT = {
@@ -2991,7 +2993,8 @@ describe('open sign-up cannot be used to send mail', () => {
     assert.ok(third.data.dev_code, 'the sign-in that re-sends a code is the third');
     await later(email, '2 minutes');
 
-    assert.deepEqual(await resend(open, email), BUSY_INBOX);
+    // "resend" says nothing either way (see the next test); sign-up with the address is refused
+    assert.deepEqual(await resend(open, email), QUIET);
     assert.deepEqual(await register(open, email, '203.0.113.2'), BUSY_INBOX);
     // signing in is not refused for it: the person is sent to enter the code they have
     assert.deepEqual(await login(open, email), NO_CODE_SENT);
@@ -3015,7 +3018,31 @@ describe('open sign-up cannot be used to send mail', () => {
     assert.ok((await resend(open, email)).data.dev_code, 'the eighth');
     await later(email, '2 minutes');
     assert.equal(await codesSent(email), 8);
-    assert.deepEqual(await resend(open, email), BUSY_INBOX, 'the ninth in a day');
+    assert.deepEqual(await resend(open, email), QUIET, 'the ninth in a day is not sent');
+    assert.equal(await codesSent(email), 8);
+  });
+
+  test('"resend" answers the same for an address with no account and for one that has had its share', async () => {
+    const known = 'has.account@example.com';
+    const unknown = 'no.account.at.all@example.com';
+    await register(open, known, '203.0.113.4');
+    // three codes in the hour: nothing more will be sent to this address
+    await db.query(
+      `insert into auth_codes (user_id, purpose, code_hash, expires_at, used_at, created_date)
+       select u.id, 'verify_email', 'x', now(), now(), now() - make_interval(mins => m)
+         from users u, generate_series(10, 20, 10) as m where u.email = $1 returning id`,
+      [known]
+    );
+    await later(known, '2 minutes');
+    assert.equal(await codesSent(known), 3);
+    // someone probing which addresses have accounts learns nothing from the answers
+    for (let i = 0; i < 4; i++) {
+      const a = await resend(open, known);
+      const b = await resend(open, unknown);
+      assert.deepEqual(a, QUIET, `known, try ${i + 1}`);
+      assert.deepEqual(b, QUIET, `unknown, try ${i + 1}`);
+    }
+    assert.equal(await codesSent(known), 3, 'and nothing was sent');
   });
 
   test('at most ten code-less sign-ups an hour from one network', async () => {
@@ -3043,7 +3070,8 @@ describe('open sign-up cannot be used to send mail', () => {
       assert.deepEqual(await register(small, 'crowd.3@example.com', '203.0.113.70'), BUSY);
       assert.equal((await db.query(`select id from users where email = 'crowd.3@example.com'`, [])).length, 0, 'no account is made');
       await later('crowd.0@example.com', '2 minutes');
-      assert.deepEqual(await resend(small, 'crowd.0@example.com'), BUSY, 'a resend is one of those emails too');
+      assert.deepEqual(await resend(small, 'crowd.0@example.com'), QUIET, 'a resend is one of those emails too, and is quietly not sent');
+      assert.equal(await codesSent('crowd.0@example.com'), 1);
       assert.deepEqual(await login(small, 'crowd.0@example.com'), NO_CODE_SENT, 'and so is the sign-in that would re-send one');
       // a sign-up with an invite code is not part of the ceiling
       assert.equal((await register(small, 'crowd.invited@example.com', '203.0.113.71', { invite_code: await mintCode() })).status, 200);

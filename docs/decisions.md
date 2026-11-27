@@ -106,7 +106,11 @@ They were left out of stage 1 on purpose. None was about Apple, so none waits fo
    (the answer is the same `{ ok: true }`); at most 10 such sign-ups an hour from one
    network; and at most `OPEN_SIGNUP_MAILS_PER_HOUR` (default 300) such emails an hour
    across everyone, beyond which sign-up answers "Sign-up is busy right now" and one
-   error report tells the owner. Sign-up with an invite code, and everything while the
+   error report tells the owner. "Resend" never refuses an open sign-up for any of
+   these: it answers `{ ok: true }` and sends nothing, exactly as for an address with no
+   account, so the answer does not reveal that an address has an unconfirmed account.
+   Signing in before confirming still answers 403 `needs_verification`, and only says a
+   code was sent when one was. Sign-up with an invite code, and everything while the
    switch is off, keeps the earlier limits and messages.
 5. **The phone's "confirm your email" screen asks for the password** when it is reached
    from sign-in (`475410e`), and sends it with the code.
