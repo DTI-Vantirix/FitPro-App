@@ -69,8 +69,8 @@ assert(/^~58\.0\.\d+$/.test(pkg.dependencies['expo-build-properties']), 'Expecte
 assert(!Object.keys(pkg.dependencies).some((name) => /analytics|sentry|posthog|supabase|expo-health-connect/i.test(name)), 'Unexpected data collection or deprecated Android Health dependency.');
 const cfg = JSON.parse(readFileSync(join(native, 'app.json'), 'utf8'));
 const healthPlugin = cfg.expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === '@kingstinct/react-native-healthkit');
-assert(healthPlugin && healthPlugin[1].background === true && healthPlugin[1].NSHealthUpdateUsageDescription === false,
-  'Read-only HealthKit background entitlement must be configured for native scheduler testing.');
+assert(healthPlugin && healthPlugin[1].background === true && /does not save anything to Apple Health/.test(healthPlugin[1].NSHealthUpdateUsageDescription),
+  'Read-only HealthKit: Apple rejects a build without the write purpose string (ITMS-90683), and it must say nothing is written.');
 const apple = readFileSync(join(native, 'src/health/apple-adapter.ts'), 'utf8');
 assert(apple.includes('hk.requestAuthorization') && apple.includes('toRead:'), 'Apple Health read authorization missing.');
 assert(!apple.includes('toShare:') && !apple.includes('saveWorkoutSample') && !apple.includes('enableBackgroundDelivery'), 'No write/background features allowed.');
