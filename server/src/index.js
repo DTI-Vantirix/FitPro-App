@@ -2,6 +2,7 @@ import http from 'node:http';
 import { syncInviteEntitlements } from './access.js';
 import { createApp } from './app.js';
 import { bootstrapAdmin } from './auth/bootstrap.js';
+import { startTrialReminders } from './billing/reminders.js';
 import { loadConfig } from './config.js';
 import { createDb } from './db.js';
 import { loadRegistry } from './entities/registry.js';
@@ -48,6 +49,10 @@ server.listen(config.port, () => {
   console.log(`VantraRun API listening on http://localhost:${config.port} (${config.production ? 'production' : 'development'})`);
   console.log(`[uploads] stored ${config.storage.s3 ? `in the bucket "${config.storage.s3.bucket}"` : `on disk at ${config.uploadDir}`}`);
 });
+
+// The "your trial ends in two days" email: once now, then every hour. Only where Stripe
+// is set up; without it there are no trials to remind anyone about.
+if (config.stripe.ready) startTrialReminders({ db, config });
 
 const shutdown = () => {
   server.close(() => db.close().then(() => process.exit(0)));

@@ -12,6 +12,7 @@ import { createApp } from '../src/app.js';
 import { SERVER_ROOT, loadConfig } from '../src/config.js';
 import { bootstrapAdmin } from '../src/auth/bootstrap.js';
 import { hashPassword } from '../src/auth/crypto.js';
+import { formatDay, sendTrialReminders } from '../src/billing/reminders.js';
 import { loadRegistry } from '../src/entities/registry.js';
 import { migrate } from '../src/migrate.js';
 import { createPsqlDb } from './psql-db.js';
@@ -2710,5 +2711,112 @@ describe('your data: an account with a subscription', () => {
     assert.deepEqual(res, { status: 200, data: { received: true } });
     assert.equal(store.fake.callsTo('listSubscriptions').length, calls);
     assert.equal((await db.query(`select id from entitlements where external_id = $1`, [sub.id])).length, 0);
+  });
+});
+
+describe('trial reminder', () => {
+  const HOUR_MS = 60 * 60 * 1000;
+  let seq = 0;
+  // An account with one Stripe row, written straight into the table.
+  async function withRow(name, { status = 'trial', plan = 'monthly', endsInHours = 36, cancelled = false, source = 'stripe' } = {}) {
+    const who = await legacyUser(`${name}@example.com`);
+    seq += 1;
+    await db.query(
+      `insert into entitlements (user_id, source, status, plan, expires_at, cancel_at_period_end, external_id)
+       values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+      [who.user.id, source, status, source === 'stripe' ? plan : null, source === 'stripe' ? new Date(Date.now() + endsInHours * HOUR_MS).toISOString() : null, cancelled, source === 'stripe' ? `sub_reminder_${seq}` : null]
+    );
+    return who;
+  }
+  // Collects what would have been mailed; `answer` is what the mail provider said.
+  function outbox(answer = { delivered: true }) {
+    const sent = [];
+    return { sent, send: async (_config, message) => (sent.push(message), answer), to: (who) => sent.filter((m) => m.to === who.user.email) };
+  }
+  const sweep = (box, config = testConfig, now = new Date()) => sendTrialReminders({ db, config, now, send: box.send });
+  const claimed = async (who) => (await entitlementsOf(who.user.id))[0].trial_reminder_sent_at;
+
+  test('a trial ending within two days gets one reminder', async () => {
+    const mona = await withRow('mona.monthly', { plan: 'monthly', endsInHours: 36 });
+    const anna = await withRow('anna.annual', { plan: 'annual', endsInHours: 47 });
+    const box = outbox();
+    const count = await sweep(box);
+    assert.ok(count >= 2);
+
+    const [monthly] = box.to(mona);
+    const [row] = await entitlementsOf(mona.user.id);
+    const day = formatDay(row.expires_at);
+    assert.match(day, /^[A-Z][a-z]+ \d{1,2}, \d{4}$/);
+    assert.equal(monthly.subject, `Your VantraRun free trial ends on ${day}`);
+    assert.equal(
+      monthly.text,
+      `Your VantraRun free trial ends on ${day}. On that day your card will be charged $4.99 for the monthly plan, and it renews every month at that price until you cancel.\n\n` +
+        `To cancel before you are charged, sign in at ${testConfig.appUrl}/settings and choose "Cancel subscription". You keep access until the trial ends and pay nothing.\n\n` +
+        'Questions: info@dtisys.com'
+    );
+    const [annual] = box.to(anna);
+    assert.match(annual.text, /your card will be charged \$49\.99 for the annual plan, and it renews every year at that price until you cancel\./);
+    assert.ok(await claimed(mona));
+
+    // a second sweep, and a third an hour later, send nothing more
+    const again = outbox();
+    assert.equal(await sweep(again), 0);
+    assert.equal(await sweep(again, testConfig, new Date(Date.now() + HOUR_MS)), 0);
+    assert.equal(again.sent.length, 0);
+    assert.equal(box.to(mona).length, 1);
+  });
+
+  test('no reminder three days out, none after the trial has ended', async () => {
+    const early = await withRow('earl.early', { endsInHours: 72 });
+    const late = await withRow('lane.late', { endsInHours: -1 });
+    const box = outbox();
+    await sweep(box);
+    assert.equal(box.to(early).length, 0);
+    assert.equal(box.to(late).length, 0);
+    assert.equal(await claimed(early), null);
+    // a day later the first one is inside the two days
+    await sweep(box, testConfig, new Date(Date.now() + 25 * HOUR_MS));
+    assert.equal(box.to(early).length, 1);
+  });
+
+  test('no reminder for a trial already cancelled, an active subscription or a free pass', async () => {
+    const cancelled = await withRow('cal.cancelled', { cancelled: true });
+    const active = await withRow('ada.active', { status: 'active' });
+    const free = await withRow('finn.free', { source: 'admin', status: 'active' });
+    const expired = await withRow('exa.expired', { status: 'expired' });
+    const box = outbox();
+    await sweep(box);
+    for (const who of [cancelled, active, free, expired]) {
+      assert.equal(box.to(who).length, 0, who.user.email);
+      assert.equal(await claimed(who), null);
+    }
+  });
+
+  test('a refused message is tried again', async () => {
+    const rita = await withRow('rita.refused');
+    const withKey = { ...testConfig, mail: { ...testConfig.mail, resendApiKey: 're_test_not_real' } };
+    const refused = outbox({ delivered: false });
+    const before = await sweep(refused, withKey);
+    assert.equal(refused.to(rita).length, 1, 'it was attempted');
+    assert.equal(before, 0, 'and not counted as sent');
+    assert.equal(await claimed(rita), null, 'the claim was cleared');
+
+    const broken = { sent: [], send: async () => { throw new Error('mail provider timed out'); } };
+    assert.equal(await sweep(broken, withKey), 0);
+    assert.equal(await claimed(rita), null);
+
+    const ok = outbox();
+    assert.equal(await sweep(ok, withKey), 1);
+    assert.equal(ok.to(rita).length, 1);
+    assert.ok(await claimed(rita));
+  });
+
+  test('without a mail key the reminder is printed like every other email, once', async () => {
+    const dev = await withRow('devon.dev');
+    // no key: sendMail answers { delivered: false } after printing, which is not a refusal
+    const box = outbox({ delivered: false });
+    assert.equal(await sweep(box), 1);
+    assert.ok(await claimed(dev));
+    assert.equal(await sweep(box), 0);
   });
 });
