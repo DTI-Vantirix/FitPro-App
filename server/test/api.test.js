@@ -556,14 +556,39 @@ describe('access', () => {
 
   test('the database refuses an unknown source or status, and a second row for one subscription', async () => {
     const user = await userRow(bob.user.id);
-    const insert = (source, status, externalId) =>
-      db.query('insert into entitlements (user_id, source, status, external_id) values ($1, $2, $3, $4) returning id', [user.id, source, status, externalId]);
+    const insert = (source, status, externalId, expiresAt = daysFromNow(30)) =>
+      db.query('insert into entitlements (user_id, source, status, external_id, expires_at) values ($1, $2, $3, $4, $5) returning id', [
+        user.id, source, status, externalId, expiresAt,
+      ]);
     await assert.rejects(insert('paypal', 'active', null));
     await assert.rejects(insert('stripe', 'paused', null));
-    await assert.rejects(insert('invite', 'active', null), 'bob already has his invite row');
+    await assert.rejects(insert('invite', 'active', null, null), 'bob already has his invite row');
     await insert('apple', 'expired', 'orig-tx-1');
     await assert.rejects(insert('apple', 'active', 'orig-tx-1'));
     await db.query(`delete from entitlements where user_id = $1 and source = 'apple' returning id`, [user.id]);
+  });
+
+  test('a paid entitlement must say when it ends; only a free pass may be open-ended', async () => {
+    const pia = await legacyUser('pia.paid@example.com');
+    const user = await userRow(pia.user.id);
+    const insert = (source, status, expiresAt) =>
+      db.query('insert into entitlements (user_id, source, status, external_id, expires_at) values ($1, $2, $3, $4, $5) returning id', [
+        user.id, source, status, source === 'stripe' || source === 'apple' ? `${source}-pia` : null, expiresAt,
+      ]);
+    for (const source of ['stripe', 'apple']) {
+      for (const status of ['trial', 'active', 'grace', 'expired', 'revoked']) {
+        await assert.rejects(insert(source, status, null), /check constraint|not allowed/i, `${source} ${status} with no end date`);
+      }
+    }
+    assert.equal(await hasAccess(db, user), false);
+    const [paid] = await insert('stripe', 'active', daysFromNow(30));
+    assert.equal(await hasAccess(db, user), true);
+    await assert.rejects(db.query('update entitlements set expires_at = null where id = $1 returning id', [paid.id]), 'nor can the end date be taken away later');
+    await db.query('delete from entitlements where id = $1 returning id', [paid.id]);
+
+    await insert('admin', 'active', null);
+    await insert('invite', 'active', null);
+    assert.equal(await hasAccess(db, user), true);
   });
 
   test('the migration carries redeemed invite codes over, once', async () => {

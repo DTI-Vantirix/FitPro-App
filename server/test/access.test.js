@@ -7,7 +7,8 @@ import { GRACE_DAYS, isLive } from '../src/access.js';
 const NOW = new Date('2026-11-27T12:00:00Z');
 const DAY = 24 * 60 * 60 * 1000;
 const daysFromNow = (days) => new Date(NOW.getTime() + days * DAY).toISOString();
-const row = (status, days) => ({ status, expires_at: days === undefined ? null : daysFromNow(days) });
+// A free pass unless a source is given: the tests of the date rule are about the dates.
+const row = (status, days, source = 'invite') => ({ source, status, expires_at: days === undefined ? null : daysFromNow(days) });
 
 describe('isLive', () => {
   test('the renewal allowance is three days', () => {
@@ -32,8 +33,8 @@ describe('isLive', () => {
 
   test('the allowance ends exactly three days after the expiry', () => {
     const expires = new Date(NOW.getTime() - GRACE_DAYS * DAY);
-    assert.equal(isLive({ status: 'active', expires_at: expires }, NOW), true, 'on the last moment');
-    assert.equal(isLive({ status: 'active', expires_at: new Date(expires.getTime() - 1000) }, NOW), false, 'one second later');
+    assert.equal(isLive({ source: 'stripe', status: 'active', expires_at: expires }, NOW), true, 'on the last moment');
+    assert.equal(isLive({ source: 'stripe', status: 'active', expires_at: new Date(expires.getTime() - 1000) }, NOW), false, 'one second later');
   });
 
   test('revoked and expired are never live, whatever the date says', () => {
@@ -52,19 +53,36 @@ describe('isLive', () => {
     }
   });
 
+  test('a paid row with no end date is never live: only a free pass may be open-ended', () => {
+    for (const source of ['stripe', 'apple']) {
+      for (const status of ['trial', 'active', 'grace']) {
+        assert.equal(isLive(row(status, undefined, source), NOW), false, `${source} ${status}, no end date`);
+        assert.equal(isLive({ source, status }, NOW), false, `${source} ${status}, end date missing altogether`);
+        assert.equal(isLive(row(status, 1, source), NOW), true, `${source} ${status}, ending tomorrow`);
+        assert.equal(isLive(row(status, -2, source), NOW), true, `${source} ${status}, inside the allowance`);
+        assert.equal(isLive(row(status, -4, source), NOW), false, `${source} ${status}, past the allowance`);
+      }
+    }
+    for (const source of ['invite', 'admin']) {
+      assert.equal(isLive(row('active', undefined, source), NOW), true, `${source}, no end date`);
+    }
+    assert.equal(isLive({ status: 'active', expires_at: null }, NOW), false, 'a row that does not say where it came from');
+    assert.equal(isLive({ source: 'paypal', status: 'active', expires_at: null }, NOW), false, 'an unknown source');
+  });
+
   test('a date as a Date object or as text gives the same answer', () => {
-    assert.equal(isLive({ status: 'active', expires_at: new Date(daysFromNow(-4)) }, NOW), false);
-    assert.equal(isLive({ status: 'active', expires_at: new Date(daysFromNow(1)) }, NOW), true);
+    assert.equal(isLive({ source: 'apple', status: 'active', expires_at: new Date(daysFromNow(-4)) }, NOW), false);
+    assert.equal(isLive({ source: 'apple', status: 'active', expires_at: new Date(daysFromNow(1)) }, NOW), true);
   });
 
   test('a missing row, an unknown status or an unreadable date is not live', () => {
     assert.equal(isLive(null, NOW), false);
-    assert.equal(isLive({ status: 'paused', expires_at: null }, NOW), false);
-    assert.equal(isLive({ status: 'active', expires_at: 'not a date' }, NOW), false);
+    assert.equal(isLive({ source: 'invite', status: 'paused', expires_at: null }, NOW), false);
+    assert.equal(isLive({ source: 'stripe', status: 'active', expires_at: 'not a date' }, NOW), false);
   });
 
   test('without a given moment it uses the current time', () => {
-    assert.equal(isLive({ status: 'active', expires_at: new Date(Date.now() + DAY) }), true);
-    assert.equal(isLive({ status: 'active', expires_at: new Date(Date.now() - 4 * DAY) }), false);
+    assert.equal(isLive({ source: 'stripe', status: 'active', expires_at: new Date(Date.now() + DAY) }), true);
+    assert.equal(isLive({ source: 'stripe', status: 'active', expires_at: new Date(Date.now() - 4 * DAY) }), false);
   });
 });

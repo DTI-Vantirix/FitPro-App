@@ -86,7 +86,8 @@ per source of access per account:
 | `stripe`, `apple` | a paid subscription | not built yet (stages 2 and 3); the table and the check already allow for them |
 
 A row is live when its `status` is `trial`, `active` or `grace` and it is not more than
-three days past `expires_at` (`GRACE_DAYS`; free passes have no expiry). The three days
+three days past `expires_at` (`GRACE_DAYS`). Free passes have no expiry; a paid row
+must have one (the table refuses a paid row without it, and one is never treated as live). The three days
 are there so a renewal notice that arrives late never locks out someone who paid. With
 more than one live row, access holds while any of them is good; the paid one is the
 one reported. Admins need no row.

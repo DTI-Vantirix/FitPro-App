@@ -14,10 +14,14 @@ const LIVE_STATUSES = new Set(['trial', 'active', 'grace']);
 const PAID_SOURCES = new Set(['stripe', 'apple']);
 const FREE_SOURCES = new Set(['invite', 'admin']);
 
-/** Is this entitlement row good at `now`? Free passes have no expiry. */
+/**
+ * Is this entitlement row good at `now`? Only a free pass may have no end date. A paid
+ * row without one is never good: it would be access for ever from one missing value.
+ * (The table refuses such a row too; this is the same rule where the decision is made.)
+ */
 export function isLive(row, now = new Date()) {
   if (!row || !LIVE_STATUSES.has(row.status)) return false;
-  if (row.expires_at === null || row.expires_at === undefined) return true;
+  if (row.expires_at === null || row.expires_at === undefined) return FREE_SOURCES.has(row.source);
   const end = new Date(row.expires_at).getTime();
   if (Number.isNaN(end)) return false;
   return now.getTime() <= end + GRACE_MS;

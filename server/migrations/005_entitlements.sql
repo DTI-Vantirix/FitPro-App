@@ -19,7 +19,9 @@ create table entitlements (
   external_id          text,
   -- the admin who granted it, or the invite code used
   granted_by           text,
-  note                 text
+  note                 text,
+  -- Only a free pass may be open-ended. A paid row always says when its period ends.
+  constraint entitlements_paid_has_end check (source in ('invite', 'admin') or expires_at is not null)
 );
 create index entitlements_user_idx on entitlements (user_id);
 -- One row per subscription at the payment provider.
