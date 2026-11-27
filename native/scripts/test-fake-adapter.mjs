@@ -53,7 +53,7 @@ activities[0].routeName = 'CHANGED BY TEST';
 assert.equal((await adapter.readActivities())[0].routeName, 'Demo park loop');
 // Reload-feedback regression: a fast, repeatable provider must still show
 // proof that a read completed, instead of silently repainting identical cards.
-const screen = readFileSync(resolve(import.meta.dirname, '../app/activities.tsx'), 'utf8');
+const screen = readFileSync(resolve(import.meta.dirname, '../app/(tabs)/activities.tsx'), 'utf8');
 const controls = readFileSync(resolve(import.meta.dirname, '../src/components/Ui.tsx'), 'utf8');
 assert.match(screen, /setReadCount\(\(value\) => value \+ 1\)/, 'Reload button must trigger a new adapter read');
 assert.match(screen, /lastSuccessfulRead/, 'Completed reads must have persistent on-screen status');

@@ -70,7 +70,7 @@ if (actualKey) {
   await assert.rejects(state.loadAutoSyncState(), /paused/);
 }
 const screen = readFileSync(resolve(root, 'src/ingestion/manual-import-panel.tsx'), 'utf8');
-const activities = readFileSync(resolve(root, 'app/activities.tsx'), 'utf8');
+const activities = readFileSync(resolve(root, 'app/(tabs)/activities.tsx'), 'utf8');
 const session = readFileSync(resolve(root, 'src/auth/session.tsx'), 'utf8');
 assert(screen.includes('setAutoSyncEnabled') && screen.includes('eligibleAutoActivities'), 'Auto opt-in and selection UI present');
 assert(screen.includes("onForegroundResume?.()"), 'Foreground resume triggers a health refresh');

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
-import { Action, ErrorNotice, SectionHeading } from '../src/components/Ui';
+import { Action, ErrorNotice, Heading, Label, StatRow } from '../src/components/Ui';
 import { runStore } from '../src/run/device/run-files';
 import { formatDuration, formatMiles } from '../src/run/format';
 import { retryRun, type StoredRun } from '../src/run/queue';
@@ -10,14 +10,7 @@ import { RunMap } from '../src/run/ui/RunMap';
 import { Brand, Gated, Loading, Note, Panel, Screen, styles as shared } from '../src/run/ui/Screen';
 import { useRunAccount, useWaitingRuns } from '../src/run/use-run';
 import { formatPace } from '../src/run/zones';
-import { colors } from '../src/theme';
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return <View style={styles.stat}>
-    <Text style={styles.statValue}>{value}</Text>
-    <Text style={styles.statLabel}>{label}</Text>
-  </View>;
-}
+import { display, stat } from '../src/typography';
 
 function RunSummary() {
   const router = useRouter();
@@ -65,26 +58,32 @@ function RunSummary() {
   const hasMap = s.points.length >= 2;
   return <Screen>
     <Brand />
-    <SectionHeading kicker="RUN COMPLETE" title={s.routeName}
-      subtitle={new Date(s.startedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} />
-
-    <View style={styles.grid}>
-      <Stat label="DISTANCE (MI)" value={formatMiles(s.distanceMi)} />
-      <Stat label="TIME" value={formatDuration(s.durationSec)} />
-      <Stat label="AVG PACE /MI" value={formatPace(s.avgPaceSec)} />
+    <View style={styles.hero}>
+      <Label>Run complete · {new Date(s.startedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</Label>
+      <Heading size={22}>{s.routeName}</Heading>
+      <View style={styles.distance}>
+        <Text style={display(104)}>{formatMiles(s.distanceMi)}</Text>
+        <Label style={styles.distanceUnit}>mi</Label>
+      </View>
     </View>
 
+    <StatRow boxed size={26} items={[
+      { label: 'Time', value: formatDuration(s.durationSec) },
+      { label: 'Avg pace', value: formatPace(s.avgPaceSec), unit: '/mi' },
+      { label: 'Pace in zone', value: s.paceInZonePct != null ? `${s.paceInZonePct}%` : '–', highlight: s.paceInZonePct != null },
+    ]} />
+
     <Panel>
-      <Text style={shared.label}>HEART RATE</Text>
-      {s.hr ? <View style={styles.grid}>
-        <Stat label="MAX" value={String(s.hr.max)} />
-        <Stat label="MIN" value={String(s.hr.min)} />
-        <Stat label="AVG" value={String(s.hr.avg)} />
-      </View> : <Text style={shared.body}>No heart-rate sensor was connected for this run.</Text>}
+      <Heading size={16}>Heart rate</Heading>
+      {s.hr ? <StatRow items={[
+        { label: 'Max', value: String(s.hr.max), unit: 'bpm' },
+        { label: 'Min', value: String(s.hr.min), unit: 'bpm' },
+        { label: 'Avg', value: String(s.hr.avg), unit: 'bpm' },
+      ]} /> : <Text style={shared.body}>No heart-rate sensor was connected for this run.</Text>}
     </Panel>
 
     <Panel>
-      <Text style={shared.label}>TIME IN ZONE · {s.zone.name.toUpperCase()}</Text>
+      <Heading size={16}>Time in zone · {s.zone.name}</Heading>
       <Text style={shared.body}>
         Pace {formatPace(s.zone.fast_sec)}–{formatPace(s.zone.slow_sec)} /mi: {s.paceInZonePct != null ? `${s.paceInZonePct}% of the run` : 'not measured'}
       </Text>
@@ -95,7 +94,7 @@ function RunSummary() {
     </Panel>
 
     <Panel>
-      <Text style={shared.label}>MILE SPLITS</Text>
+      <Heading size={16}>Mile splits</Heading>
       {s.splits.length === 0
         ? <Text style={shared.body}>No full mile completed.</Text>
         : s.splits.map((split) => <View key={split.mile} style={shared.row}>
@@ -107,7 +106,7 @@ function RunSummary() {
     {hasMap && <View style={styles.map}><RunMap live={false} track={s.points} /></View>}
 
     <Panel>
-      <Text style={shared.label}>SAVING</Text>
+      <Heading size={16}>Saving</Heading>
       {run.status === 'uploaded' && <Text style={shared.body}>Saved to VantraRun. It is on the website too.</Text>}
       {run.status === 'pending' && <>
         <Text style={shared.body}>Waiting for a connection. The run is safe on this phone and is sent automatically.</Text>
@@ -128,12 +127,11 @@ function RunSummary() {
 }
 
 const styles = StyleSheet.create({
-  grid: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  stat: { flex: 1, backgroundColor: colors.panel, borderColor: colors.panelBorder, borderWidth: 1, borderRadius: 14, paddingVertical: 14, alignItems: 'center', gap: 4 },
-  statValue: { color: colors.text, fontSize: 24, fontWeight: '900', fontVariant: ['tabular-nums'] },
-  statLabel: { color: colors.subtle, fontSize: 10, letterSpacing: 1.2, fontWeight: '800' },
-  split: { color: colors.text, fontWeight: '800', fontSize: 15, fontVariant: ['tabular-nums'] },
-  map: { height: 240, marginBottom: 16 },
+  hero: { gap: 8, marginBottom: 18, paddingHorizontal: 4 },
+  distance: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 6 },
+  distanceUnit: { fontSize: 13 },
+  split: { ...stat(20) },
+  map: { height: 240, marginBottom: 14 },
 });
 
 export default function RunSummaryScreen() {

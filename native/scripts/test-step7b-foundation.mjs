@@ -43,7 +43,7 @@ assert.equal(selectBackgroundCandidates(valid, due, null, [], day).length, 0);
 assert.equal(selectBackgroundCandidates(valid, due, 'bad', [], day).length, 0);
 const panel = readFileSync(new URL('../src/ingestion/background-readiness-panel.tsx', import.meta.url),'utf8');
 assert(panel.includes('Historical Step 7B.1 foundation snapshot') && panel.includes('No background health-sync tasks scheduled at Step 7B.1'));
-const activities = readFileSync(new URL('../app/activities.tsx', import.meta.url), 'utf8');
+const activities = readFileSync(new URL('../app/(tabs)/activities.tsx', import.meta.url), 'utf8');
 assert(activities.includes('<BackgroundReadinessPanel ') && activities.includes('const authorized = Boolean('));
 console.log('PASS: Step 7B background sync remains OFF by default; all consent, access, provider, native and OS safety gates enforced.');
 console.log('PASS: dry-run activity selection is source-scoped, bounded, opt-in-only, recent-only, and duplicate-safe.');

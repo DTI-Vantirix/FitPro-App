@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Redirect, useRouter } from 'expo-router';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { login, resendSmsMfa, verifyMfa, type MfaChallenge, type MfaMethod } from '../src/auth/auth-api';
 import { useSession } from '../src/auth/session';
-import { Action, ErrorNotice, Field, SectionHeading } from '../src/components/Ui';
+import { Action, AuthHero, Card, ErrorNotice, Field, Screen } from '../src/components/Ui';
 import { colors } from '../src/theme';
+import { type } from '../src/typography';
 
 export default function SignIn() {
   const router = useRouter();
@@ -36,9 +37,9 @@ export default function SignIn() {
         setChallenge(result.challenge);
         setMethod(result.challenge.methods.includes('totp') ? 'totp' : 'sms');
         if (result.challenge.nextStep === 'enroll') {
-          setError('The VantraRun API requires MFA enrollment. This Step 1 shell does not enroll new factors. Finish enrollment in the VantraRun web app, then return here.');
+          setError('Your account needs two-step sign-in set up before you can sign in here. Set it up on the VantraRun website, then come back.');
         } else if (result.challenge.methods.length === 0) {
-          setError('MFA required but no supported totp/sms method was returned. Stop.');
+          setError('Two-step sign-in is required, but your account has no authenticator or SMS method this app supports.');
         }
       }
     } catch (e) {
@@ -87,46 +88,39 @@ export default function SignIn() {
 
   const unsupportedMfa = challenge?.nextStep === 'enroll' || challenge?.methods.length === 0;
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-        <Text style={styles.brand}>VANTRARUN</Text>
-        <View style={styles.topRule} />
-        <SectionHeading kicker="SIGN IN" title={challenge ? 'Verify your identity' : 'Welcome back.'}
-          subtitle={challenge ? 'Complete the same multi-factor login used by the VantraRun web app.'
-            : 'Sign into your VantraRun account.'} />
-        <ErrorNotice message={error ?? sessionError} />
+    <Screen>
+      <AuthHero title={challenge ? 'Verify it is you' : 'Welcome back'}
+        subtitle={challenge ? 'Enter the code from your second sign-in step.' : 'Sign in to your account.'} />
+      <ErrorNotice message={error ?? sessionError} />
+      <Card style={styles.card}>
         {!challenge ? (
           <>
-            <Field label="EMAIL" value={email} onChangeText={setEmail} keyboardType="email-address" />
-            <Field label="PASSWORD" value={password} onChangeText={setPassword} secure />
-            <Action label="Sign into VantraRun" onPress={attemptLogin} busy={busy} disabled={!email.trim() || !password} />
-            <Action label="Create an account with an invite code" onPress={() => router.push('/signup')} secondary />
-            <Text style={styles.note}>VantraRun is invite-only for now. Sign in with your email and password, or create an account with the code you were given.</Text>
+            <Field label="Email" value={email} onChangeText={setEmail} keyboardType="email-address" placeholder="you@example.com" />
+            <Field label="Password" value={password} onChangeText={setPassword} secure />
+            <Action label="Sign in" onPress={attemptLogin} busy={busy} disabled={!email.trim() || !password} />
+            <Action label="Create an account with an invite code" onPress={() => router.push('/signup')} variant="ghost" />
           </>
         ) : (
           <>
-            <Text style={styles.note}>Required MFA method: {challenge.methods.join(' or ') || 'unavailable'}</Text>
+            <Text style={type.body}>Sign-in method: {challenge.methods.join(' or ') || 'unavailable'}</Text>
             {challenge.methods.includes('totp') && <Action label="Use authenticator code" onPress={() => setMethod('totp')} secondary={method !== 'totp'} />}
             {challenge.methods.includes('sms') && <Action label="Use SMS code" onPress={() => setMethod('sms')} secondary={method !== 'sms'} />}
-            <Field label="SIX-DIGIT CODE" value={code} onChangeText={setCode} keyboardType="number-pad" />
+            <Field label="Six-digit code" value={code} onChangeText={setCode} keyboardType="number-pad" />
             <Action label="Verify and continue" onPress={attemptMfa} busy={busy} disabled={unsupportedMfa || code.trim().length < 6} />
             {method === 'sms' && challenge.methods.includes('sms') &&
-              <Action label="Send / resend SMS code" secondary onPress={resendSms} busy={busy} disabled={unsupportedMfa} />}
-            <Action label="Start over" secondary onPress={() => { setChallenge(null); setError(null); setCode(''); }} />
+              <Action label="Send a new SMS code" secondary onPress={resendSms} busy={busy} disabled={unsupportedMfa} />}
+            <Action label="Start over" variant="ghost" onPress={() => { setChallenge(null); setError(null); setCode(''); }} />
           </>
         )}
-        <Text style={styles.footer}>AUTH SESSION · EXPO SECURE STORE · NO TRACKING</Text>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </Card>
+      {!challenge && <Text style={[type.small, styles.note]}>VantraRun is invite-only for now. Sign in with your email and password, or create an account with the code you were given.</Text>}
+      <Text style={[type.small, styles.note]}>Your sign-in is kept in secure storage on this phone. No tracking.</Text>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.background },
-  content: { flexGrow: 1, padding: 25, paddingTop: 85, paddingBottom: 45 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  brand: { color: colors.text, fontWeight: '900', letterSpacing: 3, fontSize: 14 },
-  topRule: { width: 48, backgroundColor: colors.accent, height: 3, marginTop: 18, marginBottom: 50 },
-  note: { marginTop: 20, color: colors.muted, lineHeight: 21, fontSize: 13 },
-  footer: { marginTop: 55, fontSize: 10, letterSpacing: 1.5, color: colors.subtle, textAlign: 'center' },
+  card: { paddingTop: 22, paddingBottom: 14 },
+  note: { textAlign: 'center', marginTop: 10, paddingHorizontal: 12 },
 });

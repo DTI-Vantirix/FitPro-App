@@ -1,80 +1,272 @@
-import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { colors } from '../theme';
+/** The VantraRun component kit: logo, type, buttons, cards, inputs and stat blocks.
+ * Shapes follow the website: Volt pill buttons, Graphite cards with a Line border, no shadows.
+ */
+import React, { useState } from 'react';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View,
+  type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
+import Feather from '@expo/vector-icons/Feather';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { brand, colors } from '../theme';
+import { display, fonts, heading, stat, type } from '../typography';
 
-export function SectionHeading({ kicker, title, subtitle }: { kicker: string; title: string; subtitle: string }) {
-  return <View style={styles.heading}>
-    <Text style={styles.kicker}>{kicker}</Text>
-    <Text style={styles.title}>{title}</Text>
-    <Text style={styles.subtitle}>{subtitle}</Text>
+export type IconName = React.ComponentProps<typeof Feather>['name'];
+
+export function Icon({ name, size = 20, color = colors.text }: { name: IconName; size?: number; color?: string }) {
+  return <Feather name={name} size={size} color={color} />;
+}
+
+// ---- Logo -------------------------------------------------------------------------------
+// Real pixel sizes of the kit PNGs in assets/brand; width is always derived from height.
+const LOGOS = {
+  horizontal: { source: require('../../assets/brand/vantrarun-horizontal-full-colour-1000w.png'), ratio: 1000 / 195 },
+  stacked: { source: require('../../assets/brand/vantrarun-stacked-full-colour-512h.png'), ratio: 362 / 512 },
+  mark: { source: require('../../assets/brand/vantrarun-mark-neon-256.png'), ratio: 1 },
+} as const;
+
+export function Logo({ variant = 'horizontal', height }: { variant?: keyof typeof LOGOS; height?: number }) {
+  const logo = LOGOS[variant];
+  const h = height ?? (variant === 'stacked' ? 112 : variant === 'mark' ? 32 : 26);
+  return <Image source={logo.source} accessibilityRole="image" accessibilityLabel="VantraRun" resizeMode="contain"
+    style={{ height: h, width: Math.round(h * logo.ratio) }} />;
+}
+
+/** Header of the signed-in screens: the horizontal logo, with an optional back button and right-hand slot. */
+export function ScreenHeader({ onBack, right }: { onBack?: () => void; right?: React.ReactNode }) {
+  return <View style={styles.header}>
+    <View style={styles.headerLeft}>
+      {onBack && <IconButton icon="arrow-left" label="Back" onPress={onBack} />}
+      <Logo variant="horizontal" />
+    </View>
+    {right}
   </View>;
 }
 
-export function Field({ label, value, onChangeText, secure = false, keyboardType = 'default', autoCapitalize = 'none' }: {
+/** Top of the sign-in, sign-up, invite, consent and setup screens. */
+export function AuthHero({ title, subtitle }: { title: string; subtitle?: string }) {
+  return <View style={styles.hero}>
+    <Logo variant="stacked" />
+    <Text style={[type.label, styles.tagline]}>Own every mile.</Text>
+    <Text accessibilityRole="header" style={[display(38), styles.center]}>{title}</Text>
+    {!!subtitle && <Text style={[type.bodyLarge, styles.center, styles.heroSubtitle]}>{subtitle}</Text>}
+  </View>;
+}
+
+// ---- Text -------------------------------------------------------------------------------
+export function Label({ children, style }: { children: React.ReactNode; style?: StyleProp<TextStyle> }) {
+  return <Text style={[type.label, style]}>{children}</Text>;
+}
+
+export function Heading({ children, size = 18, style }: { children: React.ReactNode; size?: number; style?: StyleProp<TextStyle> }) {
+  return <Text accessibilityRole="header" style={[heading(size), style]}>{children}</Text>;
+}
+
+export function Body({ children, style, selectable }: { children: React.ReactNode; style?: StyleProp<TextStyle>; selectable?: boolean }) {
+  return <Text selectable={selectable} style={[type.body, style]}>{children}</Text>;
+}
+
+/** Overline, display title and optional lead paragraph at the top of a screen. */
+export function SectionHeading({ kicker, title, subtitle }: { kicker?: string; title: string; subtitle?: string }) {
+  return <View style={styles.heading}>
+    {!!kicker && <Text style={type.label}>{kicker}</Text>}
+    <Text accessibilityRole="header" style={display(36)}>{title}</Text>
+    {!!subtitle && <Text style={type.body}>{subtitle}</Text>}
+  </View>;
+}
+
+// ---- Inputs -----------------------------------------------------------------------------
+export function Field({ label, value, onChangeText, secure = false, keyboardType = 'default', autoCapitalize = 'none', placeholder }: {
   label: string;
   value: string;
   onChangeText: (v: string) => void;
   secure?: boolean;
   keyboardType?: 'default' | 'email-address' | 'number-pad';
   autoCapitalize?: 'none' | 'sentences';
+  placeholder?: string;
 }) {
+  const [focused, setFocused] = useState(false);
   return <View style={styles.field}>
     <Text style={styles.fieldLabel}>{label}</Text>
     <TextInput
       accessibilityLabel={label}
       value={value}
       onChangeText={onChangeText}
+      placeholder={placeholder}
       placeholderTextColor={colors.subtle}
+      selectionColor={colors.accent}
       autoCapitalize={autoCapitalize}
       autoCorrect={false}
       secureTextEntry={secure}
       keyboardType={keyboardType}
-      style={styles.input}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={[styles.input, focused && styles.inputFocused]}
     />
   </View>;
 }
 
-export function Action({ label, onPress, busy = false, disabled = false, secondary = false }: {
+export function Toggle({ label, value, onValueChange }: { label: string; value: boolean; onValueChange: (on: boolean) => void }) {
+  return <Switch accessibilityLabel={label} value={value} onValueChange={onValueChange}
+    trackColor={{ false: brand.line, true: brand.volt }} thumbColor={value ? brand.ink : brand.chalk} ios_backgroundColor={brand.line} />;
+}
+
+// ---- Buttons ----------------------------------------------------------------------------
+export type ActionVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+
+/** Primary: Volt pill, Ink text. Secondary: Chalk outline pill. Ghost: Volt text only.
+ * Danger: the outline pill in the error colour, for destructive actions. */
+export function Action({ label, onPress, busy = false, disabled = false, secondary = false, variant, icon, compact = false }: {
   label: string;
   onPress: () => void;
   busy?: boolean;
   disabled?: boolean;
   secondary?: boolean;
+  variant?: ActionVariant;
+  icon?: IconName;
+  compact?: boolean;
 }) {
+  const kind: ActionVariant = variant ?? (secondary ? 'secondary' : 'primary');
+  const ink = kind === 'primary' ? colors.accentText : kind === 'ghost' ? colors.accent : kind === 'danger' ? colors.danger : colors.text;
   return <Pressable accessibilityRole="button" accessibilityState={{ disabled: busy || disabled, busy }}
     disabled={busy || disabled} onPress={onPress}
     style={({ pressed }) => [
       styles.action,
-      secondary && styles.secondary,
+      compact && styles.actionCompact,
+      kind === 'secondary' && styles.secondary,
+      kind === 'danger' && styles.dangerAction,
+      kind === 'ghost' && styles.ghost,
       pressed && !(busy || disabled) && styles.pressed,
       (busy || disabled) && styles.disabled,
     ]}>
-    {busy && <ActivityIndicator color={secondary ? colors.accent : colors.accentText} />}
-    <Text style={[styles.actionText, secondary && styles.secondaryText]}>{label}</Text>
+    {busy ? <ActivityIndicator color={ink} /> : icon ? <Feather name={icon} size={18} color={ink} /> : null}
+    <Text style={[styles.actionText, { color: ink }]}>{label}</Text>
   </Pressable>;
+}
+
+export function IconButton({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} hitSlop={6}
+    style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
+    <Feather name={icon} size={18} color={colors.text} />
+  </Pressable>;
+}
+
+// ---- Surfaces ---------------------------------------------------------------------------
+/** Graphite card with a Line border. `selected` swaps the border for Volt. */
+export function Card({ children, style, selected = false }: { children: React.ReactNode; style?: StyleProp<ViewStyle>; selected?: boolean }) {
+  return <View style={[styles.card, selected && styles.cardSelected, style]}>{children}</View>;
 }
 
 export function ErrorNotice({ message }: { message: string | null }) {
   if (!message) return null;
-  return <View accessibilityRole="alert" style={styles.error}><Text selectable style={styles.errorText}>{message}</Text></View>;
+  return <View accessibilityRole="alert" style={styles.error}>
+    <Feather name="alert-circle" size={18} color={colors.danger} style={styles.errorIcon} />
+    <Text selectable style={styles.errorText}>{message}</Text>
+  </View>;
+}
+
+/** A plain notice that is not an error: neutral card, wording carries it. */
+export function Notice({ children, icon = 'info' }: { children: React.ReactNode; icon?: IconName }) {
+  return <View style={[styles.card, styles.notice]}>
+    <Feather name={icon} size={18} color={colors.text} style={styles.errorIcon} />
+    <Text style={[type.body, styles.noticeText]}>{children}</Text>
+  </View>;
+}
+
+// ---- Stats ------------------------------------------------------------------------------
+export type StatBlockProps = {
+  label: string;
+  value: string;
+  unit?: string;
+  /** Live or record value: Volt. Everything else is Chalk. */
+  highlight?: boolean;
+  size?: number;
+  caption?: string;
+  align?: 'left' | 'center';
+};
+
+/** Steel label above a Barlow ExtraBold value. */
+export function StatBlock({ label, value, unit, highlight = false, size = 28, caption, align = 'left' }: StatBlockProps) {
+  return <View style={[styles.statBlock, align === 'center' && styles.statCenter]}>
+    <Text style={type.label} numberOfLines={1}>{label}</Text>
+    <View style={styles.statValueRow}>
+      <Text style={[stat(size), highlight && { color: colors.accent }]} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
+      {!!unit && <Text style={[type.label, styles.statUnit]}>{unit}</Text>}
+    </View>
+    {!!caption && <Text style={type.small}>{caption}</Text>}
+  </View>;
+}
+
+/** Stat blocks side by side (three by default). `boxed` puts each in its own card; otherwise
+ * they share the parent card and are split by Line dividers. */
+export function StatRow({ items, boxed = false, size }: { items: StatBlockProps[]; boxed?: boolean; size?: number }) {
+  return <View style={[styles.statRow, boxed && styles.statRowBoxed]}>
+    {items.map((item, index) => <View key={item.label}
+      style={boxed ? [styles.card, styles.statCell, styles.statCellBoxed] : [styles.statCell, index > 0 && styles.statDivider]}>
+      <StatBlock size={size} {...item} />
+    </View>)}
+  </View>;
+}
+
+// ---- Layout -----------------------------------------------------------------------------
+export function Loading({ label }: { label?: string }) {
+  return <View style={styles.loading}>
+    <ActivityIndicator color={colors.accent} />
+    {!!label && <Text style={type.body}>{label}</Text>}
+  </View>;
+}
+
+/** A full screen on Ink, clear of the notch and home indicator. */
+export function Screen({ children, scroll = true }: { children: React.ReactNode; scroll?: boolean }) {
+  const insets = useSafeAreaInsets();
+  if (!scroll) {
+    return <View style={[styles.root, styles.fixed, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 16 }]}>{children}</View>;
+  }
+  return <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <ScrollView keyboardShouldPersistTaps="handled"
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 40 }]}>{children}</ScrollView>
+  </KeyboardAvoidingView>;
 }
 
 const styles = StyleSheet.create({
-  heading: { marginBottom: 28, gap: 8 },
-  kicker: { color: colors.accent, fontSize: 12, letterSpacing: 2, fontWeight: '800' },
-  title: { fontSize: 32, color: colors.text, letterSpacing: -0.8, fontWeight: '800' },
-  subtitle: { fontSize: 15, color: colors.muted, lineHeight: 22 },
-  field: { marginBottom: 16, gap: 7 },
-  fieldLabel: { color: colors.muted, fontWeight: '700', fontSize: 13 },
-  input: { backgroundColor: colors.panel, borderRadius: 12, paddingHorizontal: 14, minHeight: 52,
-    fontSize: 16, color: colors.text, borderColor: colors.panelBorder, borderWidth: 1 },
-  action: { minHeight: 54, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 16, marginTop: 8, borderRadius: 14, gap: 8, flexDirection: 'row' },
-  secondary: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.panelBorder },
-  pressed: { opacity: 0.68, transform: [{ scale: 0.985 }] },
+  root: { flex: 1, backgroundColor: colors.background },
+  fixed: { paddingHorizontal: 16 },
+  content: { flexGrow: 1, paddingHorizontal: 16 },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: colors.background },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, marginBottom: 20, paddingHorizontal: 4 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  hero: { alignItems: 'center', marginTop: 12, marginBottom: 24 },
+  tagline: { marginTop: 12, marginBottom: 28 },
+  center: { textAlign: 'center' },
+  heroSubtitle: { marginTop: 10 },
+  heading: { marginBottom: 20, gap: 8 },
+  field: { marginBottom: 16, gap: 8 },
+  fieldLabel: { fontFamily: fonts.bodyStrong, color: colors.text, fontSize: 14 },
+  input: { backgroundColor: colors.panel, borderRadius: 16, paddingHorizontal: 16, minHeight: 52,
+    fontFamily: fonts.body, fontSize: 16, color: colors.text, borderColor: colors.panelBorder, borderWidth: 1 },
+  inputFocused: { borderColor: colors.accent },
+  action: { minHeight: 52, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 24, paddingVertical: 8, marginTop: 10, borderRadius: 999, gap: 8, flexDirection: 'row' },
+  actionCompact: { minHeight: 44, paddingHorizontal: 18, marginTop: 0 },
+  secondary: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: colors.text },
+  dangerAction: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: colors.danger },
+  ghost: { backgroundColor: 'transparent' },
+  pressed: { opacity: 0.7, transform: [{ scale: 0.985 }] },
   disabled: { opacity: 0.5 },
-  actionText: { fontSize: 15, fontWeight: '800', color: colors.accentText },
-  secondaryText: { color: colors.text },
-  error: { padding: 14, backgroundColor: colors.dangerBg, borderColor: colors.danger, borderWidth: 1, borderRadius: 12, marginVertical: 12 },
-  errorText: { color: colors.danger, fontSize: 13, lineHeight: 21 },
+  actionText: { fontFamily: fonts.bodyStrong, fontSize: 15, textAlign: 'center', flexShrink: 1 },
+  iconButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.panelBorder, alignItems: 'center', justifyContent: 'center' },
+  card: { backgroundColor: colors.panel, borderColor: colors.panelBorder, borderWidth: 1, borderRadius: 22, padding: 18, gap: 10, marginBottom: 14 },
+  cardSelected: { borderColor: colors.accent },
+  error: { flexDirection: 'row', gap: 10, padding: 14, backgroundColor: colors.dangerBg, borderColor: colors.danger, borderWidth: 1, borderRadius: 16, marginVertical: 12 },
+  errorIcon: { marginTop: 1 },
+  errorText: { flex: 1, fontFamily: fonts.body, color: colors.danger, fontSize: 14, lineHeight: 21 },
+  notice: { flexDirection: 'row' },
+  noticeText: { flex: 1, color: colors.text },
+  statBlock: { gap: 6 },
+  statCenter: { alignItems: 'center' },
+  statValueRow: { flexDirection: 'row', alignItems: 'baseline', gap: 5 },
+  statUnit: { fontSize: 10 },
+  statRow: { flexDirection: 'row' },
+  statRowBoxed: { gap: 10, marginBottom: 14 },
+  statCell: { flex: 1, paddingHorizontal: 12 },
+  statCellBoxed: { marginBottom: 0, paddingHorizontal: 14, paddingVertical: 14 },
+  statDivider: { borderLeftWidth: 1, borderLeftColor: colors.panelBorder },
 });

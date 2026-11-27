@@ -1,33 +1,23 @@
 /** Layout and access gate shared by the run screens. */
 import React from 'react';
 import { Redirect } from 'expo-router';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 import { useSession } from '../../auth/session';
 import { useAccessGate } from '../../access/access-gate';
-import { Action, ErrorNotice } from '../../components/Ui';
+import { Action, Card, ErrorNotice, Loading, Screen, ScreenHeader } from '../../components/Ui';
 import { colors } from '../../theme';
+import { heading, type } from '../../typography';
 import { useRunAccount } from '../use-run';
 
-export function Loading({ label }: { label?: string }) {
-  return <View style={styles.loading}>
-    <ActivityIndicator color={colors.accent} />
-    {!!label && <Text style={styles.muted}>{label}</Text>}
-  </View>;
-}
+export { Loading, Screen };
 
-export function Screen({ children, scroll = true }: { children: React.ReactNode; scroll?: boolean }) {
-  if (!scroll) return <View style={[styles.root, styles.fixed]}>{children}</View>;
-  return <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>{children}</ScrollView>
-  </KeyboardAvoidingView>;
-}
-
-export function Brand() {
-  return <Text style={styles.brand}>VANTRARUN</Text>;
+/** The horizontal logo at the top of a signed-in screen. */
+export function Brand({ onBack }: { onBack?: () => void }) {
+  return <ScreenHeader onBack={onBack} />;
 }
 
 export function Panel({ children }: { children: React.ReactNode }) {
-  return <View style={styles.panel}>{children}</View>;
+  return <Card>{children}</Card>;
 }
 
 export function Note({ children }: { children: React.ReactNode }) {
@@ -77,16 +67,14 @@ export function Gated({ children, setup = true }: { children: React.ReactNode; s
 }
 
 export const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.background },
-  fixed: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20 },
-  content: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 36, paddingBottom: 60 },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: colors.background },
-  brand: { color: colors.text, fontWeight: '900', letterSpacing: 3, fontSize: 14, marginBottom: 28 },
-  panel: { backgroundColor: colors.panel, borderColor: colors.panelBorder, borderWidth: 1, borderRadius: 14, padding: 16, gap: 8, marginBottom: 16 },
-  note: { color: colors.subtle, lineHeight: 19, marginTop: 10, marginBottom: 6, fontSize: 12 },
-  muted: { color: colors.muted, fontSize: 14, lineHeight: 21 },
-  label: { color: colors.accent, letterSpacing: 1.5, fontSize: 11, fontWeight: '800' },
-  title: { color: colors.text, fontSize: 18, fontWeight: '800' },
-  body: { color: colors.muted, fontSize: 14, lineHeight: 21 },
+  panel: { backgroundColor: colors.panel, borderColor: colors.panelBorder, borderWidth: 1, borderRadius: 22, padding: 18, gap: 10, marginBottom: 14 },
+  selected: { borderColor: colors.accent },
+  note: { ...type.small, marginTop: 12, marginBottom: 6 },
+  muted: { ...type.body },
+  label: { ...type.label },
+  title: { ...heading(18) },
+  body: { ...type.body },
+  strong: { ...type.bodyStrong },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  section: { marginTop: 14, marginBottom: 6, gap: 10 },
 });

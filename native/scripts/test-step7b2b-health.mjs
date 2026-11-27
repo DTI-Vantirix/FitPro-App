@@ -8,7 +8,7 @@ const code = read('src/ingestion/background-health-read-diagnostic.ts');
 const panel = read('src/ingestion/background-health-read-diagnostic-panel.tsx');
 const entry = read('index.js');
 const session = read('src/auth/session.tsx');
-const activities = read('app/activities.tsx');
+const activities = read('app/(tabs)/activities.tsx');
 const config = JSON.parse(read('app.json')).expo;
 assert(entry.includes("import './src/ingestion/background-health-read-diagnostic';"));
 assert(entry.indexOf("background-health-read-diagnostic';") < entry.indexOf("expo-router/entry';"));

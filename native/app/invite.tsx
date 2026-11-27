@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Redirect, useRouter } from 'expo-router';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useSession } from '../src/auth/session';
 import { useAccessGate } from '../src/access/access-gate';
-import { Action, ErrorNotice, Field, SectionHeading } from '../src/components/Ui';
+import { Action, AuthHero, Card, ErrorNotice, Field, Screen } from '../src/components/Ui';
 import { colors } from '../src/theme';
+import { type } from '../src/typography';
 
 export default function InviteScreen() {
   const router = useRouter();
@@ -54,44 +55,37 @@ export default function InviteScreen() {
     }
   }
 
-  return <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-      <Text style={styles.brand}>VANTRARUN</Text>
-      <SectionHeading kicker="STEP 02 · INVITE ACCESS" title="Verify your invite."
-        subtitle="VantraRun is invite-only. We'll check your existing account access before accepting a new code." />
-      {status === 'checking' ? (
-        <View style={styles.loadingPanel}>
-          <ActivityIndicator color={colors.accent} />
-          <Text style={styles.muted}>Checking VantraRun invite access…</Text>
-        </View>
-      ) : <>
-        <ErrorNotice message={error ?? accessError ?? sessionError} />
-        {status === 'error' ? (
-          <>
-            <Text style={styles.muted}>VantraRun could not verify access. You are not authorized to continue while this request is failing.</Text>
-            <Action label="Retry access check" onPress={retry} busy={busy} />
-          </>
-        ) : (
-          <>
-            <Text style={styles.muted}>Enter the single-use invite code provided by the VantraRun administrator. An existing approved account should pass this step automatically.</Text>
-            <Field label="VANTRARUN INVITE CODE" value={code} onChangeText={setCode} />
-            <Action label="Redeem invite and continue" onPress={redeemCode} busy={busy} disabled={!code.trim()} />
-            <Action label="Check access again" onPress={retry} busy={busy} secondary />
-          </>
-        )}
-      </>}
-      <Action label="Sign out" onPress={signOut} busy={busy} secondary />
-      <Text style={styles.note}>Codes are verified directly by the VantraRun API's inviteAccess function. This native client never creates access grants itself.</Text>
-    </ScrollView>
-  </KeyboardAvoidingView>;
+  return <Screen>
+    <AuthHero title="Verify your invite" subtitle="VantraRun is invite-only. Your account is checked before a new code is asked for." />
+    {status === 'checking' ? (
+      <Card style={styles.loadingPanel}>
+        <ActivityIndicator color={colors.accent} />
+        <Text style={type.body}>Checking your invite…</Text>
+      </Card>
+    ) : <>
+      <ErrorNotice message={error ?? accessError ?? sessionError} />
+      {status === 'error' ? (
+        <>
+          <Text style={[type.body, styles.lead]}>VantraRun could not check your access, so you cannot continue yet. Check your connection and try again.</Text>
+          <Action label="Try again" onPress={retry} busy={busy} />
+        </>
+      ) : (
+        <Card>
+          <Text style={type.body}>Enter the single-use invite code you were given. An account that is already approved passes this step automatically.</Text>
+          <Field label="Invite code" value={code} onChangeText={setCode} />
+          <Action label="Redeem invite and continue" onPress={redeemCode} busy={busy} disabled={!code.trim()} />
+          <Action label="Check access again" onPress={retry} busy={busy} variant="ghost" />
+        </Card>
+      )}
+    </>}
+    <Action label="Sign out" onPress={signOut} busy={busy} secondary />
+    <Text style={[type.small, styles.note]}>Codes are checked by VantraRun itself. This app never grants access on its own.</Text>
+  </Screen>;
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.background },
-  content: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 42, paddingBottom: 60 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  brand: { color: colors.text, fontWeight: '900', letterSpacing: 3, fontSize: 14, marginBottom: 36 },
-  loadingPanel: { backgroundColor: colors.panel, borderRadius: 14, padding: 25, gap: 14, alignItems: 'center' },
-  muted: { color: colors.muted, fontSize: 14, lineHeight: 22, marginBottom: 18 },
-  note: { color: colors.subtle, lineHeight: 19, marginTop: 20, fontSize: 12 },
+  loadingPanel: { alignItems: 'center', paddingVertical: 26, gap: 14 },
+  lead: { marginBottom: 8 },
+  note: { textAlign: 'center', marginTop: 16, paddingHorizontal: 12 },
 });

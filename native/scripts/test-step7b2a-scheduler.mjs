@@ -6,7 +6,7 @@ const root = resolve(import.meta.dirname, '..');
 const file = (path) => readFileSync(resolve(root,path),'utf8');
 const worker=file('src/ingestion/background-scheduler-diagnostic.ts');
 const panel=file('src/ingestion/background-scheduler-diagnostic-panel.tsx');
-const screen=file('app/activities.tsx');
+const screen=file('app/(tabs)/activities.tsx');
 const session=file('src/auth/session.tsx');
 const entry=file('index.js');
 const config=JSON.parse(file('app.json')).expo;
