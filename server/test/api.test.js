@@ -11,6 +11,7 @@ import { GRACE_DAYS, accessOf, grantFree, hasAccess } from '../src/access.js';
 import { createApp } from '../src/app.js';
 import { SERVER_ROOT, loadConfig } from '../src/config.js';
 import { bootstrapAdmin } from '../src/auth/bootstrap.js';
+import { hashPassword } from '../src/auth/crypto.js';
 import { loadRegistry } from '../src/entities/registry.js';
 import { migrate } from '../src/migrate.js';
 import { createPsqlDb } from './psql-db.js';
@@ -64,11 +65,27 @@ async function signUp(email, password = 'correct-horse-1') {
   return signUpWith(email, await mintCode(), password);
 }
 
-// An account from before sign-up needed a code: verified, but no accepted invite.
-async function legacyUser(email) {
-  const account = await signUp(email);
-  await db.query('delete from access_grants where user_id = $1 returning id', [account.user.id]);
-  await db.query('delete from entitlements where user_id = $1 returning id', [account.user.id]);
+// An account from before sign-up needed a code: verified, but no accepted invite
+// and so no access. Written straight into the database, as such accounts were
+// never made by today's sign-up (and so that it does not count as a sign-up).
+let passwordHash;
+async function legacyUser(email, password = 'correct-horse-1') {
+  passwordHash ||= await hashPassword('correct-horse-1');
+  await db.query(
+    `insert into users (email, password_hash, full_name, email_verified_at) values ($1, $2, $3, now()) returning id`,
+    [email, password === 'correct-horse-1' ? passwordHash : await hashPassword(password), email.split('@')[0]]
+  );
+  const login = await call('POST', '/api/auth/login', { body: { email, password } });
+  assert.equal(login.status, 200, JSON.stringify(login.data));
+  return { token: login.data.access_token, user: login.data.user };
+}
+
+// An account that has access through an invite code, without going through sign-up.
+async function invitedUser(email) {
+  const account = await legacyUser(email);
+  const code = await mintCode();
+  const res = await call('POST', '/api/functions/inviteAccess', { token: account.token, body: { action: 'redeem', code } });
+  assert.deepEqual(res.data, { allowed: true });
   return account;
 }
 
@@ -360,7 +377,9 @@ describe('invite access', () => {
     assert.equal(codes.length, 3);
     assert.match(codes[0].code, /^FP-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
 
-    assert.deepEqual((await call('POST', '/api/functions/inviteAccess', { token: nina.token, body: { action: 'status' } })).data, { allowed: false });
+    assert.deepEqual((await call('POST', '/api/functions/inviteAccess', { token: nina.token, body: { action: 'status' } })).data, {
+      allowed: false, reason: null, source: null, plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: false,
+    });
     const wrong = await call('POST', '/api/functions/inviteAccess', { token: nina.token, body: { action: 'redeem', code: 'FP-NOPE-NOPE' } });
     assert.equal(wrong.data.allowed, false);
     const redeem = await call('POST', '/api/functions/inviteAccess', {
@@ -374,7 +393,9 @@ describe('invite access', () => {
     assert.equal(reuse.data.allowed, false);
     assert.match(reuse.data.error, /already been used/);
 
-    assert.deepEqual((await call('POST', '/api/functions/inviteAccess', { token: admin.token, body: {} })).data, { allowed: true, admin: true });
+    assert.deepEqual((await call('POST', '/api/functions/inviteAccess', { token: admin.token, body: {} })).data, {
+      allowed: true, admin: true, reason: 'admin', source: null, plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: false,
+    });
   });
 
   test('revoke only unused codes', async () => {
@@ -465,7 +486,7 @@ describe('access', () => {
   });
 
   test('with an invite and a paid entitlement, the paid one is reported and either keeps access', async () => {
-    const tess = await signUp('tess.access@example.com');
+    const tess = await invitedUser('tess.access@example.com');
     const user = await userRow(tess.user.id);
     await db.query(
       `insert into entitlements (user_id, source, status, plan, expires_at, cancel_at_period_end, external_id)
@@ -555,6 +576,202 @@ describe('access', () => {
   });
 });
 
+describe('the server refuses product calls without access', () => {
+  const NO_ACCESS = { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } };
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 9, 9, 9]);
+  const aRun = { distance_mi: 2, duration_sec: 1200, route_name: 'Before the lapse', started_at: '2026-11-21T12:00:00Z' };
+  const upload = {
+    kind: 'run', source: 'fitpro', external_id: 'fp-lapse-0001',
+    distance_mi: 4, duration_sec: 2000, started_at: '2026-11-22T12:00:00Z',
+  };
+  const fn = (who, name, body = {}) => call('POST', `/api/functions/${name}`, { token: who.token, body });
+  const setFree = (who, status) =>
+    db.query(`update entitlements set status = $2 where user_id = $1 and source = 'invite' returning id`, [who.user.id, status]);
+  let mia;
+  let run;
+  let zone;
+
+  // Every product call, by name. `own` are the ids of records the person made while they had access.
+  const productCalls = (who, own) => ({
+    'entity list': () => call('GET', '/api/entities/Run', { token: who.token }),
+    'entity query': () => call('POST', '/api/entities/Run/query', { token: who.token, body: {} }),
+    'entity get': () => call('GET', `/api/entities/Run/${own.run}`, { token: who.token }),
+    'entity create': () => call('POST', '/api/entities/Run', { token: who.token, body: { ...aRun, route_name: 'Sneaked in' } }),
+    'entity update': () => call('PUT', `/api/entities/Run/${own.run}`, { token: who.token, body: { notes: 'changed' } }),
+    'entity bulk create': () =>
+      call('POST', '/api/entities/PaceZone/bulk', { token: who.token, body: [{ name: 'Sneaked zone', zone_number: 9, fast_sec: 300, slow_sec: 330 }] }),
+    'entity bulk update': () => call('PUT', '/api/entities/PaceZone/bulk', { token: who.token, body: [{ id: own.zone, color: '#00ff00' }] }),
+    'entity update-many': () =>
+      call('POST', '/api/entities/PaceZone/update-many', { token: who.token, body: { q: { created_by_id: who.user.id }, data: { color: '#0000ff' } } }),
+    'entity delete-many': () =>
+      call('POST', '/api/entities/PaceZone/delete-many', { token: who.token, body: { q: { created_by_id: who.user.id } } }),
+    'entity delete': () => call('DELETE', `/api/entities/Run/${own.run}`, { token: who.token }),
+    upload: () => call('POST', '/api/uploads', { token: who.token, raw: png, headers: { 'Content-Type': 'image/png' } }),
+    snapRoute: () => fn(who, 'snapRoute', { points: [{ lat: 40.7, lng: -74.0, offroad: true }, { lat: 40.71, lng: -74.0, offroad: true }] }),
+    socialFeed: () => fn(who, 'socialFeed'),
+    challengeBoard: () => fn(who, 'challengeBoard', { challenge_id: own.run }),
+    routeDirections: () => fn(who, 'routeDirections', { route_id: own.run }),
+    ingestActivity: () => fn(who, 'ingestActivity', { ...upload, external_id: 'fp-sneak-0001' }),
+    adminInviteCodes: () => fn(who, 'adminInviteCodes', { action: 'list' }),
+    adminClientErrors: () => fn(who, 'adminClientErrors', { action: 'list' }),
+  });
+
+  const snapshot = async (who) => ({
+    runs: (await db.query('select id, route_name, notes from runs where created_by_id = $1 order by id', [who.user.id])).map((r) => ({ ...r })),
+    zones: (await db.query('select id, name, color from pace_zones where created_by_id = $1 order by id', [who.user.id])).map((r) => ({ ...r })),
+    posts: (await db.query('select count(*)::int as n from posts where created_by_id = $1', [who.user.id]))[0].n,
+  });
+
+  test('every product call is a 403 once access is gone, and nothing is read or changed', async () => {
+    mia = await invitedUser('mia.lapsed@example.com');
+    run = (await call('POST', '/api/entities/Run', { token: mia.token, body: aRun })).data;
+    zone = (await call('POST', '/api/entities/PaceZone', { token: mia.token, body: { name: 'Easy', zone_number: 1, fast_sec: 540, slow_sec: 600 } })).data;
+    assert.ok(run.id && zone.id);
+    const filesBefore = fs.readdirSync(uploadDir).length;
+    const before = await snapshot(mia);
+
+    await setFree(mia, 'revoked');
+    const calls = productCalls(mia, { run: run.id, zone: zone.id });
+    assert.equal(Object.keys(calls).length, 18);
+    for (const [name, send] of Object.entries(calls)) {
+      assert.deepEqual(await send(), NO_ACCESS, name);
+    }
+    assert.deepEqual(await snapshot(mia), before, 'nothing was created, changed or deleted');
+    assert.equal(fs.readdirSync(uploadDir).length, filesBefore, 'no file was stored');
+  });
+
+  test('no token is still a 401, never a 403', async () => {
+    assert.equal((await call('GET', '/api/entities/Run')).status, 401);
+    assert.equal((await call('POST', '/api/functions/socialFeed', { body: {} })).status, 401);
+    assert.equal((await call('POST', '/api/uploads', { raw: png, headers: { 'Content-Type': 'image/png' } })).status, 401);
+  });
+
+  test('a person without access can still see their account, their access status and sign out', async () => {
+    const me = await call('GET', '/api/auth/me', { token: mia.token });
+    assert.equal(me.status, 200);
+    assert.equal(me.data.email, 'mia.lapsed@example.com');
+    const consent = await call('PUT', '/api/auth/me', { token: mia.token, body: { consent_version: '2026-11' } });
+    assert.equal(consent.status, 200);
+    assert.equal((await call('POST', '/api/auth/logout', { token: mia.token, body: {} })).status, 200);
+    assert.equal((await call('GET', '/api/auth/options')).status, 200);
+    assert.equal((await call('GET', '/api/health')).status, 200);
+    assert.equal((await call('GET', '/.well-known/apple-app-site-association')).status, 200);
+    assert.equal((await call('GET', '/.well-known/assetlinks.json')).status, 200);
+
+    const status = await fn(mia, 'inviteAccess', { action: 'status' });
+    assert.deepEqual(status, {
+      status: 200,
+      data: { allowed: false, reason: null, source: null, plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: false },
+    });
+  });
+
+  test('redeeming an invite code opens every product call again', async () => {
+    const wrong = await fn(mia, 'inviteAccess', { action: 'redeem', code: 'FP-NOPE-NOPE' });
+    assert.deepEqual(wrong, { status: 200, data: { allowed: false, error: 'That code is not recognised.' } });
+    const redeem = await fn(mia, 'inviteAccess', { action: 'redeem', code: await mintCode() });
+    assert.deepEqual(redeem, { status: 200, data: { allowed: true } });
+    const status = await fn(mia, 'inviteAccess', { action: 'status' });
+    assert.deepEqual(status.data, {
+      allowed: true, reason: 'invite', source: 'invite', plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: false,
+    });
+
+    const calls = productCalls(mia, { run: run.id, zone: zone.id });
+    const refusedAnyway = { challengeBoard: 404, routeDirections: 404, adminInviteCodes: 403, adminClientErrors: 403 };
+    for (const [name, send] of Object.entries(calls)) {
+      const res = await send();
+      if (refusedAnyway[name]) {
+        assert.equal(res.status, refusedAnyway[name], name);
+        assert.notEqual(res.data.error, NO_ACCESS.data.error, `${name} is refused for its own reason now`);
+      } else {
+        assert.ok(res.status === 200 || res.status === 201, `${name}: ${res.status} ${JSON.stringify(res.data)}`);
+      }
+    }
+  });
+
+  test('an entitlement that ended four days ago is refused; two days ago is inside the allowance', async () => {
+    const quin = await legacyUser('quin.expired@example.com');
+    await db.query(
+      `insert into entitlements (user_id, source, status, plan, expires_at, external_id)
+       values ($1, 'stripe', 'active', 'monthly', $2, 'sub_quin') returning id`,
+      [quin.user.id, daysFromNow(-4)]
+    );
+    assert.deepEqual(await call('POST', '/api/entities/Run/query', { token: quin.token, body: {} }), NO_ACCESS);
+    assert.deepEqual(await fn(quin, 'socialFeed'), NO_ACCESS);
+    assert.equal((await fn(quin, 'inviteAccess', { action: 'status' })).data.allowed, false);
+
+    await db.query(`update entitlements set expires_at = $2 where user_id = $1 returning id`, [quin.user.id, daysFromNow(-2)]);
+    const inside = await call('POST', '/api/entities/Run/query', { token: quin.token, body: {} });
+    assert.equal(inside.status, 200);
+    const status = (await fn(quin, 'inviteAccess', { action: 'status' })).data;
+    assert.deepEqual(
+      [status.allowed, status.reason, status.source, status.plan, status.cancel_at_period_end],
+      [true, 'subscription', 'stripe', 'monthly', false]
+    );
+    assert.equal(Math.round((Date.now() - new Date(status.expires_at).getTime()) / 86400000), 2);
+  });
+
+  test('a run the phone retries after access lapses gets a clear 403, and saves once access is back', async () => {
+    const ravi = await invitedUser('ravi.retry@example.com');
+    const first = await fn(ravi, 'ingestActivity', upload);
+    assert.equal(first.data.action, 'created');
+
+    await setFree(ravi, 'revoked');
+    const queued = { ...upload, external_id: 'fp-lapse-0002', started_at: '2026-11-23T12:00:00Z' };
+    for (const body of [queued, { ...upload, distance_mi: 9 }]) {
+      const refused = await fn(ravi, 'ingestActivity', body);
+      // 403 with a readable `error` is what makes the phone keep the run and try again (native/src/run/queue.ts)
+      assert.equal(refused.status, 403);
+      assert.equal(refused.data.error, 'Subscribe or enter an invite code to use VantraRun.');
+    }
+    const stored = await db.query('select external_id, distance_mi from runs where created_by_id = $1', [ravi.user.id]);
+    assert.deepEqual(stored.map((r) => [r.external_id, Number(r.distance_mi)]), [['fp-lapse-0001', 4]], 'nothing stored or changed while refused');
+
+    await setFree(ravi, 'active');
+    const retried = await fn(ravi, 'ingestActivity', queued);
+    assert.equal(retried.status, 200);
+    assert.equal(retried.data.action, 'created', 'the queued run is saved by the retry');
+  });
+
+  test('an admin with no entitlement row passes everywhere by role', async () => {
+    const login = await call('POST', '/api/auth/login', { body: { email: 'role-only@example.com', password: 'a-long-enough-password' } });
+    const boss = { token: login.data.access_token, user: login.data.user };
+    assert.equal((await entitlementsOf(boss.user.id)).length, 0);
+    assert.equal((await call('POST', '/api/entities/Run/query', { token: boss.token, body: {} })).status, 200);
+    assert.equal((await call('POST', '/api/entities/Run', { token: boss.token, body: aRun })).status, 201);
+    assert.equal((await call('POST', '/api/uploads', { token: boss.token, raw: png, headers: { 'Content-Type': 'image/png' } })).status, 201);
+    assert.equal((await fn(boss, 'socialFeed')).status, 200);
+    assert.equal((await fn(boss, 'adminInviteCodes', { action: 'list' })).status, 200);
+    assert.equal((await fn(boss, 'ingestActivity', { ...upload, external_id: 'fp-boss-0001' })).status, 200);
+    assert.deepEqual((await fn(boss, 'inviteAccess', { action: 'status' })).data, {
+      allowed: true, admin: true, reason: 'admin', source: null, plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: false,
+    });
+  });
+
+  test('a person without access can change or reset their password and delete their account', async () => {
+    const zed = await legacyUser('zed.leaving@example.com');
+    assert.deepEqual(await call('POST', '/api/entities/Run/query', { token: zed.token, body: {} }), NO_ACCESS);
+
+    const changed = await call('POST', '/api/auth/change-password', {
+      token: zed.token,
+      body: { currentPassword: 'correct-horse-1', newPassword: 'another-horse-2' },
+    });
+    assert.equal(changed.status, 200, JSON.stringify(changed.data));
+
+    const ask = await call('POST', '/api/auth/reset-password-request', { body: { email: 'zed.leaving@example.com' } });
+    const reset = await call('POST', '/api/auth/reset-password', { body: { resetToken: ask.data.dev_token, newPassword: 'third-horse-3' } });
+    assert.equal(reset.status, 200);
+    const login = await call('POST', '/api/auth/login', { body: { email: 'zed.leaving@example.com', password: 'third-horse-3' } });
+    assert.equal(login.status, 200);
+
+    const report = await call('POST', '/api/client-errors', { token: login.data.access_token, body: { message: 'the paywall crashed' } });
+    assert.equal(report.status, 201, 'a crash on the way in can still be reported');
+
+    const gone = await call('DELETE', '/api/auth/me', { token: login.data.access_token, body: { password: 'third-horse-3' } });
+    assert.deepEqual(gone, { status: 200, data: { ok: true, deleted: true } });
+    assert.equal((await db.query('select id from users where id = $1', [zed.user.id])).length, 0);
+  });
+});
+
 describe('sign-up needs a code', () => {
   test('no code, unknown code and used code are refused', async () => {
     const body = { email: 'erin2@example.com', password: 'longenough1' };
@@ -574,7 +791,9 @@ describe('sign-up needs a code', () => {
     const code = await mintCode();
     const gina = await signUpWith('gina@example.com', `  ${code.toLowerCase()} `);
     const status = await call('POST', '/api/functions/inviteAccess', { token: gina.token, body: { action: 'status' } });
-    assert.deepEqual(status.data, { allowed: true });
+    assert.deepEqual(status.data, {
+      allowed: true, reason: 'invite', source: 'invite', plan: null, expires_at: null, cancel_at_period_end: false, subscriptions: false,
+    });
     const [row] = await db.query('select status, used_by_email from invite_codes where code = $1', [code]);
     assert.deepEqual({ ...row }, { status: 'used', used_by_email: 'gina@example.com' });
   });
@@ -701,13 +920,16 @@ describe('ingestActivity (native contract)', () => {
   test('no accepted invite code -> 403, nothing stored', async () => {
     const lee = await legacyUser('lee@example.com');
     const res = await call('POST', '/api/functions/ingestActivity', { token: lee.token, body: run });
-    assert.deepEqual(res, { status: 403, data: { error: 'Redeem your invite code before syncing activities.' } });
+    assert.deepEqual(res, { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } });
+    assert.equal((await db.query('select id from runs where created_by_id = $1', [lee.user.id])).length, 0);
+    // and they cannot read runs either: the whole product is closed, not only the upload
     const mine = await call('POST', '/api/entities/Run/query', { token: lee.token, body: {} });
-    assert.equal(mine.data.items.length, 0);
+    assert.deepEqual(mine, { status: 403, data: { error: 'Subscribe or enter an invite code to use VantraRun.' } });
   });
 
   test('admins upload without a code', async () => {
     await db.query('delete from access_grants where user_id = $1 returning id', [admin.user.id]);
+    await db.query('delete from entitlements where user_id = $1 returning id', [admin.user.id]);
     const res = await call('POST', '/api/functions/ingestActivity', { token: admin.token, body: { ...run, external_id: 'HK-ADMIN-1' } });
     assert.equal(res.status, 200, JSON.stringify(res.data));
   });

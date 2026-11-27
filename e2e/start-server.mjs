@@ -37,6 +37,7 @@ Object.assign(process.env, {
   TRUST_PROXY: 'false',
   UPLOAD_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'fitpro-e2e-uploads-')),
   MIGRATE_ON_START: 'false',
+  SUBSCRIPTIONS: 'off', // the browser tests cover today's invite-only sign-up
 });
 
 const { createDb } = await import('../server/src/db.js');

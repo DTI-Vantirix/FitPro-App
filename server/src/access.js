@@ -2,6 +2,8 @@
 // Every source of access writes a row to `entitlements` (migration 005): an
 // invite code, a free pass from the owner, and later Stripe and Apple. Admins
 // pass by role and need no row.
+import { requireUser } from './auth/users.js';
+import { HttpError } from './lib/http.js';
 
 // A paid period that has just ended still counts for this long, so a renewal
 // notice that arrives late never locks out someone who paid.
@@ -62,6 +64,20 @@ export async function accessOf(db, user) {
 }
 
 export const hasAccess = async (db, user) => (await accessOf(db, user)).allowed;
+
+export const NO_ACCESS_MESSAGE = 'Subscribe or enter an invite code to use VantraRun.';
+
+/**
+ * For every route that is part of the product: the signed-in user, or 401 when
+ * nobody is signed in, or 403 when the account has no access. Routes a person
+ * without access still needs (account, invite codes, access status) use
+ * requireUser instead.
+ */
+export async function requireAccess(ctx) {
+  const user = requireUser(ctx);
+  if (!(await hasAccess(ctx.db, user))) throw new HttpError(403, NO_ACCESS_MESSAGE);
+  return user;
+}
 
 /**
  * Gives an account a free pass: `invite` (a redeemed code) or `admin` (granted by

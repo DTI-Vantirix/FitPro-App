@@ -1,4 +1,4 @@
-import { grantFree, hasAccess } from '../access.js';
+import { accessOf, grantFree, hasAccess } from '../access.js';
 import { HttpError, rateLimiter } from '../lib/http.js';
 
 // Invite codes: a single-use code from the owner opens the app for one athlete,
@@ -36,12 +36,14 @@ export async function claimInvite(tx, user, code) {
   return true;
 }
 
-export default async function inviteAccess({ db, user, body }) {
+export default async function inviteAccess({ db, user, body, config }) {
   const action = body?.action || 'status';
 
   if (action === 'status') {
-    if (user.role === 'admin') return { allowed: true, admin: true };
-    return { allowed: await hasAccess(db, user) };
+    // `admin` is only present for admins, as before. `subscriptions` tells the
+    // screens whether to offer a subscription or only the invite code.
+    const { admin, ...access } = await accessOf(db, user);
+    return { ...access, ...(admin ? { admin: true } : {}), subscriptions: Boolean(config?.subscriptions) };
   }
 
   if (action === 'redeem') {

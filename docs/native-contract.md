@@ -49,10 +49,34 @@ token and returns the user.
 
 ### Invite and consent checks
 
-- Invite status: `POST /api/functions/inviteAccess` with `{ "action": "status" }` ->
-  `{ "allowed": true|false, "admin"?: true }`. Redeem with
-  `{ "action": "redeem", "code": "FP-XXXX-XXXX" }` -> `{ "allowed": true }` or
-  `{ "allowed": false, "error": "..." }` (still HTTP 200).
+- Access status: `POST /api/functions/inviteAccess` with `{ "action": "status" }` ->
+
+  ```
+  {
+    "allowed": true|false,
+    "admin"?: true,                  // only present for admins
+    "reason": "admin"|"subscription"|"trial"|"invite"|"granted"|null,
+    "source": "stripe"|"apple"|"invite"|"admin"|null,
+    "plan": "monthly"|"annual"|null,
+    "expires_at": "<ISO>"|null,      // end of the paid period; null for free passes
+    "cancel_at_period_end": true|false,
+    "subscriptions": true|false      // the server's SUBSCRIPTIONS setting
+  }
+  ```
+
+  `allowed` and `admin` are unchanged and are all the app reads today. The other
+  fields were added on 2026-11-27 for the subscription screens; with no access every
+  one of them is `null` (`cancel_at_period_end` is `false`). Ignore fields you do not know.
+- Redeem with `{ "action": "redeem", "code": "FP-XXXX-XXXX" }` -> `{ "allowed": true }` or
+  `{ "allowed": false, "error": "..." }` (still HTTP 200). Unchanged.
+
+An account without access (no subscription, no invite code, no free pass; admins always
+have access) can still sign in and out, read and update `/api/auth/me`, change or reset
+its password, delete itself, report a crash, and call `inviteAccess`. **Every other
+call** (all of `/api/entities/*`, `POST /api/uploads`, and every other function,
+`ingestActivity` included) answers
+`403 { "error": "Subscribe or enter an invite code to use VantraRun." }`. Before
+2026-11-27 only `ingestActivity` refused, with a different message.
 - Consent: the user object's `consent_version` / `consent_accepted_at`. Record acceptance
   with `PUT /api/auth/me { "consent_version": "...", "consent_accepted_at": "<ISO>" }`.
 
@@ -328,7 +352,7 @@ All errors are `{ "error": "<message>" }` with the message written for a human:
 | ------ | ---------------------------------------------------------------- |
 | 400    | missing `external_id`, bad `distance_mi`/`duration_sec`, invalid `started_at`/`performed_at`, no usable exercises, unknown `kind` |
 | 401    | no app-user session                                              |
-| 403    | signed in, but no accepted invite code (admins are exempt): `"Redeem your invite code before syncing activities."` |
+| 403    | signed in, but the account has no access (admins are exempt): `"Subscribe or enter an invite code to use VantraRun."` Until 2026-11-27 the message was `"Redeem your invite code before syncing activities."`; the status is the same. Keep the activity queued and retry later: access can come back. Never match on the message text. |
 | 500    | unexpected — surface the message, do not retry in a loop          |
 
 The shell should surface 400s verbatim next to the affected activity. A 400 means the
